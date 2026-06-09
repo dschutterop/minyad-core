@@ -58,7 +58,7 @@ Alle gepubliceerde Docker-poorten binden expliciet op `MINYAD_BIND_IP` uit `.env
 | `minyad-api` | `8000` | `8000` |
 | `minyad-dashboard` | `8080` | `80` |
 
-Hierdoor publiceert Docker deze services niet op `0.0.0.0`. Zet `MINYAD_BIND_IP` op het host-interfaceadres dat je wilt gebruiken voordat je `docker compose up` draait.
+Hierdoor publiceert Docker deze services niet op `0.0.0.0`. Zet `MINYAD_BIND_IP` op het host-interfaceadres dat je wilt gebruiken voordat je `docker compose up` draait. De Compose-poorten gebruiken bewust de korte notatie `${MINYAD_BIND_IP}:hostpoort:containerpoort`, zodat oudere Docker Compose-versies het bind-adres ook correct doorgeven aan Docker.
 
 ## Database en runtime settings
 
