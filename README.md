@@ -34,6 +34,7 @@ Alle timestamps worden UTC opgeslagen. Het dashboard toont lokale tijden met `Eu
    - `MQTT_HOST`, `MQTT_PORT`, `DSMR_MQTT_TOPIC`
    - `ENVOY_HOST`, `ENVOY_USERNAME`, `ENVOY_PASSWORD`
    - `GOODWE_HOST`
+   - `MINYAD_BIND_IP` (het host-IP-adres waarop Docker alle gepubliceerde services moet binden)
    - `MINYAD_LATITUDE`, `MINYAD_LONGITUDE`, `PV_PEAK_KW`
 
 3. Start de stack:
@@ -44,8 +45,20 @@ Alle timestamps worden UTC opgeslagen. Het dashboard toont lokale tijden met `Eu
 
 4. Open:
 
-   - Dashboard: <http://192.168.110.5:8080>
-   - API: <http://192.168.110.5:8000/api/status>
+   - Dashboard: `http://<MINYAD_BIND_IP>:8080`
+   - API: `http://<MINYAD_BIND_IP>:8000/api/status`
+
+## Service-bindings
+
+Alle gepubliceerde Docker-poorten binden expliciet op `MINYAD_BIND_IP` uit `.env`:
+
+| Service | Host-poort | Container-poort |
+| --- | ---: | ---: |
+| `postgres` | `5432` | `5432` |
+| `minyad-api` | `8000` | `8000` |
+| `minyad-dashboard` | `8080` | `80` |
+
+Hierdoor publiceert Docker deze services niet op `0.0.0.0`. Zet `MINYAD_BIND_IP` op het host-interfaceadres dat je wilt gebruiken voordat je `docker compose up` draait. De Compose-poorten gebruiken bewust de korte notatie `${MINYAD_BIND_IP}:hostpoort:containerpoort`, zodat oudere Docker Compose-versies het bind-adres ook correct doorgeven aan Docker.
 
 ## Database en runtime settings
 
@@ -66,7 +79,7 @@ Belangrijke defaults:
 Voorbeeld instelling aanpassen:
 
 ```bash
-curl -X PUT http://192.168.110.5:8000/api/settings/export_tolerance_w \
+curl -X PUT http://<MINYAD_BIND_IP>:8000/api/settings/export_tolerance_w \
   -H 'content-type: application/json' \
   -d '{"value":"25"}'
 ```
