@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Minyad VPP Dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Minyad</h1>
+    <p>Home virtual powerplant — zero-export & zelfconsumptie</p>
+  </header>
+  <main>
+    <section class="cards">
+      <article><h2>Solar</h2><strong id="solarW">— W</strong><span id="solarDay">Dag: — kWh</span></article>
+      <article><h2>Batterij</h2><strong id="soc">—%</strong><span id="batteryMode">—</span></article>
+      <article><h2>Grid</h2><strong id="gridW">— W</strong><span id="gridBalance">—</span></article>
+      <article><h2>Control</h2><strong id="controlAction">—</strong><span id="controlDetails">—</span></article>
+    </section>
+    <section class="panel">
+      <h2>Vermogensflow</h2>
+      <div class="flow">
+        <div class="node solar">☀️<span id="flowSolar">— W</span></div>
+        <div class="arrow">→</div>
+        <div class="node house">🏠<span id="flowHouse">— W</span></div>
+        <div class="arrow">↔</div>
+        <div class="node battery">🔋<span id="flowBattery">— W</span></div>
+        <div class="arrow">↔</div>
+        <div class="node grid">⚡<span id="flowGrid">— W</span></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Forecast komende 24u</h2>
+      <canvas id="forecast" width="900" height="220"></canvas>
+    </section>
+    <section class="panel">
+      <h2>Systeemstatus</h2>
+      <table><thead><tr><th>Service</th><th>Status</th><th>Laatste update</th><th>Details</th></tr></thead><tbody id="services"></tbody></table>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
