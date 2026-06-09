@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: minyad
+      POSTGRES_PASSWORD: minyad
+      POSTGRES_DB: minyad
+    volumes:
+      - minyad-postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minyad -d minyad"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://minyad:minyad@postgres:5432/minyad
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: alembic upgrade head
+    restart: "no"
+
+  minyad-ingest:
+    build: .
+    env_file: .env
+    environment:
+      INGEST_SERVICE: all
+      DATABASE_URL: postgresql://minyad:minyad@postgres:5432/minyad
+    depends_on: [migrate]
+    command: python -m minyad.ingest
+    restart: unless-stopped
+
+  minyad-control:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://minyad:minyad@postgres:5432/minyad
+    depends_on: [migrate]
+    command: python -m minyad.control
+    restart: unless-stopped
+
+  minyad-forecast:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://minyad:minyad@postgres:5432/minyad
+    depends_on: [migrate]
+    command: python -m minyad.forecast
+    restart: unless-stopped
+
+  minyad-api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://minyad:minyad@postgres:5432/minyad
+    depends_on: [migrate]
+    command: python -m minyad.api
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  minyad-dashboard:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./minyad/dashboard:/usr/share/nginx/html:ro
+    depends_on: [minyad-api]
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  minyad-postgres:
