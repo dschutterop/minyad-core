@@ -8,7 +8,7 @@ services:
     volumes:
       - minyad-postgres:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "192.168.110.5:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U minyad -d minyad"]
       interval: 10s
@@ -62,7 +62,7 @@ services:
     depends_on: [migrate]
     command: python -m minyad.api
     ports:
-      - "8000:8000"
+      - "192.168.110.5:8000:8000"
     restart: unless-stopped
 
   minyad-dashboard:
@@ -71,7 +71,7 @@ services:
       - ./minyad/dashboard:/usr/share/nginx/html:ro
     depends_on: [minyad-api]
     ports:
-      - "8080:80"
+      - "192.168.110.5:8080:80"
     restart: unless-stopped
 
 volumes:

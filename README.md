@@ -44,8 +44,8 @@ Alle timestamps worden UTC opgeslagen. Het dashboard toont lokale tijden met `Eu
 
 4. Open:
 
-   - Dashboard: <http://localhost:8080>
-   - API: <http://localhost:8000/api/status>
+   - Dashboard: <http://192.168.110.5:8080>
+   - API: <http://192.168.110.5:8000/api/status>
 
 ## Database en runtime settings
 
@@ -66,7 +66,7 @@ Belangrijke defaults:
 Voorbeeld instelling aanpassen:
 
 ```bash
-curl -X PUT http://localhost:8000/api/settings/export_tolerance_w \
+curl -X PUT http://192.168.110.5:8000/api/settings/export_tolerance_w \
   -H 'content-type: application/json' \
   -d '{"value":"25"}'
 ```
