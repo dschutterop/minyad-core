@@ -28,8 +28,8 @@ def parse_dsmr_payload(payload: bytes) -> dict[str, Any]:
         data = json.loads(text)
         return {
             "timestamp": _parse_ts(data.get("timestamp") or data.get("time")),
-            "import_w": int(float(_first(data, "import_w", "power_delivered_w", "electricity_currently_delivered") or 0)),
-            "export_w": int(float(_first(data, "export_w", "power_returned_w", "electricity_currently_returned") or 0)),
+            "import_w": _power_w(data, ("import_w", "power_delivered_w"), ("electricity_currently_delivered",)),
+            "export_w": _power_w(data, ("export_w", "power_returned_w"), ("electricity_currently_returned",)),
             "import_kwh_t1": _first(data, "import_kwh_t1", "electricity_delivered_1"),
             "import_kwh_t2": _first(data, "import_kwh_t2", "electricity_delivered_2"),
             "export_kwh_t1": _first(data, "export_kwh_t1", "electricity_returned_1"),
@@ -59,6 +59,12 @@ def _first(data: dict[str, Any], *keys: str) -> Any:
         if key in data and data[key] is not None:
             return data[key]
     return None
+
+
+def _power_w(data: dict[str, Any], watt_keys: tuple[str, ...], kilowatt_keys: tuple[str, ...]) -> int:
+    if value := _first(data, *watt_keys):
+        return int(float(value))
+    return int(float(_first(data, *kilowatt_keys) or 0) * 1000)
 
 
 def _parse_ts(value: Any) -> datetime:
