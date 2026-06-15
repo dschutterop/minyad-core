@@ -22,6 +22,11 @@ class AppConfig(BaseSettings):
     envoy_host: str = Field("envoy.local", alias="ENVOY_HOST")
     envoy_username: str = Field("installer", alias="ENVOY_USERNAME")
     envoy_password: str = Field("", alias="ENVOY_PASSWORD")
+    enphase_gateway_ip: str = Field("envoy.local", alias="ENPHASE_GATEWAY_IP")
+    enphase_token: str = Field("", alias="ENPHASE_TOKEN")
+    enphase_verify_tls: bool = Field(False, alias="ENPHASE_VERIFY_TLS")
+    enphase_switch_hysteresis_s: int = Field(600, alias="ENPHASE_SWITCH_HYSTERESIS_S")
+    curtailment_granular_enabled: bool = Field(False, alias="CURTAILMENT_GRANULAR_ENABLED")
 
     goodwe_host: str = Field("goodwe.local", alias="GOODWE_HOST")
     goodwe_modbus_port: int = Field(502, alias="GOODWE_MODBUS_PORT")
