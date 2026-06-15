@@ -1,4 +1,4 @@
-const apiBase = window.location.origin.replace(/:\d+$/, ':8000');
+const apiBase = window.MINYAD_API_BASE || window.location.origin;
 const fmtW = (v) => `${Math.round(Number(v || 0))} W`;
 const fmtTime = (v) => v ? new Date(v).toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam' }) : '—';
 
