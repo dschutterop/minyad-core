@@ -2,7 +2,7 @@
 
 Minyad is een home virtual powerplant voor een woning in Nederland. De v1-focus is een harde zero-export strategie en maximale zelfconsumptie met:
 
-- Enphase IQ7/IQ7A via lokale Envoy `/api/v1/production` met digest-authenticatie.
+- Enphase IQ7/IQ7A via lokale Envoy `/api/v1/production` met digest-authenticatie en curtailment via de lokale IQ Gateway API met bearer-token.
 - GoodWe GW5048D-ES met Dyness DL5.0C via lokale GoodWe API, met Modbus/RS485 fallback achter dezelfde `GoodWeClient` interface.
 - DSMR P1-reader MQTT-telegrams of JSON-berichten.
 - PostgreSQL als service-communicatielaag en opslag.
@@ -33,6 +33,7 @@ Alle timestamps worden UTC opgeslagen. Het dashboard toont lokale tijden met `Eu
 
    - `MQTT_HOST`, `MQTT_PORT`, `DSMR_MQTT_TOPIC`
    - `ENVOY_HOST`, `ENVOY_USERNAME`, `ENVOY_PASSWORD`
+   - `ENPHASE_GATEWAY_IP`, `ENPHASE_TOKEN`
    - `GOODWE_HOST`
    - `MINYAD_BIND_IP` (het host-IP-adres waarop Docker alle gepubliceerde services moet binden)
    - `MINYAD_LATITUDE`, `MINYAD_LONGITUDE`, `PV_PEAK_KW`
@@ -83,6 +84,14 @@ curl -X PUT http://<MINYAD_BIND_IP>:${MINYAD_API_HOST_PORT:-18000}/api/settings/
   -H 'content-type: application/json' \
   -d '{"value":"25"}'
 ```
+
+## Enphase curtailment
+
+De Enphase-productiemeting blijft via de Envoy `/api/v1/production` endpoint lopen. Curtailment gebruikt de lokale IQ Gateway API over HTTPS met een bearer-token. Minyad leest de JWT rechtstreeks uit `ENPHASE_TOKEN` in `.env`. Token-vernieuwing hoort buiten deze service te gebeuren; werk de `.env`-waarde bij wanneer het externe vernieuwingsproces een nieuw token oplevert.
+
+De huidige actuator is een harde productie-toggle op `PUT /ivp/mod/603980032/mode/power_status` met `expectedEnergyFlag=0` voor uit en `expectedEnergyFlag=1` voor aan. De status wordt gecontroleerd via `GET /ivp/mod/603980032/mode/power_status` en `powerForcedOff`. Omdat de gateway en microinverters 15–30 minuten latency kunnen hebben, bewaakt `ENPHASE_SWITCH_HYSTERESIS_S` standaard minimaal 600 seconden tussen tegengestelde schakelingen.
+
+`CURTAILMENT_GRANULAR_ENABLED=false` houdt deze harde toggle actief. De control loop roept bewust alleen `set_production_limit(percent)` aan, zodat de toekomstige DRM-route voor procentuele fijnregeling onder dezelfde interface geactiveerd kan worden zonder control-loop refactor.
 
 ## GoodWe control
 

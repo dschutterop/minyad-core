@@ -15,6 +15,7 @@ from minyad.common.db import (
 )
 from minyad.common.status import update_status
 from minyad.common.time import utc_now
+from minyad.integrations.enphase import EnphaseClient
 from minyad.integrations.goodwe import GoodWeClient, build_goodwe_client
 
 LOG = logging.getLogger(__name__)
@@ -97,20 +98,29 @@ def decide(
     return Decision("balanced", "idle", 0, details)
 
 
-def apply_decision(client: GoodWeClient, decision: Decision) -> int | None:
+def apply_decision(
+    client: GoodWeClient, decision: Decision, enphase_client: EnphaseClient | None = None
+) -> int | None:
     if decision.action == "charge":
         client.set_charge_power(decision.target_w)
         return decision.target_w
     if decision.action == "discharge":
         client.set_discharge_power(decision.target_w)
         return decision.target_w
-    if decision.action in {"idle", "curtail_solar"}:
+    if decision.action == "curtail_solar":
         client.set_idle()
+        if enphase_client is not None:
+            enphase_client.set_production_limit(0)
+        return 0
+    if decision.action == "idle":
+        client.set_idle()
+        if enphase_client is not None:
+            enphase_client.set_production_limit(100)
         return 0
     return None
 
 
-def run_once(client: GoodWeClient) -> Decision:
+def run_once(client: GoodWeClient, enphase_client: EnphaseClient | None = None) -> Decision:
     with connect() as conn:
         settings = get_settings(conn)
         grid = latest(conn, "grid_readings")
@@ -118,7 +128,7 @@ def run_once(client: GoodWeClient) -> Decision:
         battery = latest(conn, "battery_readings")
         forecast = latest_forecast(conn, hours=24)
         decision = decide(grid, solar, battery, settings, forecast)
-    actual = apply_decision(client, decision)
+    actual = apply_decision(client, decision, enphase_client)
     with connect() as conn:
         insert_reading(
             conn,
@@ -138,11 +148,13 @@ def run_once(client: GoodWeClient) -> Decision:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    client = build_goodwe_client(get_config())
+    config = get_config()
+    client = build_goodwe_client(config)
+    enphase_client = EnphaseClient(config)
     while True:
         interval = 10
         try:
-            decision = run_once(client)
+            decision = run_once(client, enphase_client)
             LOG.info("Control decision: %s", decision)
             with connect() as conn:
                 interval = setting_int(get_settings(conn), "control_loop_interval_s", 10)
