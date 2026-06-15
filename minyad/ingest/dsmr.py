@@ -64,6 +64,14 @@ def _first(data: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _top_level_first(data: dict[str, Any], *keys: str) -> Any:
+    normalized = {_normalize_key(key): value for key, value in data.items()}
+    for key in keys:
+        if key in normalized and normalized[key] is not None:
+            return normalized[key]
+    return None
+
+
 def _flatten(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
     flattened: dict[str, Any] = {}
     for key, value in data.items():
@@ -82,11 +90,11 @@ def _normalize_key(key: Any) -> str:
 
 
 def _grid_power(data: dict[str, Any]) -> tuple[int, int]:
-    net_w = _first(data, "active_power_w", "net_power_w", "power_w")
+    net_w = _top_level_first(data, "active_power_w", "net_power_w", "power_w")
     if net_w is not None:
         return _split_signed_power(_number(net_w))
 
-    net_kw = _first(data, "active_power", "net_power", "power")
+    net_kw = _top_level_first(data, "active_power", "net_power", "power")
     if net_kw is not None:
         return _split_signed_power(_number(net_kw, multiplier=1000))
 
@@ -100,6 +108,7 @@ def _grid_power(data: dict[str, Any]) -> tuple[int, int]:
                 "consumption_w",
                 "electricity_currently_delivered_w",
                 "electricity_meter_power_consumption_w",
+                "consumption_power_w",
             ),
             (
                 "electricity_currently_delivered",
@@ -108,6 +117,8 @@ def _grid_power(data: dict[str, Any]) -> tuple[int, int]:
                 "power_consumption",
                 "currently_delivered",
                 "electricity_meter_power_consumption",
+                "consumption_power",
+                "consumption",
             ),
         ),
         _power_w(
@@ -119,6 +130,7 @@ def _grid_power(data: dict[str, Any]) -> tuple[int, int]:
                 "production_w",
                 "electricity_currently_returned_w",
                 "electricity_meter_power_production_w",
+                "production_power_w",
             ),
             (
                 "electricity_currently_returned",
@@ -127,6 +139,8 @@ def _grid_power(data: dict[str, Any]) -> tuple[int, int]:
                 "power_production",
                 "currently_returned",
                 "electricity_meter_power_production",
+                "production_power",
+                "production",
             ),
         ),
     )
@@ -137,15 +151,42 @@ def _split_signed_power(watts: int) -> tuple[int, int]:
 
 
 def _power_w(data: dict[str, Any], watt_keys: tuple[str, ...], kilowatt_keys: tuple[str, ...]) -> int:
+    normalized = _flatten(data)
     watt_value = _first(data, *watt_keys)
     if watt_value is not None:
         return _number(watt_value)
-    return _number(_first(data, *kilowatt_keys) or 0, multiplier=1000)
+
+    for key in kilowatt_keys:
+        value = normalized.get(key)
+        if value is not None:
+            return _number_with_unit(value, _first(data, f"{key}_unit"), default_multiplier=1000)
+        nested_value = normalized.get(f"{key}_value")
+        if nested_value is not None:
+            return _number_with_unit(
+                nested_value,
+                normalized.get(f"{key}_unit") or normalized.get(f"{key}_uom"),
+                default_multiplier=1000,
+            )
+    return 0
 
 
 def _number(value: Any, multiplier: int = 1) -> int:
+    return _number_with_unit(value, None, default_multiplier=multiplier)
+
+
+def _number_with_unit(value: Any, unit: Any, default_multiplier: int = 1) -> int:
+    multiplier = default_multiplier
     if isinstance(value, str):
-        value = value.strip().split()[0].replace(",", ".")
+        parts = value.strip().replace(",", ".").split()
+        value = parts[0]
+        if len(parts) > 1:
+            unit = parts[1]
+    if unit is not None:
+        normalized_unit = str(unit).strip().lower()
+        if normalized_unit in {"w", "watt", "watts"}:
+            multiplier = 1
+        elif normalized_unit in {"kw", "kilowatt", "kilowatts"}:
+            multiplier = 1000
     return int(float(value) * multiplier)
 
 
