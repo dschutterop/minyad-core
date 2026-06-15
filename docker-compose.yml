@@ -1,5 +1,6 @@
 services:
-  postgres:
+  minyad-postgres:
+    container_name: minyad-postgres
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: minyad
@@ -15,57 +16,63 @@ services:
       timeout: 5s
       retries: 5
 
-  migrate:
+  minyad-migrate:
+    container_name: minyad-migrate
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://minyad:minyad@postgres:5432/minyad
+      DATABASE_URL: postgresql://minyad:minyad@minyad-postgres:5432/minyad
     depends_on:
-      postgres:
+      minyad-postgres:
         condition: service_healthy
     command: alembic upgrade head
     restart: "no"
 
   minyad-ingest:
+    container_name: minyad-ingest
     build: .
     env_file: .env
     environment:
       INGEST_SERVICE: all
-      DATABASE_URL: postgresql://minyad:minyad@postgres:5432/minyad
-    depends_on: [migrate]
+      DATABASE_URL: postgresql://minyad:minyad@minyad-postgres:5432/minyad
+    depends_on: [minyad-migrate]
     command: python -m minyad.ingest
     restart: unless-stopped
 
   minyad-control:
+    container_name: minyad-control
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://minyad:minyad@postgres:5432/minyad
-    depends_on: [migrate]
+      DATABASE_URL: postgresql://minyad:minyad@minyad-postgres:5432/minyad
+    depends_on: [minyad-migrate]
     command: python -m minyad.control
     restart: unless-stopped
 
   minyad-forecast:
+    container_name: minyad-forecast
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://minyad:minyad@postgres:5432/minyad
-    depends_on: [migrate]
+      DATABASE_URL: postgresql://minyad:minyad@minyad-postgres:5432/minyad
+    depends_on: [minyad-migrate]
     command: python -m minyad.forecast
     restart: unless-stopped
 
   minyad-api:
+    container_name: minyad-api
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://minyad:minyad@postgres:5432/minyad
-    depends_on: [migrate]
+      DATABASE_URL: postgresql://minyad:minyad@minyad-postgres:5432/minyad
+    depends_on: [minyad-migrate]
     command: python -m minyad.api
     ports:
       - "${MINYAD_BIND_IP:?Set MINYAD_BIND_IP in .env to the host IP address that should expose Minyad services}:8000:8000"
     restart: unless-stopped
 
   minyad-dashboard:
+    container_name: minyad-dashboard
     image: nginx:1.27-alpine
     volumes:
       - ./minyad/dashboard:/usr/share/nginx/html:ro
