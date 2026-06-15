@@ -31,6 +31,33 @@ def test_parse_dsmr_json_current_power_uses_kilowatts():
     assert reading["export_w"] == 0
 
 
+def test_parse_dsmr_json_power_delivered_aliases_use_kilowatts():
+    payload = b'{"timestamp":"2026-06-15T22:57:05Z","power_delivered":2.634,"power_returned":0.0}'
+    reading = parse_dsmr_payload(payload)
+    assert reading["import_w"] == 2634
+    assert reading["export_w"] == 0
+
+
+def test_parse_dsmr_json_active_power_w_splits_signed_net_power():
+    import_payload = b'{"timestamp":"2026-06-15T22:57:05Z","active_power_w":2634}'
+    export_payload = b'{"timestamp":"2026-06-15T22:57:05Z","active_power_w":-512}'
+
+    import_reading = parse_dsmr_payload(import_payload)
+    export_reading = parse_dsmr_payload(export_payload)
+
+    assert import_reading["import_w"] == 2634
+    assert import_reading["export_w"] == 0
+    assert export_reading["import_w"] == 0
+    assert export_reading["export_w"] == 512
+
+
+def test_parse_dsmr_json_current_power_accepts_unit_strings():
+    payload = b'{"timestamp":"2026-06-15T22:57:05Z","electricity_currently_delivered":"2.634 kW","electricity_currently_returned":"0.0 kW"}'
+    reading = parse_dsmr_payload(payload)
+    assert reading["import_w"] == 2634
+    assert reading["export_w"] == 0
+
+
 def test_decision_zero_export_charges_battery():
     decision = decide(
         grid={"import_w": 0, "export_w": 350},
