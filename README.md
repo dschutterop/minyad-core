@@ -7,7 +7,7 @@ Minyad is een home virtual powerplant voor een woning in Nederland. De v1-focus 
 - DSMR P1-reader MQTT-telegrams of JSON-berichten.
 - PostgreSQL als service-communicatielaag en opslag.
 - Open-Meteo solar forecast zonder API-key.
-- Een minimaal custom dashboard op poort `8080`.
+- Een minimaal custom dashboard op standaard hostpoort `18080`.
 
 ## Architectuur
 
@@ -45,20 +45,20 @@ Alle timestamps worden UTC opgeslagen. Het dashboard toont lokale tijden met `Eu
 
 4. Open:
 
-   - Dashboard: `http://<MINYAD_BIND_IP>:8080`
-   - API: `http://<MINYAD_BIND_IP>:8000/api/status`
+   - Dashboard: `http://<MINYAD_BIND_IP>:<MINYAD_DASHBOARD_HOST_PORT>` (standaard `18080`)
+   - API: `http://<MINYAD_BIND_IP>:<MINYAD_API_HOST_PORT>/api/status` (standaard `18000`)
 
 ## Service-bindings
 
-Alle gepubliceerde Docker-poorten binden expliciet op `MINYAD_BIND_IP` uit `.env`:
+Alle gepubliceerde Docker-poorten binden expliciet op `MINYAD_BIND_IP` uit `.env`. De host-poorten zijn instelbaar zodat Minyad niet botst met andere stacks op dezelfde machine:
 
 | Service | Host-poort | Container-poort |
 | --- | ---: | ---: |
-| `postgres` | `5432` | `5432` |
-| `minyad-api` | `8000` | `8000` |
-| `minyad-dashboard` | `8080` | `80` |
+| `postgres` | `MINYAD_POSTGRES_HOST_PORT` (`15432`) | `5432` |
+| `minyad-api` | `MINYAD_API_HOST_PORT` (`18000`) | `8000` |
+| `minyad-dashboard` | `MINYAD_DASHBOARD_HOST_PORT` (`18080`) | `80` |
 
-Hierdoor publiceert Docker deze services niet op `0.0.0.0`. Zet `MINYAD_BIND_IP` op het host-interfaceadres dat je wilt gebruiken voordat je `docker compose up` draait. De Compose-poorten gebruiken bewust de korte notatie `${MINYAD_BIND_IP}:hostpoort:containerpoort`, zodat oudere Docker Compose-versies het bind-adres ook correct doorgeven aan Docker.
+Hierdoor publiceert Docker deze services niet op `0.0.0.0`. Zet `MINYAD_BIND_IP` op het host-interfaceadres dat je wilt gebruiken voordat je `docker compose up` draait. Pas `MINYAD_POSTGRES_HOST_PORT`, `MINYAD_API_HOST_PORT` of `MINYAD_DASHBOARD_HOST_PORT` aan als een standaardpoort al bezet is. Het dashboard proxyt `/api/` intern naar `minyad-api`, zodat het dashboard blijft werken wanneer je de API-hostpoort wijzigt. De Compose-poorten gebruiken bewust de korte notatie `${MINYAD_BIND_IP}:hostpoort:containerpoort`, zodat oudere Docker Compose-versies het bind-adres ook correct doorgeven aan Docker.
 
 ## Database en runtime settings
 
@@ -79,7 +79,7 @@ Belangrijke defaults:
 Voorbeeld instelling aanpassen:
 
 ```bash
-curl -X PUT http://<MINYAD_BIND_IP>:8000/api/settings/export_tolerance_w \
+curl -X PUT http://<MINYAD_BIND_IP>:${MINYAD_API_HOST_PORT:-18000}/api/settings/export_tolerance_w \
   -H 'content-type: application/json' \
   -d '{"value":"25"}'
 ```

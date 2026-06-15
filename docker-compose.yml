@@ -9,7 +9,7 @@ services:
     volumes:
       - minyad-postgres:/var/lib/postgresql/data
     ports:
-      - "${MINYAD_BIND_IP:?Set MINYAD_BIND_IP in .env to the host IP address that should expose Minyad services}:5434:5432"
+      - "${MINYAD_BIND_IP:?Set MINYAD_BIND_IP in .env to the host IP address that should expose Minyad services}:${MINYAD_POSTGRES_HOST_PORT:-15432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U minyad -d minyad"]
       interval: 10s
@@ -68,7 +68,7 @@ services:
     depends_on: [minyad-migrate]
     command: python -m minyad.api
     ports:
-      - "${MINYAD_BIND_IP:?Set MINYAD_BIND_IP in .env to the host IP address that should expose Minyad services}:8000:8000"
+      - "${MINYAD_BIND_IP:?Set MINYAD_BIND_IP in .env to the host IP address that should expose Minyad services}:${MINYAD_API_HOST_PORT:-18000}:8000"
     restart: unless-stopped
 
   minyad-dashboard:
@@ -76,9 +76,10 @@ services:
     image: nginx:1.27-alpine
     volumes:
       - ./minyad/dashboard:/usr/share/nginx/html:ro
+      - ./minyad/dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on: [minyad-api]
     ports:
-      - "${MINYAD_BIND_IP:?Set MINYAD_BIND_IP in .env to the host IP address that should expose Minyad services}:8080:80"
+      - "${MINYAD_BIND_IP:?Set MINYAD_BIND_IP in .env to the host IP address that should expose Minyad services}:${MINYAD_DASHBOARD_HOST_PORT:-18080}:80"
     restart: unless-stopped
 
 volumes:
