@@ -31,6 +31,13 @@ def test_parse_dsmr_json_current_power_uses_kilowatts():
     assert reading["export_w"] == 0
 
 
+def test_parse_dsmr_json_power_delivered_aliases_use_kilowatts():
+    payload = b'{"timestamp":"2026-06-15T22:57:05Z","power_delivered":2.634,"power_returned":0.0}'
+    reading = parse_dsmr_payload(payload)
+    assert reading["import_w"] == 2634
+    assert reading["export_w"] == 0
+
+
 def test_decision_zero_export_charges_battery():
     decision = decide(
         grid={"import_w": 0, "export_w": 350},
