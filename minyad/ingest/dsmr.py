@@ -12,6 +12,7 @@ from minyad.common.status import update_status
 from minyad.common.time import ensure_utc, utc_now
 
 LOG = logging.getLogger(__name__)
+PAYLOAD_PREVIEW_CHARS = 500
 OBIS_PATTERNS = {
     "import_kwh_t1": re.compile(r"1-0:1\.8\.1\((\d+\.\d+)\*kWh\)"),
     "import_kwh_t2": re.compile(r"1-0:1\.8\.2\((\d+\.\d+)\*kWh\)"),
@@ -156,6 +157,50 @@ def _parse_ts(value: Any) -> datetime:
     return ensure_utc(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
 
 
+def _payload_preview(payload: bytes) -> str:
+    text = payload.decode("utf-8", errors="replace").replace("\r", "\\r").replace("\n", "\\n")
+    if len(text) <= PAYLOAD_PREVIEW_CHARS:
+        return text
+    return f"{text[:PAYLOAD_PREVIEW_CHARS]}…"
+
+
+def _payload_debug_details(payload: bytes) -> dict[str, Any]:
+    text = payload.decode("utf-8", errors="replace")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        matched_obis = [key for key, pattern in OBIS_PATTERNS.items() if pattern.search(text)]
+        return {"format": "telegram", "matched_obis": matched_obis}
+    if isinstance(data, dict):
+        flattened = _flatten(data)
+        return {"format": "json", "keys": sorted(flattened)}
+    return {"format": type(data).__name__}
+
+
+def _log_dsmr_reading(topic: str, payload: bytes, reading: dict[str, Any]) -> None:
+    details = _payload_debug_details(payload)
+    LOG.info(
+        "DSMR reading topic=%s import_w=%s export_w=%s import_kwh_t1=%s import_kwh_t2=%s "
+        "export_kwh_t1=%s export_kwh_t2=%s format=%s",
+        topic,
+        reading.get("import_w"),
+        reading.get("export_w"),
+        reading.get("import_kwh_t1"),
+        reading.get("import_kwh_t2"),
+        reading.get("export_kwh_t1"),
+        reading.get("export_kwh_t2"),
+        details.get("format"),
+    )
+    LOG.debug("DSMR payload details topic=%s details=%s preview=%s", topic, details, _payload_preview(payload))
+    if not reading.get("import_w") and not reading.get("export_w"):
+        LOG.warning(
+            "DSMR reading has zero import/export; topic=%s details=%s preview=%s",
+            topic,
+            details,
+            _payload_preview(payload),
+        )
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     cfg = get_config()
@@ -172,9 +217,20 @@ def main() -> None:
     def on_message(_client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         try:
             reading = parse_dsmr_payload(message.payload)
+            _log_dsmr_reading(message.topic, message.payload, reading)
             with connect() as conn:
                 insert_reading(conn, "grid_readings", reading)
-                update_status(conn, "dsmr", "ok", {"topic": message.topic})
+                update_status(
+                    conn,
+                    "dsmr",
+                    "ok",
+                    {
+                        "topic": message.topic,
+                        "import_w": reading.get("import_w"),
+                        "export_w": reading.get("export_w"),
+                        "debug": _payload_debug_details(message.payload),
+                    },
+                )
         except Exception as exc:  # noqa: BLE001
             LOG.exception("Failed to ingest DSMR message: %s", exc)
             with connect() as conn:
