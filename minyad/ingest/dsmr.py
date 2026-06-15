@@ -26,18 +26,11 @@ def parse_dsmr_payload(payload: bytes) -> dict[str, Any]:
     text = payload.decode("utf-8", errors="replace")
     try:
         data = json.loads(text)
+        import_w, export_w = _grid_power(data)
         return {
             "timestamp": _parse_ts(data.get("timestamp") or data.get("time")),
-            "import_w": _power_w(
-                data,
-                ("import_w", "power_delivered_w"),
-                ("electricity_currently_delivered", "power_delivered"),
-            ),
-            "export_w": _power_w(
-                data,
-                ("export_w", "power_returned_w"),
-                ("electricity_currently_returned", "power_returned"),
-            ),
+            "import_w": import_w,
+            "export_w": export_w,
             "import_kwh_t1": _first(data, "import_kwh_t1", "electricity_delivered_1"),
             "import_kwh_t2": _first(data, "import_kwh_t2", "electricity_delivered_2"),
             "export_kwh_t1": _first(data, "export_kwh_t1", "electricity_returned_1"),
@@ -69,11 +62,37 @@ def _first(data: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _grid_power(data: dict[str, Any]) -> tuple[int, int]:
+    net_w = _first(data, "active_power_w", "net_power_w", "power_w")
+    if net_w is not None:
+        watts = _number(net_w)
+        return max(0, watts), max(0, -watts)
+
+    return (
+        _power_w(
+            data,
+            ("import_w", "power_delivered_w", "electricity_currently_delivered_w"),
+            ("electricity_currently_delivered", "power_delivered"),
+        ),
+        _power_w(
+            data,
+            ("export_w", "power_returned_w", "electricity_currently_returned_w"),
+            ("electricity_currently_returned", "power_returned"),
+        ),
+    )
+
+
 def _power_w(data: dict[str, Any], watt_keys: tuple[str, ...], kilowatt_keys: tuple[str, ...]) -> int:
     watt_value = _first(data, *watt_keys)
     if watt_value is not None:
-        return int(float(watt_value))
-    return int(float(_first(data, *kilowatt_keys) or 0) * 1000)
+        return _number(watt_value)
+    return _number(_first(data, *kilowatt_keys) or 0, multiplier=1000)
+
+
+def _number(value: Any, multiplier: int = 1) -> int:
+    if isinstance(value, str):
+        value = value.strip().split()[0].replace(",", ".")
+    return int(float(value) * multiplier)
 
 
 def _parse_ts(value: Any) -> datetime:
