@@ -58,6 +58,20 @@ def test_parse_dsmr_json_current_power_accepts_unit_strings():
     assert reading["export_w"] == 0
 
 
+def test_parse_dsmr_json_active_power_uses_kilowatts_when_unitless():
+    payload = b'{"timestamp":"2026-06-15T22:57:05Z","active_power":1.024}'
+    reading = parse_dsmr_payload(payload)
+    assert reading["import_w"] == 1024
+    assert reading["export_w"] == 0
+
+
+def test_parse_dsmr_json_home_assistant_power_consumption_aliases():
+    payload = b'{"timestamp":"2026-06-15T22:57:05Z","electricity_meter":{"power_consumption":"1.001 kW","power_production":"0.000 kW"}}'
+    reading = parse_dsmr_payload(payload)
+    assert reading["import_w"] == 1000
+    assert reading["export_w"] == 0
+
+
 def test_decision_zero_export_charges_battery():
     decision = decide(
         grid={"import_w": 0, "export_w": 350},
