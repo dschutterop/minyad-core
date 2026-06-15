@@ -72,6 +72,20 @@ def test_parse_dsmr_json_home_assistant_power_consumption_aliases():
     assert reading["export_w"] == 0
 
 
+def test_parse_dsmr_json_nested_value_units():
+    payload = b'{"timestamp":"2026-06-15T22:57:05Z","electricity_currently_delivered":{"value":734,"unit":"W"},"electricity_currently_returned":{"value":0.125,"unit":"kW"}}'
+    reading = parse_dsmr_payload(payload)
+    assert reading["import_w"] == 734
+    assert reading["export_w"] == 125
+
+
+def test_parse_dsmr_json_consumption_production_power_aliases():
+    payload = b'{"timestamp":"2026-06-15T22:57:05Z","consumption":{"power":{"value":1001,"unit":"W"}},"production":{"power":"0.250 kW"}}'
+    reading = parse_dsmr_payload(payload)
+    assert reading["import_w"] == 1001
+    assert reading["export_w"] == 250
+
+
 def test_decision_zero_export_charges_battery():
     decision = decide(
         grid={"import_w": 0, "export_w": 350},
