@@ -56,30 +56,83 @@ def parse_dsmr_payload(payload: bytes) -> dict[str, Any]:
 
 
 def _first(data: dict[str, Any], *keys: str) -> Any:
+    normalized = _flatten(data)
     for key in keys:
-        if key in data and data[key] is not None:
-            return data[key]
+        if key in normalized and normalized[key] is not None:
+            return normalized[key]
     return None
+
+
+def _flatten(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    flattened: dict[str, Any] = {}
+    for key, value in data.items():
+        normalized_key = _normalize_key(key)
+        path = f"{prefix}_{normalized_key}" if prefix else normalized_key
+        if isinstance(value, dict):
+            flattened.update(_flatten(value, path))
+        else:
+            flattened[path] = value
+            flattened.setdefault(normalized_key, value)
+    return flattened
+
+
+def _normalize_key(key: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(key).strip().lower()).strip("_")
 
 
 def _grid_power(data: dict[str, Any]) -> tuple[int, int]:
     net_w = _first(data, "active_power_w", "net_power_w", "power_w")
     if net_w is not None:
-        watts = _number(net_w)
-        return max(0, watts), max(0, -watts)
+        return _split_signed_power(_number(net_w))
+
+    net_kw = _first(data, "active_power", "net_power", "power")
+    if net_kw is not None:
+        return _split_signed_power(_number(net_kw, multiplier=1000))
 
     return (
         _power_w(
             data,
-            ("import_w", "power_delivered_w", "electricity_currently_delivered_w"),
-            ("electricity_currently_delivered", "power_delivered"),
+            (
+                "import_w",
+                "power_delivered_w",
+                "power_consumed_w",
+                "consumption_w",
+                "electricity_currently_delivered_w",
+                "electricity_meter_power_consumption_w",
+            ),
+            (
+                "electricity_currently_delivered",
+                "power_delivered",
+                "power_consumed",
+                "power_consumption",
+                "currently_delivered",
+                "electricity_meter_power_consumption",
+            ),
         ),
         _power_w(
             data,
-            ("export_w", "power_returned_w", "electricity_currently_returned_w"),
-            ("electricity_currently_returned", "power_returned"),
+            (
+                "export_w",
+                "power_returned_w",
+                "power_produced_w",
+                "production_w",
+                "electricity_currently_returned_w",
+                "electricity_meter_power_production_w",
+            ),
+            (
+                "electricity_currently_returned",
+                "power_returned",
+                "power_produced",
+                "power_production",
+                "currently_returned",
+                "electricity_meter_power_production",
+            ),
         ),
     )
+
+
+def _split_signed_power(watts: int) -> tuple[int, int]:
+    return max(0, watts), max(0, -watts)
 
 
 def _power_w(data: dict[str, Any], watt_keys: tuple[str, ...], kilowatt_keys: tuple[str, ...]) -> int:
