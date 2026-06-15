@@ -24,6 +24,13 @@ def test_parse_dsmr_telegram_power_and_counters():
     assert reading["export_kwh_t2"] == 0.5
 
 
+def test_parse_dsmr_json_current_power_uses_kilowatts():
+    payload = b'{"timestamp":"2026-06-15T22:57:05Z","electricity_currently_delivered":2.734,"electricity_currently_returned":0.0}'
+    reading = parse_dsmr_payload(payload)
+    assert reading["import_w"] == 2734
+    assert reading["export_w"] == 0
+
+
 def test_decision_zero_export_charges_battery():
     decision = decide(
         grid={"import_w": 0, "export_w": 350},
