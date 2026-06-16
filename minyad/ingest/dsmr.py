@@ -80,7 +80,7 @@ def _parse_scalar_topic(topic: str, value: Any) -> dict[str, Any]:
     is_export = _is_export_topic(normalized_topic)
     is_import = _is_import_topic(normalized_topic)
     import_w, export_w = _exclusive_grid_power(
-        watts if is_import or not is_export else 0,
+        watts if is_import else 0,
         watts if is_export else 0,
     )
     return {
@@ -98,14 +98,39 @@ def _parse_scalar_topic(topic: str, value: Any) -> dict[str, Any]:
 def _is_export_topic(normalized_topic: str) -> bool:
     return any(
         part in normalized_topic
-        for part in ("returned", "return", "export", "production", "produced")
+        for part in (
+            "electricity_currently_returned",
+            "currently_returned",
+            "power_returned",
+            "power_produced",
+            "power_production",
+            "production_power",
+            "export_w",
+        )
     )
 
 
 def _is_import_topic(normalized_topic: str) -> bool:
     return any(
-        part in normalized_topic for part in ("delivered", "import", "consumption", "consumed")
+        part in normalized_topic
+        for part in (
+            "electricity_currently_delivered",
+            "currently_delivered",
+            "power_delivered",
+            "power_consumed",
+            "power_consumption",
+            "consumption_power",
+            "import_w",
+        )
     )
+
+
+def _is_scalar_grid_power_reading(reading: dict[str, Any]) -> bool:
+    raw = reading.get("raw")
+    if not isinstance(raw, dict) or "topic" not in raw or "value" not in raw:
+        return False
+    normalized_topic = _normalize_key(raw["topic"])
+    return _is_import_topic(normalized_topic) or _is_export_topic(normalized_topic)
 
 
 def _exclusive_grid_power(import_w: int, export_w: int) -> tuple[int, int]:
@@ -398,7 +423,11 @@ def main() -> None:
             message.retain,
         )
         try:
-            reading = current_power.merge(parse_dsmr_message(message.topic, message.payload))
+            parsed = parse_dsmr_message(message.topic, message.payload)
+            if parsed.get("raw", {}).get("topic") and not _is_scalar_grid_power_reading(parsed):
+                LOG.debug("Skipping non-power DSMR scalar topic=%s", message.topic)
+                return
+            reading = current_power.merge(parsed)
             _log_dsmr_reading(message.topic, message.payload, reading)
             with connect() as conn:
                 insert_reading(conn, "grid_readings", reading)
