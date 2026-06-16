@@ -3,6 +3,7 @@ import time
 
 from minyad.common.config import get_config
 from minyad.common.db import connect, get_settings, insert_reading, setting_int
+from minyad.common.logging import configure_logging
 from minyad.common.status import update_status
 from minyad.common.time import utc_now
 from minyad.integrations.goodwe import build_goodwe_client
@@ -11,8 +12,11 @@ LOG = logging.getLogger(__name__)
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    configure_logging()
     cfg = get_config()
+    if not cfg.goodwe_ingestion_enabled:
+        LOG.info("GoodWe ingestion is disabled; exiting")
+        return
     client = build_goodwe_client(cfg)
     while True:
         interval = 5
