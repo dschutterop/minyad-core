@@ -114,6 +114,26 @@ def test_parse_dsmr_scalar_current_low_kw_value_uses_topic_value():
     assert reading["import_w"] == 13
     assert reading["export_w"] == 0
 
+
+def test_parse_dsmr_json_topic_value_uses_mqtt_topic_context():
+    reading = parse_dsmr_message(
+        "dsmr/reading/electricity_currently_delivered",
+        b'{"value": 734, "unit": "W", "timestamp": "2026-06-15T22:57:05Z"}',
+    )
+
+    assert reading["import_w"] == 734
+    assert reading["export_w"] == 0
+
+
+def test_parse_dsmr_json_topic_state_defaults_to_kilowatts():
+    reading = parse_dsmr_message(
+        "dsmr/reading/electricity_currently_returned",
+        b'{"state": "0.125", "timestamp": "2026-06-15T22:57:05Z"}',
+    )
+
+    assert reading["import_w"] == 0
+    assert reading["export_w"] == 125
+
 def test_dsmr_current_power_state_merges_separate_current_topics():
     from minyad.ingest.dsmr import DsmrCurrentPowerState
 
