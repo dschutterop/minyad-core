@@ -44,7 +44,9 @@ async function refresh() {
     gridCard.classList.add('grid-consuming');
   }
   setText('gridW', exportW > 0 ? `Export ${fmtW(exportW)}` : `Import ${fmtW(importW)}`);
-  setText('gridBalance', `Netto ${fmtW(importW - exportW)}`);
+  setText('gridImport', `Import: ${fmtW(importW)}`);
+  setText('gridExport', `Export: ${fmtW(exportW)}`);
+  setText('gridBalance', `Netto: ${fmtW(importW - exportW)}`);
   setText('controlAction', control.action || '—');
   setText('controlDetails', `${control.trigger || '—'} target ${fmtW(control.target_w)}`);
   setText('flowSolar', fmtW(solar.production_w));
