@@ -61,7 +61,7 @@ def parse_dsmr_payload(payload: bytes) -> dict[str, Any]:
 
 
 def _parse_dsmr_json(data: dict[str, Any]) -> dict[str, Any]:
-    import_w, export_w = _grid_power(data)
+    import_w, export_w = _exclusive_grid_power(*_grid_power(data))
     return {
         "timestamp": _parse_ts(data.get("timestamp") or data.get("time")),
         "import_w": import_w,
@@ -77,23 +77,77 @@ def _parse_dsmr_json(data: dict[str, Any]) -> dict[str, Any]:
 def _parse_scalar_topic(topic: str, value: Any) -> dict[str, Any]:
     normalized_topic = _normalize_key(topic)
     watts = _number_with_unit(value, None, default_multiplier=_default_scalar_multiplier(value))
-    is_export = any(
-        part in normalized_topic
-        for part in ("returned", "return", "export", "production", "produced")
-    )
-    is_import = any(
-        part in normalized_topic for part in ("delivered", "import", "consumption", "consumed")
+    is_export = _is_export_topic(normalized_topic)
+    is_import = _is_import_topic(normalized_topic)
+    import_w, export_w = _exclusive_grid_power(
+        watts if is_import or not is_export else 0,
+        watts if is_export else 0,
     )
     return {
         "timestamp": utc_now(),
-        "import_w": watts if is_import or not is_export else 0,
-        "export_w": watts if is_export else 0,
+        "import_w": import_w,
+        "export_w": export_w,
         "import_kwh_t1": None,
         "import_kwh_t2": None,
         "export_kwh_t1": None,
         "export_kwh_t2": None,
         "raw": {"topic": topic, "value": value},
     }
+
+
+def _is_export_topic(normalized_topic: str) -> bool:
+    return any(
+        part in normalized_topic
+        for part in ("returned", "return", "export", "production", "produced")
+    )
+
+
+def _is_import_topic(normalized_topic: str) -> bool:
+    return any(
+        part in normalized_topic for part in ("delivered", "import", "consumption", "consumed")
+    )
+
+
+def _exclusive_grid_power(import_w: int, export_w: int) -> tuple[int, int]:
+    if import_w > 0 and export_w > 0:
+        if import_w >= export_w:
+            return import_w, 0
+        return 0, export_w
+    return import_w, export_w
+
+
+class DsmrCurrentPowerState:
+    """Merge separate DSMR current import/export MQTT topics into one grid reading."""
+
+    def __init__(self) -> None:
+        self.import_w = 0
+        self.export_w = 0
+
+    def merge(self, reading: dict[str, Any]) -> dict[str, Any]:
+        raw = reading.get("raw")
+        if not isinstance(raw, dict) or "topic" not in raw:
+            return reading
+
+        normalized_topic = _normalize_key(raw["topic"])
+        if "electricity_currently_delivered" not in normalized_topic and (
+            "electricity_currently_returned" not in normalized_topic
+        ):
+            return reading
+
+        import_w = int(reading.get("import_w") or 0)
+        export_w = int(reading.get("export_w") or 0)
+        if "electricity_currently_delivered" in normalized_topic:
+            self.import_w = import_w
+            if import_w > 0:
+                self.export_w = 0
+        elif "electricity_currently_returned" in normalized_topic:
+            self.export_w = export_w
+            if export_w > 0:
+                self.import_w = 0
+
+        merged = dict(reading)
+        merged["import_w"], merged["export_w"] = _exclusive_grid_power(self.import_w, self.export_w)
+        return merged
 
 
 def _default_scalar_multiplier(value: Any) -> int:
@@ -318,6 +372,7 @@ def main() -> None:
     if not cfg.dsmr_ingestion_enabled:
         LOG.info("DSMR ingestion is disabled; exiting")
         return
+    current_power = DsmrCurrentPowerState()
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="minyad-dsmr-consumer")
     _configure_mqtt_debug(client, cfg.debug_messages)
     if cfg.mqtt_username:
@@ -343,7 +398,7 @@ def main() -> None:
             message.retain,
         )
         try:
-            reading = parse_dsmr_message(message.topic, message.payload)
+            reading = current_power.merge(parse_dsmr_message(message.topic, message.payload))
             _log_dsmr_reading(message.topic, message.payload, reading)
             with connect() as conn:
                 insert_reading(conn, "grid_readings", reading)
