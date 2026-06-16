@@ -34,7 +34,16 @@ async function refresh() {
   setText('solarDay', `Lifetime: ${((Number(solar.lifetime_wh || 0)) / 1000).toFixed(1)} kWh`);
   setText('soc', battery.soc_pct == null ? '—%' : `${Number(battery.soc_pct).toFixed(0)}%`);
   setText('batteryMode', `${battery.mode || '—'} (${chargeW ? 'laden ' + fmtW(chargeW) : dischargeW ? 'ontladen ' + fmtW(dischargeW) : 'idle'})`);
-  setText('gridW', importW >= exportW ? `Import ${fmtW(importW)}` : `Export ${fmtW(exportW)}`);
+  const gridCard = document.getElementById('gridCard');
+  gridCard.classList.remove('grid-consuming-high', 'grid-consuming', 'grid-returning');
+  if (exportW > 0) {
+    gridCard.classList.add('grid-returning');
+  } else if (importW > 1000) {
+    gridCard.classList.add('grid-consuming-high');
+  } else if (importW > 0) {
+    gridCard.classList.add('grid-consuming');
+  }
+  setText('gridW', exportW > 0 ? `Export ${fmtW(exportW)}` : `Import ${fmtW(importW)}`);
   setText('gridBalance', `Netto ${fmtW(importW - exportW)}`);
   setText('controlAction', control.action || '—');
   setText('controlDetails', `${control.trigger || '—'} target ${fmtW(control.target_w)}`);
