@@ -18,6 +18,8 @@ class AppConfig(BaseSettings):
     mqtt_username: str | None = Field(None, alias="MQTT_USERNAME")
     mqtt_password: str | None = Field(None, alias="MQTT_PASSWORD")
     dsmr_mqtt_topic: str = Field("dsmr/reading", alias="DSMR_MQTT_TOPIC")
+    dsmr_ingestion_enabled: bool = Field(True, alias="DSMR_INGESTION_ENABLED")
+    debug_messages: bool = Field(False, alias="DEBUG_MESSAGES")
 
     envoy_host: str = Field("envoy.local", alias="ENVOY_HOST")
     envoy_username: str = Field("installer", alias="ENVOY_USERNAME")
@@ -26,11 +28,15 @@ class AppConfig(BaseSettings):
     enphase_token: str = Field("", alias="ENPHASE_TOKEN")
     enphase_verify_tls: bool = Field(False, alias="ENPHASE_VERIFY_TLS")
     enphase_switch_hysteresis_s: int = Field(600, alias="ENPHASE_SWITCH_HYSTERESIS_S")
+    enphase_ingestion_enabled: bool = Field(True, alias="ENPHASE_INGESTION_ENABLED")
+    enphase_steering_enabled: bool = Field(True, alias="ENPHASE_STEERING_ENABLED")
     curtailment_granular_enabled: bool = Field(False, alias="CURTAILMENT_GRANULAR_ENABLED")
 
     goodwe_host: str = Field("goodwe.local", alias="GOODWE_HOST")
     goodwe_modbus_port: int = Field(502, alias="GOODWE_MODBUS_PORT")
     goodwe_station_id: int = Field(247, alias="GOODWE_STATION_ID")
+    goodwe_ingestion_enabled: bool = Field(True, alias="GOODWE_INGESTION_ENABLED")
+    goodwe_steering_enabled: bool = Field(True, alias="GOODWE_STEERING_ENABLED")
 
     latitude: float = Field(52.3676, alias="MINYAD_LATITUDE")
     longitude: float = Field(4.9041, alias="MINYAD_LONGITUDE")
