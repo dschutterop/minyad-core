@@ -31,6 +31,9 @@ def parse_dsmr_message(topic: str, payload: bytes) -> dict[str, Any]:
     except json.JSONDecodeError:
         return parse_dsmr_payload(payload)
     if isinstance(data, dict):
+        topic_reading = _parse_json_topic_value(topic, data)
+        if topic_reading is not None:
+            return topic_reading
         return _parse_dsmr_json(data)
     return _parse_scalar_topic(topic, data)
 
@@ -58,6 +61,33 @@ def parse_dsmr_payload(payload: bytes) -> dict[str, Any]:
             "export_kwh_t2": parsed.get("export_kwh_t2"),
             "raw": parsed["raw"],
         }
+
+
+def _parse_json_topic_value(topic: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    normalized_topic = _normalize_key(topic)
+    if not (_is_import_topic(normalized_topic) or _is_export_topic(normalized_topic)):
+        return None
+
+    value = _first(data, "value", "state", "measurement")
+    if value is None:
+        return None
+
+    unit = _first(data, "unit", "uom")
+    watts = _number_with_unit(value, unit, default_multiplier=_default_scalar_multiplier(value))
+    import_w, export_w = _exclusive_grid_power(
+        watts if _is_import_topic(normalized_topic) else 0,
+        watts if _is_export_topic(normalized_topic) else 0,
+    )
+    return {
+        "timestamp": _parse_ts(data.get("timestamp") or data.get("time")),
+        "import_w": import_w,
+        "export_w": export_w,
+        "import_kwh_t1": None,
+        "import_kwh_t2": None,
+        "export_kwh_t1": None,
+        "export_kwh_t2": None,
+        "raw": {"topic": topic, "value": value, "payload": data},
+    }
 
 
 def _parse_dsmr_json(data: dict[str, Any]) -> dict[str, Any]:
