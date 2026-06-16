@@ -262,3 +262,35 @@ def test_disabled_goodwe_client_skips_steering_calls(caplog):
     assert "skipping charge target 1200W" in caplog.text
     assert "skipping discharge target 500W" in caplog.text
     assert "skipping idle command" in caplog.text
+
+
+def test_dsmr_mqtt_debug_enables_paho_logger():
+    from minyad.ingest.dsmr import _configure_mqtt_debug
+
+    class FakeMqttClient:
+        def __init__(self):
+            self.logger = None
+
+        def enable_logger(self, logger):
+            self.logger = logger
+
+    client = FakeMqttClient()
+    _configure_mqtt_debug(client, True)
+
+    assert client.logger.name == "minyad.ingest.dsmr.mqtt"
+
+
+def test_dsmr_mqtt_debug_disabled_leaves_paho_logger_off():
+    from minyad.ingest.dsmr import _configure_mqtt_debug
+
+    class FakeMqttClient:
+        def __init__(self):
+            self.enabled = False
+
+        def enable_logger(self, logger):
+            self.enabled = True
+
+    client = FakeMqttClient()
+    _configure_mqtt_debug(client, False)
+
+    assert client.enabled is False

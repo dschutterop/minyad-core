@@ -296,6 +296,13 @@ def _log_dsmr_reading(topic: str, payload: bytes, reading: dict[str, Any]) -> No
         )
 
 
+def _configure_mqtt_debug(client: mqtt.Client, debug_messages: bool) -> None:
+    if not debug_messages:
+        return
+    client.enable_logger(logging.getLogger("minyad.ingest.dsmr.mqtt"))
+    LOG.debug("Enabled verbose DSMR MQTT client logging")
+
+
 def main() -> None:
     configure_logging()
     cfg = get_config()
@@ -303,6 +310,7 @@ def main() -> None:
         LOG.info("DSMR ingestion is disabled; exiting")
         return
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="minyad-dsmr-consumer")
+    _configure_mqtt_debug(client, cfg.debug_messages)
     if cfg.mqtt_username:
         client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
 
@@ -315,6 +323,13 @@ def main() -> None:
             update_status(conn, "dsmr", "connected", {"topic": cfg.dsmr_mqtt_topic})
 
     def on_message(_client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
+        LOG.debug(
+            "Received DSMR MQTT message topic=%s payload_bytes=%s qos=%s retain=%s",
+            message.topic,
+            len(message.payload),
+            message.qos,
+            message.retain,
+        )
         try:
             reading = parse_dsmr_message(message.topic, message.payload)
             _log_dsmr_reading(message.topic, message.payload, reading)
@@ -336,8 +351,36 @@ def main() -> None:
             with connect() as conn:
                 update_status(conn, "dsmr", "error", {"error": str(exc)})
 
+    def on_subscribe(
+        _client: mqtt.Client,
+        _userdata: Any,
+        mid: int,
+        reason_codes: Any,
+        _properties: Any = None,
+    ) -> None:
+        LOG.debug(
+            "Subscribed to DSMR MQTT topic=%s mid=%s reason_codes=%s",
+            cfg.dsmr_mqtt_topic,
+            mid,
+            reason_codes,
+        )
+
+    def on_disconnect(
+        _client: mqtt.Client,
+        _userdata: Any,
+        disconnect_flags: Any,
+        reason_code: Any,
+        _properties: Any = None,
+    ) -> None:
+        LOG.info(
+            "Disconnected from MQTT broker %s:%s: %s", cfg.mqtt_host, cfg.mqtt_port, reason_code
+        )
+        LOG.debug("DSMR MQTT disconnect flags=%s", disconnect_flags)
+
     client.on_connect = on_connect
     client.on_message = on_message
+    client.on_subscribe = on_subscribe
+    client.on_disconnect = on_disconnect
     client.connect(cfg.mqtt_host, cfg.mqtt_port, keepalive=60)
     client.loop_forever()
 
