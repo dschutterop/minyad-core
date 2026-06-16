@@ -23,21 +23,24 @@ OBIS_PATTERNS = {
 }
 
 
+def parse_dsmr_message(topic: str, payload: bytes) -> dict[str, Any]:
+    text = payload.decode("utf-8", errors="replace")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return parse_dsmr_payload(payload)
+    if isinstance(data, dict):
+        return _parse_dsmr_json(data)
+    return _parse_scalar_topic(topic, data)
+
+
 def parse_dsmr_payload(payload: bytes) -> dict[str, Any]:
     text = payload.decode("utf-8", errors="replace")
     try:
         data = json.loads(text)
-        import_w, export_w = _grid_power(data)
-        return {
-            "timestamp": _parse_ts(data.get("timestamp") or data.get("time")),
-            "import_w": import_w,
-            "export_w": export_w,
-            "import_kwh_t1": _first(data, "import_kwh_t1", "electricity_delivered_1"),
-            "import_kwh_t2": _first(data, "import_kwh_t2", "electricity_delivered_2"),
-            "export_kwh_t1": _first(data, "export_kwh_t1", "electricity_returned_1"),
-            "export_kwh_t2": _first(data, "export_kwh_t2", "electricity_returned_2"),
-            "raw": data,
-        }
+        if not isinstance(data, dict):
+            return _parse_scalar_topic("", data)
+        return _parse_dsmr_json(data)
     except json.JSONDecodeError:
         parsed: dict[str, Any] = {"timestamp": utc_now(), "raw": {"telegram": text}}
         for key, pattern in OBIS_PATTERNS.items():
@@ -54,6 +57,45 @@ def parse_dsmr_payload(payload: bytes) -> dict[str, Any]:
             "export_kwh_t2": parsed.get("export_kwh_t2"),
             "raw": parsed["raw"],
         }
+
+
+
+def _parse_dsmr_json(data: dict[str, Any]) -> dict[str, Any]:
+    import_w, export_w = _grid_power(data)
+    return {
+        "timestamp": _parse_ts(data.get("timestamp") or data.get("time")),
+        "import_w": import_w,
+        "export_w": export_w,
+        "import_kwh_t1": _first(data, "import_kwh_t1", "electricity_delivered_1"),
+        "import_kwh_t2": _first(data, "import_kwh_t2", "electricity_delivered_2"),
+        "export_kwh_t1": _first(data, "export_kwh_t1", "electricity_returned_1"),
+        "export_kwh_t2": _first(data, "export_kwh_t2", "electricity_returned_2"),
+        "raw": data,
+    }
+
+
+def _parse_scalar_topic(topic: str, value: Any) -> dict[str, Any]:
+    normalized_topic = _normalize_key(topic)
+    watts = _number_with_unit(value, None, default_multiplier=_default_scalar_multiplier(value))
+    is_export = any(part in normalized_topic for part in ("returned", "return", "export", "production", "produced"))
+    is_import = any(part in normalized_topic for part in ("delivered", "import", "consumption", "consumed"))
+    return {
+        "timestamp": utc_now(),
+        "import_w": watts if is_import or not is_export else 0,
+        "export_w": watts if is_export else 0,
+        "import_kwh_t1": None,
+        "import_kwh_t2": None,
+        "export_kwh_t1": None,
+        "export_kwh_t2": None,
+        "raw": {"topic": topic, "value": value},
+    }
+
+
+def _default_scalar_multiplier(value: Any) -> int:
+    try:
+        return 1000 if abs(float(str(value).strip().replace(",", "."))) < 100 else 1
+    except (TypeError, ValueError):
+        return 1
 
 
 def _first(data: dict[str, Any], *keys: str) -> Any:
@@ -257,7 +299,7 @@ def main() -> None:
 
     def on_message(_client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         try:
-            reading = parse_dsmr_payload(message.payload)
+            reading = parse_dsmr_message(message.topic, message.payload)
             _log_dsmr_reading(message.topic, message.payload, reading)
             with connect() as conn:
                 insert_reading(conn, "grid_readings", reading)

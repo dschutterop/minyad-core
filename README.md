@@ -99,8 +99,9 @@ De code gebruikt primair de community `goodwe` Python library voor lokale runtim
 
 ## DSMR MQTT payloads
 
-De consumer ondersteunt twee vormen:
+De consumer ondersteunt drie vormen:
 
+- Losse numerieke MQTT-topicwaarden, bijvoorbeeld `dsmr/reading/electricity_currently_delivered` of `dsmr/reading/electricity_currently_returned`, waarbij de topicnaam bepaalt of de waarde import of export is.
 - Raw DSMR telegram met OBIS-codes `1-0:1.7.0`, `1-0:2.7.0`, `1-0:1.8.1/2`, `1-0:2.8.1/2`.
 - JSON met bijvoorbeeld `import_w`, `export_w`, `import_kwh_t1`, `import_kwh_t2`, `export_kwh_t1`, `export_kwh_t2`. De DSMR-parser accepteert ook gangbare P1/Home Assistant-varianten zoals `electricity_currently_delivered`, `electricity_currently_returned`, geneste `{ "value": ..., "unit": "W" }`-velden en `consumption.power`/`production.power`.
 
