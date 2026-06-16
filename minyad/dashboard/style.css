@@ -15,3 +15,8 @@ span { color: #bfd0ee; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: .65rem; border-bottom: 1px solid #29364f; text-align: left; vertical-align: top; }
 .ok { color: #86efac; } .error { color: #fca5a5; } .connected { color: #93c5fd; }
+
+#gridCard { transition: border-color .2s ease, box-shadow .2s ease; }
+#gridCard.grid-returning { border-color: #22c55e; box-shadow: 0 0 0 1px #22c55e66, 0 10px 30px #0004; }
+#gridCard.grid-consuming { border-color: #f97316; box-shadow: 0 0 0 1px #f9731666, 0 10px 30px #0004; }
+#gridCard.grid-consuming-high { border-color: #ef4444; box-shadow: 0 0 0 1px #ef444466, 0 10px 30px #0004; }
