@@ -98,6 +98,21 @@ def test_parse_dsmr_scalar_export_topic_uses_topic_context():
     assert reading["export_w"] == 125
 
 
+def test_parse_dsmr_scalar_cumulative_topics_are_not_grid_power():
+    from minyad.ingest.dsmr import _is_scalar_grid_power_reading
+
+    reading = parse_dsmr_message("dsmr/reading/electricity_delivered_1", b"34619.700")
+
+    assert reading["import_w"] == 0
+    assert reading["export_w"] == 0
+    assert _is_scalar_grid_power_reading(reading) is False
+
+
+def test_parse_dsmr_scalar_current_low_kw_value_uses_topic_value():
+    reading = parse_dsmr_message("dsmr/reading/electricity_currently_delivered", b"0.013")
+
+    assert reading["import_w"] == 13
+    assert reading["export_w"] == 0
 
 def test_dsmr_current_power_state_merges_separate_current_topics():
     from minyad.ingest.dsmr import DsmrCurrentPowerState
