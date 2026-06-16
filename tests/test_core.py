@@ -76,14 +76,14 @@ def test_parse_dsmr_json_nested_value_units():
     payload = b'{"timestamp":"2026-06-15T22:57:05Z","electricity_currently_delivered":{"value":734,"unit":"W"},"electricity_currently_returned":{"value":0.125,"unit":"kW"}}'
     reading = parse_dsmr_payload(payload)
     assert reading["import_w"] == 734
-    assert reading["export_w"] == 125
+    assert reading["export_w"] == 0
 
 
 def test_parse_dsmr_json_consumption_production_power_aliases():
     payload = b'{"timestamp":"2026-06-15T22:57:05Z","consumption":{"power":{"value":1001,"unit":"W"}},"production":{"power":"0.250 kW"}}'
     reading = parse_dsmr_payload(payload)
     assert reading["import_w"] == 1001
-    assert reading["export_w"] == 250
+    assert reading["export_w"] == 0
 
 
 def test_parse_dsmr_scalar_import_topic_uses_topic_context():
@@ -97,6 +97,41 @@ def test_parse_dsmr_scalar_export_topic_uses_topic_context():
     assert reading["import_w"] == 0
     assert reading["export_w"] == 125
 
+
+
+def test_dsmr_current_power_state_merges_separate_current_topics():
+    from minyad.ingest.dsmr import DsmrCurrentPowerState
+
+    state = DsmrCurrentPowerState()
+
+    delivered = state.merge(
+        parse_dsmr_message("dsmr/reading/electricity_currently_delivered", b"2.734")
+    )
+    returned_zero = state.merge(
+        parse_dsmr_message("dsmr/reading/electricity_currently_returned", b"0.0")
+    )
+    returned = state.merge(
+        parse_dsmr_message("dsmr/reading/electricity_currently_returned", b"0.125")
+    )
+    delivered_zero = state.merge(
+        parse_dsmr_message("dsmr/reading/electricity_currently_delivered", b"0.0")
+    )
+
+    assert delivered["import_w"] == 2734
+    assert delivered["export_w"] == 0
+    assert returned_zero["import_w"] == 2734
+    assert returned_zero["export_w"] == 0
+    assert returned["import_w"] == 0
+    assert returned["export_w"] == 125
+    assert delivered_zero["import_w"] == 0
+    assert delivered_zero["export_w"] == 125
+
+
+def test_parse_dsmr_json_current_power_is_exclusive():
+    payload = b'{"timestamp":"2026-06-15T22:57:05Z","electricity_currently_delivered":0.050,"electricity_currently_returned":0.125}'
+    reading = parse_dsmr_payload(payload)
+    assert reading["import_w"] == 0
+    assert reading["export_w"] == 125
 
 def test_decision_zero_export_charges_battery():
     decision = decide(
