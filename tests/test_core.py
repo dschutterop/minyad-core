@@ -294,3 +294,17 @@ def test_dsmr_mqtt_debug_disabled_leaves_paho_logger_off():
     _configure_mqtt_debug(client, False)
 
     assert client.enabled is False
+
+
+def test_dsmr_subscription_topics_include_base_and_descendants():
+    from minyad.ingest.dsmr import _dsmr_subscription_topics
+
+    assert _dsmr_subscription_topics("dsmr/reading") == ["dsmr/reading", "dsmr/reading/#"]
+    assert _dsmr_subscription_topics("dsmr/reading/") == ["dsmr/reading", "dsmr/reading/#"]
+
+
+def test_dsmr_subscription_topics_preserve_explicit_wildcards():
+    from minyad.ingest.dsmr import _dsmr_subscription_topics
+
+    assert _dsmr_subscription_topics("dsmr/+/power") == ["dsmr/+/power"]
+    assert _dsmr_subscription_topics("dsmr/#") == ["dsmr/#"]

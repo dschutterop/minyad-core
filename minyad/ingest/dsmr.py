@@ -296,6 +296,15 @@ def _log_dsmr_reading(topic: str, payload: bytes, reading: dict[str, Any]) -> No
         )
 
 
+def _dsmr_subscription_topics(base_topic: str) -> list[str]:
+    topic = base_topic.strip().rstrip("/")
+    if not topic:
+        return ["#"]
+    if "+" in topic or "#" in topic:
+        return [topic]
+    return [topic, f"{topic}/#"]
+
+
 def _configure_mqtt_debug(client: mqtt.Client, debug_messages: bool) -> None:
     if not debug_messages:
         return
@@ -318,9 +327,12 @@ def main() -> None:
         client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any = None
     ) -> None:
         LOG.info("Connected to MQTT broker %s:%s: %s", cfg.mqtt_host, cfg.mqtt_port, reason_code)
-        client.subscribe(cfg.dsmr_mqtt_topic)
+        topics = _dsmr_subscription_topics(cfg.dsmr_mqtt_topic)
+        for topic in topics:
+            client.subscribe(topic)
+        LOG.info("Subscribed to DSMR MQTT topics: %s", ", ".join(topics))
         with connect() as conn:
-            update_status(conn, "dsmr", "connected", {"topic": cfg.dsmr_mqtt_topic})
+            update_status(conn, "dsmr", "connected", {"topics": topics})
 
     def on_message(_client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         LOG.debug(
@@ -359,7 +371,7 @@ def main() -> None:
         _properties: Any = None,
     ) -> None:
         LOG.debug(
-            "Subscribed to DSMR MQTT topic=%s mid=%s reason_codes=%s",
+            "Subscribed to DSMR MQTT base_topic=%s mid=%s reason_codes=%s",
             cfg.dsmr_mqtt_topic,
             mid,
             reason_codes,
