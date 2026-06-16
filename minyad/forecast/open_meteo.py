@@ -7,6 +7,7 @@ import httpx
 
 from minyad.common.config import get_config
 from minyad.common.db import bulk_insert_forecast, connect, get_settings, setting_int
+from minyad.common.logging import configure_logging
 from minyad.common.retry import with_backoff
 from minyad.common.status import update_status
 from minyad.common.time import ensure_utc, utc_now
@@ -39,7 +40,9 @@ def fetch_open_meteo(hours: int) -> dict[str, Any]:
 def predicted_power_w(ghi_wm2: float, cloud_cover_pct: float) -> int:
     cfg = get_config()
     cloud_factor = max(0.15, 1 - (cloud_cover_pct / 100) * 0.35)
-    return max(0, int(ghi_wm2 / 1000 * cfg.pv_peak_kw * 1000 * cfg.pv_performance_ratio * cloud_factor))
+    return max(
+        0, int(ghi_wm2 / 1000 * cfg.pv_peak_kw * 1000 * cfg.pv_performance_ratio * cloud_factor)
+    )
 
 
 def forecast_rows(payload: dict[str, Any], lookahead_h: int) -> list[dict[str, Any]]:
@@ -80,7 +83,7 @@ def refresh_once() -> int:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    configure_logging()
     while True:
         interval = 21600
         try:

@@ -13,6 +13,7 @@ from minyad.common.db import (
     setting_float,
     setting_int,
 )
+from minyad.common.logging import configure_logging
 from minyad.common.status import update_status
 from minyad.common.time import utc_now
 from minyad.integrations.enphase import EnphaseClient
@@ -47,7 +48,12 @@ def decide(
     forecast: list[dict[str, Any]],
 ) -> Decision:
     if not grid or not solar or not battery:
-        return Decision("missing_data", "idle", 0, {"grid": bool(grid), "solar": bool(solar), "battery": bool(battery)})
+        return Decision(
+            "missing_data",
+            "idle",
+            0,
+            {"grid": bool(grid), "solar": bool(solar), "battery": bool(battery)},
+        )
 
     import_w = int(grid.get("import_w") or 0)
     export_w = int(grid.get("export_w") or 0)
@@ -66,7 +72,9 @@ def decide(
     max_discharge = setting_int(settings, "battery_max_discharge_w", 4600)
     low_solar_kwh = setting_float(settings, "low_solar_forecast_kwh", 8.0)
     forecast_floor = setting_float(settings, "min_forecast_soc_pct", 35)
-    effective_min_soc = max(min_soc, forecast_floor) if tomorrow_forecast_kwh(forecast) < low_solar_kwh else min_soc
+    effective_min_soc = (
+        max(min_soc, forecast_floor) if tomorrow_forecast_kwh(forecast) < low_solar_kwh else min_soc
+    )
 
     details = {
         "grid_import_w": import_w,
@@ -120,6 +128,20 @@ def apply_decision(
     return None
 
 
+class DisabledGoodWeClient(GoodWeClient):
+    def read_state(self) -> None:
+        raise RuntimeError("GoodWe steering client does not support reads")
+
+    def set_charge_power(self, watts: int) -> None:
+        LOG.info("GoodWe steering disabled; skipping charge target %sW", watts)
+
+    def set_discharge_power(self, watts: int) -> None:
+        LOG.info("GoodWe steering disabled; skipping discharge target %sW", watts)
+
+    def set_idle(self) -> None:
+        LOG.info("GoodWe steering disabled; skipping idle command")
+
+
 def run_once(client: GoodWeClient, enphase_client: EnphaseClient | None = None) -> Decision:
     with connect() as conn:
         settings = get_settings(conn)
@@ -142,15 +164,26 @@ def run_once(client: GoodWeClient, enphase_client: EnphaseClient | None = None) 
                 "details": decision.details,
             },
         )
-        update_status(conn, "control", "ok", {"action": decision.action, "target_w": decision.target_w})
+        update_status(
+            conn, "control", "ok", {"action": decision.action, "target_w": decision.target_w}
+        )
     return decision
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    configure_logging()
     config = get_config()
-    client = build_goodwe_client(config)
-    enphase_client = EnphaseClient(config)
+    client: GoodWeClient
+    if config.goodwe_steering_enabled:
+        client = build_goodwe_client(config)
+    else:
+        LOG.info("GoodWe steering is disabled by GOODWE_STEERING_ENABLED=false")
+        client = DisabledGoodWeClient()
+    if config.enphase_steering_enabled:
+        enphase_client: EnphaseClient | None = EnphaseClient(config)
+    else:
+        LOG.info("Enphase steering is disabled by ENPHASE_STEERING_ENABLED=false")
+        enphase_client = None
     while True:
         interval = 10
         try:
