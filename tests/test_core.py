@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from minyad.control.loop import decide
-from minyad.ingest.dsmr import parse_dsmr_payload
+from minyad.ingest.dsmr import parse_dsmr_message, parse_dsmr_payload
 from minyad.integrations.enphase import POWER_STATUS_PATH, EnphaseClient, EnphasePowerStatus
 
 
@@ -84,6 +84,18 @@ def test_parse_dsmr_json_consumption_production_power_aliases():
     reading = parse_dsmr_payload(payload)
     assert reading["import_w"] == 1001
     assert reading["export_w"] == 250
+
+
+def test_parse_dsmr_scalar_import_topic_uses_topic_context():
+    reading = parse_dsmr_message("dsmr/reading/electricity_currently_delivered", b"2.734")
+    assert reading["import_w"] == 2734
+    assert reading["export_w"] == 0
+
+
+def test_parse_dsmr_scalar_export_topic_uses_topic_context():
+    reading = parse_dsmr_message("dsmr/reading/electricity_currently_returned", b"0.125")
+    assert reading["import_w"] == 0
+    assert reading["export_w"] == 125
 
 
 def test_decision_zero_export_charges_battery():
