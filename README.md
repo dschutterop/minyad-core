@@ -32,6 +32,9 @@ Alle timestamps worden UTC opgeslagen. Het dashboard toont lokale tijden met `Eu
 2. Vul minimaal deze waarden in `.env` in:
 
    - `MQTT_HOST`, `MQTT_PORT`, `DSMR_MQTT_TOPIC`
+   - `DSMR_INGESTION_ENABLED`, `ENPHASE_INGESTION_ENABLED`, `GOODWE_INGESTION_ENABLED` om databronnen aan/uit te zetten
+   - `ENPHASE_STEERING_ENABLED`, `GOODWE_STEERING_ENABLED` om actuator-aansturing aan/uit te zetten
+   - `DEBUG_MESSAGES` voor extra verbose debug logging
    - `ENVOY_HOST`, `ENVOY_USERNAME`, `ENVOY_PASSWORD`
    - `ENPHASE_GATEWAY_IP`, `ENPHASE_TOKEN`
    - `GOODWE_HOST`
@@ -48,6 +51,21 @@ Alle timestamps worden UTC opgeslagen. Het dashboard toont lokale tijden met `Eu
 
    - Dashboard: `http://<MINYAD_BIND_IP>:<MINYAD_DASHBOARD_HOST_PORT>` (standaard `18080`)
    - API: `http://<MINYAD_BIND_IP>:<MINYAD_API_HOST_PORT>/api/status` (standaard `18000`)
+
+## `.env` feature toggles en logging
+
+De integraties kunnen per rol worden aan- en uitgezet zonder codewijziging:
+
+| Variabele | Default | Effect |
+| --- | --- | --- |
+| `DSMR_INGESTION_ENABLED` | `true` | Start of stopt de DSMR MQTT consumer voor grid-metingen. |
+| `ENPHASE_INGESTION_ENABLED` | `true` | Start of stopt de Enphase productie-poller. |
+| `GOODWE_INGESTION_ENABLED` | `true` | Start of stopt de GoodWe batterij-poller. |
+| `ENPHASE_STEERING_ENABLED` | `true` | Staat Enphase curtailment-commando's vanuit de control loop toe. |
+| `GOODWE_STEERING_ENABLED` | `true` | Staat GoodWe laad/ontlaad/idle-commando's vanuit de control loop toe. |
+| `DEBUG_MESSAGES` | `false` | Zet de Python logging level op `DEBUG` voor extra diagnoseberichten. |
+
+Als alle ingestion toggles op `false` staan, eindigt `minyad-ingest` zonder workers te starten. Als steering uit staat, blijft de control loop beslissingen en control-logregels maken, maar worden de bijbehorende apparaatcommando's overgeslagen.
 
 ## Service-bindings
 

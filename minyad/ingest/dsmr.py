@@ -8,6 +8,7 @@ import paho.mqtt.client as mqtt
 
 from minyad.common.config import get_config
 from minyad.common.db import connect, insert_reading
+from minyad.common.logging import configure_logging
 from minyad.common.status import update_status
 from minyad.common.time import ensure_utc, utc_now
 
@@ -59,7 +60,6 @@ def parse_dsmr_payload(payload: bytes) -> dict[str, Any]:
         }
 
 
-
 def _parse_dsmr_json(data: dict[str, Any]) -> dict[str, Any]:
     import_w, export_w = _grid_power(data)
     return {
@@ -77,8 +77,13 @@ def _parse_dsmr_json(data: dict[str, Any]) -> dict[str, Any]:
 def _parse_scalar_topic(topic: str, value: Any) -> dict[str, Any]:
     normalized_topic = _normalize_key(topic)
     watts = _number_with_unit(value, None, default_multiplier=_default_scalar_multiplier(value))
-    is_export = any(part in normalized_topic for part in ("returned", "return", "export", "production", "produced"))
-    is_import = any(part in normalized_topic for part in ("delivered", "import", "consumption", "consumed"))
+    is_export = any(
+        part in normalized_topic
+        for part in ("returned", "return", "export", "production", "produced")
+    )
+    is_import = any(
+        part in normalized_topic for part in ("delivered", "import", "consumption", "consumed")
+    )
     return {
         "timestamp": utc_now(),
         "import_w": watts if is_import or not is_export else 0,
@@ -192,7 +197,9 @@ def _split_signed_power(watts: int) -> tuple[int, int]:
     return max(0, watts), max(0, -watts)
 
 
-def _power_w(data: dict[str, Any], watt_keys: tuple[str, ...], kilowatt_keys: tuple[str, ...]) -> int:
+def _power_w(
+    data: dict[str, Any], watt_keys: tuple[str, ...], kilowatt_keys: tuple[str, ...]
+) -> int:
     normalized = _flatten(data)
     watt_value = _first(data, *watt_keys)
     if watt_value is not None:
@@ -274,7 +281,12 @@ def _log_dsmr_reading(topic: str, payload: bytes, reading: dict[str, Any]) -> No
         reading.get("export_kwh_t2"),
         details.get("format"),
     )
-    LOG.debug("DSMR payload details topic=%s details=%s preview=%s", topic, details, _payload_preview(payload))
+    LOG.debug(
+        "DSMR payload details topic=%s details=%s preview=%s",
+        topic,
+        details,
+        _payload_preview(payload),
+    )
     if not reading.get("import_w") and not reading.get("export_w"):
         LOG.warning(
             "DSMR reading has zero import/export; topic=%s details=%s preview=%s",
@@ -285,13 +297,18 @@ def _log_dsmr_reading(topic: str, payload: bytes, reading: dict[str, Any]) -> No
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    configure_logging()
     cfg = get_config()
+    if not cfg.dsmr_ingestion_enabled:
+        LOG.info("DSMR ingestion is disabled; exiting")
+        return
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="minyad-dsmr-consumer")
     if cfg.mqtt_username:
         client.username_pw_set(cfg.mqtt_username, cfg.mqtt_password)
 
-    def on_connect(client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any = None) -> None:
+    def on_connect(
+        client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any = None
+    ) -> None:
         LOG.info("Connected to MQTT broker %s:%s: %s", cfg.mqtt_host, cfg.mqtt_port, reason_code)
         client.subscribe(cfg.dsmr_mqtt_topic)
         with connect() as conn:
