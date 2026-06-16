@@ -220,8 +220,77 @@ def test_enphase_hysteresis_blocks_fast_reverse_switch(monkeypatch):
 
     monkeypatch.setattr(client, "get_power_status", lambda: statuses.pop(0))
     monkeypatch.setattr("minyad.integrations.enphase.time.monotonic", lambda: next(times))
-    monkeypatch.setattr(client, "_control_request", lambda *args, **kwargs: sent.append((args, kwargs)) or {})
+    monkeypatch.setattr(
+        client, "_control_request", lambda *args, **kwargs: sent.append((args, kwargs)) or {}
+    )
 
     assert client.set_production_limit(0) is True
     assert client.set_production_limit(100) is False
     assert len(sent) == 1
+
+
+def test_env_booleans_control_integration_toggles():
+    from minyad.common.config import AppConfig
+
+    config = AppConfig(
+        _env_file=None,
+        DSMR_INGESTION_ENABLED="false",
+        ENPHASE_INGESTION_ENABLED="false",
+        ENPHASE_STEERING_ENABLED="false",
+        GOODWE_INGESTION_ENABLED="true",
+        GOODWE_STEERING_ENABLED="false",
+        DEBUG_MESSAGES="true",
+    )
+
+    assert config.dsmr_ingestion_enabled is False
+    assert config.enphase_ingestion_enabled is False
+    assert config.enphase_steering_enabled is False
+    assert config.goodwe_ingestion_enabled is True
+    assert config.goodwe_steering_enabled is False
+    assert config.debug_messages is True
+
+
+def test_disabled_goodwe_client_skips_steering_calls(caplog):
+    from minyad.control.loop import DisabledGoodWeClient
+
+    client = DisabledGoodWeClient()
+    with caplog.at_level("INFO"):
+        client.set_charge_power(1200)
+        client.set_discharge_power(500)
+        client.set_idle()
+
+    assert "skipping charge target 1200W" in caplog.text
+    assert "skipping discharge target 500W" in caplog.text
+    assert "skipping idle command" in caplog.text
+
+
+def test_dsmr_mqtt_debug_enables_paho_logger():
+    from minyad.ingest.dsmr import _configure_mqtt_debug
+
+    class FakeMqttClient:
+        def __init__(self):
+            self.logger = None
+
+        def enable_logger(self, logger):
+            self.logger = logger
+
+    client = FakeMqttClient()
+    _configure_mqtt_debug(client, True)
+
+    assert client.logger.name == "minyad.ingest.dsmr.mqtt"
+
+
+def test_dsmr_mqtt_debug_disabled_leaves_paho_logger_off():
+    from minyad.ingest.dsmr import _configure_mqtt_debug
+
+    class FakeMqttClient:
+        def __init__(self):
+            self.enabled = False
+
+        def enable_logger(self, logger):
+            self.enabled = True
+
+    client = FakeMqttClient()
+    _configure_mqtt_debug(client, False)
+
+    assert client.enabled is False
