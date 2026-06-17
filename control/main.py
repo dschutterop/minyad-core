@@ -10,7 +10,6 @@ from typing import Any
 from sqlalchemy import text
 
 from hysteresis import HysteresisController, OverrideMode
-from inverter import GoodWeInverter, InverterSettings, InverterUnavailable
 from shared.db import AsyncSessionLocal
 from shared.mqtt_client import MinyadMqttClient
 from state import ControlState
@@ -20,13 +19,23 @@ LOGGER = logging.getLogger(__name__)
 
 STATUS_PREFIX = "battery.status."
 DEFAULT_SETPOINT_W = 0
+BRIDGE_OFFLINE_STATUSES = {"offline", "error"}
+BATTERY_TOPIC_TYPES = {
+    "soc": int,
+    "soh": int,
+    "power_w": int,
+    "voltage": float,
+    "mode": int,
+    "mode_label": str,
+    "charge_i": int,
+}
 
 
 async def load_settings() -> dict[str, Any]:
     async with AsyncSessionLocal() as session:
         result = await session.execute(text("select key, value from settings where key like 'battery.%'"))
         rows = {row.key.removeprefix("battery."): row.value for row in result}
-    int_keys = {"start_w", "stop_w", "start_duration", "stop_duration", "cooldown", "max_charge_w", "max_charge_a", "inverter_retries", "inverter_delay"}
+    int_keys = {"start_w", "stop_w", "start_duration", "stop_duration", "cooldown", "max_charge_w", "max_charge_a"}
     return {key: int(value) if key in int_keys else value for key, value in rows.items() if not key.startswith("status.")}
 
 
@@ -56,9 +65,9 @@ class ControlApp:
     def __init__(self) -> None:
         self.mqtt = MinyadMqttClient("minyad-control")
         self.controller: HysteresisController | None = None
-        self.inverter: GoodWeInverter | None = None
         self.settings: dict[str, Any] = {}
         self.setpoint_w = DEFAULT_SETPOINT_W
+        self.bridge_status = "offline"
         self.loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
@@ -67,19 +76,13 @@ class ControlApp:
         await self.apply_override(await load_override())
         self.mqtt.start()
         self.mqtt.subscribe("minyad/dsmr/net_power_w", self._on_mqtt)
+        self.mqtt.subscribe("minyad/battery/+", self._on_mqtt)
+        self.mqtt.subscribe("minyad/bridge/+", self._on_mqtt)
         self.mqtt.subscribe("minyad/control/override", self._on_mqtt)
-        await asyncio.gather(self.poll_battery(), self.publish_state_loop())
+        await self.publish_state_loop()
 
     async def reload_settings(self) -> None:
         self.settings = await load_settings()
-        self.inverter = GoodWeInverter(
-            InverterSettings(
-                inverter_ip=str(self.settings["inverter_ip"]),
-                inverter_retries=int(self.settings["inverter_retries"]),
-                inverter_delay=int(self.settings["inverter_delay"]),
-                max_charge_a=min(30, int(self.settings["max_charge_a"])),
-            )
-        )
         self.controller = HysteresisController(
             start_w=int(self.settings["start_w"]),
             stop_w=int(self.settings["stop_w"]),
@@ -107,26 +110,71 @@ class ControlApp:
         self.loop.call_soon_threadsafe(asyncio.create_task, self.handle_message(topic, payload))
 
     async def handle_message(self, topic: str, payload: bytes) -> None:
+        decoded = payload.decode()
         if topic == "minyad/dsmr/net_power_w":
-            surplus = int(payload.decode())
-            if self.controller:
+            surplus = int(decoded)
+            if self.controller and self.bridge_is_available:
                 state = self.controller.tick(surplus)
                 if state:
                     await self.publish_state(state)
             return
         if topic == "minyad/control/override":
-            command = json.loads(payload.decode())
+            command = json.loads(decoded)
             if command.get("mode") == "reload_settings":
                 await self.reload_settings()
             else:
                 await self.apply_override(command)
+            return
+        if topic.startswith("minyad/bridge/"):
+            await self.handle_bridge_topic(topic, decoded)
+            return
+        if topic.startswith("minyad/battery/"):
+            await self.handle_battery_topic(topic, decoded)
+            return
 
-    async def _mark_inverter_unavailable(self, exc: InverterUnavailable) -> None:
-        LOGGER.warning("Inverter unavailable: %s", exc)
-        await store_status(available=False, error=str(exc))
+    async def handle_battery_topic(self, topic: str, payload: str) -> None:
+        measurement = topic.removeprefix("minyad/battery/")
+        value_type = BATTERY_TOPIC_TYPES.get(measurement)
+        if value_type is None:
+            LOGGER.debug("Ignoring unsupported battery topic %s", topic)
+            return
+        await store_status(**{measurement: value_type(payload)})
+
+    async def handle_bridge_topic(self, topic: str, payload: str) -> None:
+        measurement = topic.removeprefix("minyad/bridge/")
+        if measurement == "status":
+            await self.handle_bridge_status(payload.strip().lower())
+            return
+        if measurement == "last_seen":
+            await store_status(bridge_last_seen=payload.strip())
+            return
+        LOGGER.debug("Ignoring unsupported bridge topic %s", topic)
+
+    @property
+    def bridge_is_available(self) -> bool:
+        return self.bridge_status not in BRIDGE_OFFLINE_STATUSES
+
+    async def handle_bridge_status(self, status: str) -> None:
+        self.bridge_status = status
+        await store_status(bridge_status=status, available=self.bridge_is_available)
+        if status in BRIDGE_OFFLINE_STATUSES:
+            LOGGER.warning("GoodWe bridge is %s; stopping control and suppressing setpoints", status)
+            self.setpoint_w = 0
+            self._force_controller_idle()
+            self.mqtt.publish_measurement("control", "command", "stop")
+            await self.publish_state(ControlState.IDLE, publish_setpoint=False)
+
+    def _force_controller_idle(self) -> None:
+        if self.controller is None:
+            return
+        with self.controller._lock:  # HysteresisController intentionally remains unchanged.
+            self.controller._state = ControlState.IDLE
+            self.controller._start_since = None
+            self.controller._stop_since = None
+            self.controller._cooldown_until = None
 
     async def apply_override(self, command: dict[str, Any]) -> None:
-        if not self.controller or not self.inverter:
+        if not self.controller:
             return
         mode = OverrideMode(command.get("mode", "none"))
         watts = int(command.get("watts") or 0)
@@ -136,62 +184,29 @@ class ControlApp:
             self.setpoint_w = 0
         else:
             self.controller.set_override(mode, int(duration) if duration else None)
-        try:
-            if mode is OverrideMode.FORCE_ON:
-                await self.inverter.set_charge_power(watts)
-                self.setpoint_w = watts
-            elif mode is OverrideMode.FORCE_OFF:
-                await self.inverter.stop_charging()
-                self.setpoint_w = 0
-            elif mode is OverrideMode.FORCE_DISCHARGE:
-                await self.inverter.stop_charging()
-                await self.inverter.set_discharge_power(watts)
-                self.setpoint_w = -watts
-            elif mode is OverrideMode.PAUSE:
-                await self.inverter.stop_charging()
-                self.setpoint_w = 0
-        except InverterUnavailable as exc:
-            await self._mark_inverter_unavailable(exc)
+        if mode is OverrideMode.FORCE_ON:
+            await self.publish_setpoint(watts)
+        elif mode in {OverrideMode.FORCE_OFF, OverrideMode.FORCE_DISCHARGE, OverrideMode.PAUSE}:
+            await self.stop_charging()
         await self.publish_state(self.controller.state)
 
     async def start_charging(self) -> None:
-        if self.inverter:
-            self.setpoint_w = int(self.settings["max_charge_w"])
-            try:
-                await self.inverter.set_charge_power(self.setpoint_w)
-            except InverterUnavailable as exc:
-                self.setpoint_w = 0
-                await self._mark_inverter_unavailable(exc)
+        await self.publish_setpoint(int(self.settings["max_charge_w"]))
 
     async def stop_charging(self) -> None:
-        if self.inverter:
-            try:
-                await self.inverter.stop_charging()
-            except InverterUnavailable as exc:
-                await self._mark_inverter_unavailable(exc)
-            self.setpoint_w = 0
+        self.setpoint_w = 0
+        self.mqtt.publish_measurement("control", "command", "stop")
+        if self.bridge_is_available:
+            self.mqtt.publish_measurement("control", "setpoint_w", 0)
 
-    async def poll_battery(self) -> None:
-        while True:
-            try:
-                if self.inverter and self.controller:
-                    status = await self.inverter.read_status()
-                    status.update(
-                        available=True,
-                        error="",
-                        state=self.controller.state.value,
-                        override_mode=self.controller.override_mode.value,
-                    )
-                    await store_status(**status)
-                    self.mqtt.publish_measurement("battery", "soc", status["soc"])
-                    self.mqtt.publish_measurement("battery", "power_w", status["power_w"])
-                    self.mqtt.publish_measurement("battery", "voltage", status["voltage"])
-            except InverterUnavailable as exc:
-                LOGGER.warning("Battery poll skipped: %s", exc)
-                await store_status(available=False, error=str(exc))
-            except Exception:
-                LOGGER.exception("Battery poll failed")
-            await asyncio.sleep(30)
+    async def publish_setpoint(self, watts: int) -> None:
+        if not self.bridge_is_available:
+            LOGGER.warning("GoodWe bridge is %s; setpoint %sW not published", self.bridge_status, watts)
+            self.setpoint_w = 0
+            return
+        self.setpoint_w = max(0, watts)
+        self.mqtt.publish_measurement("control", "command", "resume" if self.setpoint_w else "stop")
+        self.mqtt.publish_measurement("control", "setpoint_w", self.setpoint_w)
 
     async def publish_state_loop(self) -> None:
         while True:
@@ -199,12 +214,13 @@ class ControlApp:
                 await self.publish_state(self.controller.state)
             await asyncio.sleep(10)
 
-    async def publish_state(self, state: ControlState) -> None:
+    async def publish_state(self, state: ControlState, *, publish_setpoint: bool = True) -> None:
         mode = self.controller.override_mode.value if self.controller else "none"
         self.mqtt.publish_measurement("control", "state", state.value)
-        self.mqtt.publish_measurement("control", "setpoint_w", self.setpoint_w)
+        if publish_setpoint and self.bridge_is_available:
+            self.mqtt.publish_measurement("control", "setpoint_w", self.setpoint_w)
         self.mqtt.publish_measurement("control", "override_mode", mode)
-        await store_status(state=state.value, override_mode=mode)
+        await store_status(state=state.value, override_mode=mode, setpoint_w=self.setpoint_w)
 
 
 async def run_control_app() -> None:
