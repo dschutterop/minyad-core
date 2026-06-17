@@ -44,6 +44,24 @@ MQTT_STATUS_KEYS = {
     "minyad/control/setpoint_w": "setpoint_w",
     "minyad/control/discharge_w": "discharge_w",
 }
+
+GRID_STATUS_KEYS = {
+    "minyad/grid/delivered_w": "grid_delivered_w",
+    "minyad/grid/returned_w": "grid_returned_w",
+    "minyad/grid/net_power_w": "grid_net_power_w",
+    "minyad/grid/phase_delivered_l1_w": "grid_phase_delivered_l1_w",
+    "minyad/grid/phase_delivered_l2_w": "grid_phase_delivered_l2_w",
+    "minyad/grid/phase_delivered_l3_w": "grid_phase_delivered_l3_w",
+    "minyad/grid/phase_returned_l1_w": "grid_phase_returned_l1_w",
+    "minyad/grid/phase_returned_l2_w": "grid_phase_returned_l2_w",
+    "minyad/grid/phase_returned_l3_w": "grid_phase_returned_l3_w",
+    "minyad/grid/voltage_l1_v": "grid_voltage_l1_v",
+    "minyad/grid/voltage_l2_v": "grid_voltage_l2_v",
+    "minyad/grid/voltage_l3_v": "grid_voltage_l3_v",
+    "minyad/grid/timestamp": "grid_timestamp",
+    "minyad/grid/status": "grid_status",
+}
+MQTT_STATUS_KEYS.update(GRID_STATUS_KEYS)
 MQTT_STATUS_LOCK = Lock()
 MQTT_STATUS: dict[str, str] = {}
 RETAINED_STATUS_TIMEOUT_SECONDS = 1.0
@@ -157,7 +175,7 @@ def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOU
         LOGGER.debug("collect_retained_mqtt_status: connected, subscribing")
         client.loop_start()
         try:
-            for topic in ("minyad/battery/+", "minyad/bridge/+", "minyad/control/+"):
+            for topic in ("minyad/battery/+", "minyad/bridge/+", "minyad/control/+", "minyad/grid/+"):
                 client.subscribe(topic)
                 LOGGER.debug("collect_retained_mqtt_status: subscribed %s", topic)
             completed = received.wait(timeout_seconds)
@@ -188,6 +206,29 @@ def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOU
     }
     return retained_status
 
+
+
+def coerce_grid_status(payload: dict[str, Any]) -> dict[str, Any]:
+    coerced = dict(payload)
+    int_keys = {
+        "grid_delivered_w",
+        "grid_returned_w",
+        "grid_net_power_w",
+        "grid_phase_delivered_l1_w",
+        "grid_phase_delivered_l2_w",
+        "grid_phase_delivered_l3_w",
+        "grid_phase_returned_l1_w",
+        "grid_phase_returned_l2_w",
+        "grid_phase_returned_l3_w",
+    }
+    float_keys = {"grid_voltage_l1_v", "grid_voltage_l2_v", "grid_voltage_l3_v"}
+    for key in int_keys:
+        if coerced.get(key) not in (None, ""):
+            coerced[key] = int(coerced[key])
+    for key in float_keys:
+        if coerced.get(key) not in (None, ""):
+            coerced[key] = float(coerced[key])
+    return coerced
 
 def parse_bridge_last_seen(value: str | None) -> datetime | None:
     if not value:
@@ -274,6 +315,7 @@ async def startup() -> None:
     mqtt.subscribe("minyad/battery/+", handle_status_mqtt)
     mqtt.subscribe("minyad/bridge/+", handle_status_mqtt)
     mqtt.subscribe("minyad/control/+", handle_status_mqtt)
+    mqtt.subscribe("minyad/grid/+", handle_status_mqtt)
     asyncio.create_task(_refresh_debug_setting())
 
 
@@ -358,14 +400,14 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     LOGGER.debug("battery_status: db keys=%s", sorted(payload.keys()))
     mqtt_cache = latest_mqtt_status()
     LOGGER.debug("battery_status: mqtt cache keys=%s", sorted(mqtt_cache.keys()))
-    payload.update(mqtt_cache)
+    payload.update(coerce_grid_status(mqtt_cache))
     if cached_status_is_incomplete(payload):
         missing = [k for k in ("soc", "soh", "power_w", "voltage", "mode", "mode_label", "charge_i", "bridge_status", "bridge_last_seen") if not payload.get(k)]
         LOGGER.debug("battery_status: incomplete, missing=%s — attempting retained fetch", missing)
         try:
             retained = collect_retained_mqtt_status()
             LOGGER.debug("battery_status: retained fetch returned keys=%s", sorted(retained.keys()))
-            payload.update(retained)
+            payload.update(coerce_grid_status(retained))
         except OSError:
             LOGGER.exception("Unable to fetch retained MQTT status snapshot")
     else:
@@ -385,6 +427,18 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     enrich_bridge_health(payload)
     LOGGER.debug("battery_status: final keys=%s", sorted(payload.keys()))
     return payload
+
+
+
+@app.get("/dsmr/status")
+async def dsmr_status() -> dict[str, Any]:
+    grid_payload = {key: value for key, value in latest_mqtt_status().items() if key.startswith("grid_")}
+    if not grid_payload:
+        try:
+            grid_payload.update(collect_retained_mqtt_status())
+        except OSError:
+            LOGGER.exception("Unable to fetch retained MQTT grid snapshot")
+    return coerce_grid_status({key: value for key, value in grid_payload.items() if key.startswith("grid_")})
 
 
 @app.post("/battery/override")
