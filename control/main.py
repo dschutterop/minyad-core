@@ -20,6 +20,15 @@ LOGGER = logging.getLogger(__name__)
 STATUS_PREFIX = "battery.status."
 DEFAULT_SETPOINT_W = 0
 BRIDGE_OFFLINE_STATUSES = {"offline", "error"}
+BATTERY_TOPIC_TYPES = {
+    "soc": int,
+    "soh": int,
+    "power_w": int,
+    "voltage": float,
+    "mode": int,
+    "mode_label": str,
+    "charge_i": int,
+}
 
 
 async def load_settings() -> dict[str, Any]:
@@ -67,10 +76,8 @@ class ControlApp:
         await self.apply_override(await load_override())
         self.mqtt.start()
         self.mqtt.subscribe("minyad/dsmr/net_power_w", self._on_mqtt)
-        self.mqtt.subscribe("minyad/battery/soc", self._on_mqtt)
-        self.mqtt.subscribe("minyad/battery/voltage", self._on_mqtt)
-        self.mqtt.subscribe("minyad/battery/power_w", self._on_mqtt)
-        self.mqtt.subscribe("minyad/bridge/status", self._on_mqtt)
+        self.mqtt.subscribe("minyad/battery/+", self._on_mqtt)
+        self.mqtt.subscribe("minyad/bridge/+", self._on_mqtt)
         self.mqtt.subscribe("minyad/control/override", self._on_mqtt)
         await self.publish_state_loop()
 
@@ -118,18 +125,30 @@ class ControlApp:
             else:
                 await self.apply_override(command)
             return
-        if topic == "minyad/bridge/status":
-            await self.handle_bridge_status(decoded.strip().lower())
+        if topic.startswith("minyad/bridge/"):
+            await self.handle_bridge_topic(topic, decoded)
             return
-        if topic == "minyad/battery/soc":
-            await store_status(soc=int(decoded))
+        if topic.startswith("minyad/battery/"):
+            await self.handle_battery_topic(topic, decoded)
             return
-        if topic == "minyad/battery/voltage":
-            await store_status(voltage=float(decoded))
+
+    async def handle_battery_topic(self, topic: str, payload: str) -> None:
+        measurement = topic.removeprefix("minyad/battery/")
+        value_type = BATTERY_TOPIC_TYPES.get(measurement)
+        if value_type is None:
+            LOGGER.debug("Ignoring unsupported battery topic %s", topic)
             return
-        if topic == "minyad/battery/power_w":
-            await store_status(power_w=int(decoded))
+        await store_status(**{measurement: value_type(payload)})
+
+    async def handle_bridge_topic(self, topic: str, payload: str) -> None:
+        measurement = topic.removeprefix("minyad/bridge/")
+        if measurement == "status":
+            await self.handle_bridge_status(payload.strip().lower())
             return
+        if measurement == "last_seen":
+            await store_status(bridge_last_seen=payload.strip())
+            return
+        LOGGER.debug("Ignoring unsupported bridge topic %s", topic)
 
     @property
     def bridge_is_available(self) -> bool:
