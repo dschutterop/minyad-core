@@ -1,5 +1,6 @@
 alembic==1.13.2
 asyncpg==0.29.0
+psycopg[binary]==3.2.1
 cryptography==42.0.8
 fastapi==0.111.0
 paho-mqtt==2.1.0
