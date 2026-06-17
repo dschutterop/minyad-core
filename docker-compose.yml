@@ -39,7 +39,7 @@ services:
     container_name: minyad-mqtt
     restart: unless-stopped
     ports:
-      - "127.0.0.1:11883:11883"
+      - "11883:11883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     depends_on:
