@@ -1,5 +1,6 @@
 const apiBase = window.MINYAD_API_BASE || window.location.origin;
 const fmtW = (v) => `${Math.round(Number(v || 0))} W`;
+const fmtValue = (v, unit = '') => v == null ? '—' : `${v}${unit}`;
 const fmtTime = (v) => v ? new Date(v).toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam' }) : '—';
 
 function setText(id, value) { document.getElementById(id).textContent = value; }
@@ -19,6 +20,42 @@ function drawForecast(rows) {
   ctx.stroke();
   ctx.fillStyle = '#bfd0ee'; ctx.font = '12px system-ui';
   ctx.fillText(`max ${Math.round(max)} W`, 20, 16);
+}
+
+function renderGoodWeStatus(data) {
+  const pill = document.getElementById('goodweOverall');
+  const error = document.getElementById('goodweError');
+  pill.textContent = data.overall === 'ok' ? 'OK' : 'Aandacht nodig';
+  pill.className = `status-pill ${data.overall === 'ok' ? 'ok-bg' : 'warning-bg'}`;
+  error.classList.add('hidden');
+
+  setText('goodweBatterySoc', data.battery?.soc_pct == null ? '—%' : `${Number(data.battery.soc_pct).toFixed(0)}%`);
+  setText('goodweBatteryMode', `${data.battery?.mode || '—'} · ${fmtW(data.battery?.power_w)}`);
+  setText('goodweBatteryLimits', `Limieten: laden ${fmtW(data.battery?.charge_limit_w)}, ontladen ${fmtW(data.battery?.discharge_limit_w)}`);
+  setText('goodweGridPower', fmtW(data.grid?.power_w));
+  setText('goodweGridMode', `${data.grid?.direction || '—'} · ${data.grid?.mode || '—'}`);
+  setText('goodweGridVoltage', `${fmtValue(data.grid?.voltage_v, ' V')} · ${fmtValue(data.grid?.frequency_hz, ' Hz')}`);
+  setText('goodweHouseLoad', fmtW(data.load?.house_consumption_w));
+  setText('goodweLoadPower', `Load: ${fmtW(data.load?.power_w)}`);
+  setText('goodweInverterTemp', `Omvormer: ${fmtValue(data.inverter?.temperature_c, ' °C')}`);
+  setText('goodweDiagnose', data.inverter?.diagnose || 'Geen diagnose beschikbaar');
+  document.getElementById('goodweIssues').innerHTML = (data.issues?.length ? data.issues : ['Geen actieve aandachtspunten']).map(issue => `<li>${issue}</li>`).join('');
+  document.getElementById('goodweRaw').textContent = JSON.stringify(data.raw || {}, null, 2);
+}
+
+async function refreshGoodWeStatus() {
+  try {
+    const res = await fetch(`${apiBase}/api/goodwe/status`);
+    if (!res.ok) throw new Error(await res.text());
+    renderGoodWeStatus(await res.json());
+  } catch (err) {
+    const pill = document.getElementById('goodweOverall');
+    const error = document.getElementById('goodweError');
+    pill.textContent = 'Offline';
+    pill.className = 'status-pill error-bg';
+    error.textContent = `GoodWe status ophalen mislukt: ${err.message || err}`;
+    error.classList.remove('hidden');
+  }
 }
 
 async function refresh() {
@@ -61,4 +98,6 @@ async function refresh() {
 }
 
 refresh().catch(console.error);
+refreshGoodWeStatus().catch(console.error);
 setInterval(() => refresh().catch(console.error), 10000);
+setInterval(() => refreshGoodWeStatus().catch(console.error), 15000);

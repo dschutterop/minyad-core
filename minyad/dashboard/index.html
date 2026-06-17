@@ -16,6 +16,7 @@
       <a href="#overview">Overzicht</a>
       <a href="#power-flow">Vermogensflow</a>
       <a href="#forecast-panel">Forecast</a>
+      <a href="#accu-status">Accu setup</a>
       <a href="#system-status">Systeemstatus</a>
     </nav>
   </aside>
@@ -52,6 +53,28 @@
       <section class="panel" id="forecast-panel">
         <h2>Forecast komende 24u</h2>
         <canvas id="forecast" width="900" height="220"></canvas>
+      </section>
+
+      <section class="panel" id="accu-status">
+        <div class="panel-heading">
+          <h2>Accu setup status</h2>
+          <span id="goodweOverall" class="status-pill">—</span>
+        </div>
+        <div id="goodweError" class="notice hidden"></div>
+        <div class="setup-grid">
+          <article class="metric-card"><h3>Batterij</h3><strong id="goodweBatterySoc">—%</strong><span id="goodweBatteryMode">—</span><span id="goodweBatteryLimits">Limieten: —</span></article>
+          <article class="metric-card"><h3>Grid</h3><strong id="goodweGridPower">— W</strong><span id="goodweGridMode">—</span><span id="goodweGridVoltage">—</span></article>
+          <article class="metric-card"><h3>Verbruik</h3><strong id="goodweHouseLoad">— W</strong><span id="goodweLoadPower">Load: — W</span><span id="goodweInverterTemp">Omvormer: — °C</span></article>
+        </div>
+        <div class="diagnostics">
+          <h3>Diagnose</h3>
+          <ul id="goodweIssues"><li>—</li></ul>
+          <p id="goodweDiagnose">—</p>
+        </div>
+        <details>
+          <summary>Ruwe GoodWe runtime-data</summary>
+          <pre id="goodweRaw">{}</pre>
+        </details>
       </section>
       <section class="panel" id="system-status">
         <h2>Systeemstatus</h2>
