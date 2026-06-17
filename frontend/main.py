@@ -165,6 +165,10 @@ def battery_control_body() -> str:
         <p>Bridge status: <strong id='battery-bridge'>--</strong></p>
         <p>Bridge last seen: <strong id='battery-bridge-last-seen'>--</strong></p>
         <p>Override: <strong id='battery-override'>none</strong></p>
+        <p>Grid net power: <strong id='battery-grid-net-power'>--</strong> W</p>
+        <p>Grid delivered: <strong id='battery-grid-delivered'>--</strong> W</p>
+        <p>Grid returned: <strong id='battery-grid-returned'>--</strong> W</p>
+        <p>Grid status: <strong id='battery-grid-status'>--</strong></p>
       </div>
       <p id='battery-status-error' role='alert'></p>
     </div>
@@ -200,6 +204,10 @@ def battery_control_body() -> str:
           document.getElementById('battery-bridge').textContent = data.bridge_last_seen_valid === false ? `${bridgeStatus} (error)` : bridgeStatus;
           document.getElementById('battery-bridge-last-seen').textContent = data.bridge_last_seen ? `${data.bridge_last_seen} (${displayValue(data.bridge_last_seen_age_seconds, 's')} ago)` : '--';
           document.getElementById('battery-override').textContent = data.override_mode || 'none';
+          document.getElementById('battery-grid-net-power').textContent = displayValue(data.grid_net_power_w);
+          document.getElementById('battery-grid-delivered').textContent = displayValue(data.grid_delivered_w);
+          document.getElementById('battery-grid-returned').textContent = displayValue(data.grid_returned_w);
+          document.getElementById('battery-grid-status').textContent = displayValue(data.grid_status);
           error.textContent = data.bridge_last_seen_error || '';
           error.className = data.bridge_last_seen_error ? 'error' : '';
         } catch (err) {
@@ -215,6 +223,61 @@ def battery_control_body() -> str:
       function forceDischarge(){ const watts = Number(prompt('Discharge watts naar huis/net via GoodWe bridge?')); if(watts) sendOverride({mode:'force_discharge', watts}); }
       async function resumeNormal(){ if(confirm('Resume normal hysteresis control?')){ await fetch('/api/battery/override',{method:'DELETE'}); loadBatteryStatus(); } }
       loadBatteryStatus(); setInterval(loadBatteryStatus, 10000);
+    </script>
+    """
+
+
+def dsmr_body() -> str:
+    return """
+    <div class='card'><h2>DSMR grid status</h2>
+      <p>Live data from the <code>minyad/grid</code> MQTT topic.</p>
+      <div class='grid'>
+        <p>Status: <strong id='grid-status'>--</strong></p>
+        <p>Timestamp: <strong id='grid-timestamp'>--</strong></p>
+        <p>Net power: <strong id='grid-net-power'>--</strong> W</p>
+        <p>Delivered: <strong id='grid-delivered'>--</strong> W</p>
+        <p>Returned: <strong id='grid-returned'>--</strong> W</p>
+        <p>L1 delivered: <strong id='grid-l1-delivered'>--</strong> W</p>
+        <p>L2 delivered: <strong id='grid-l2-delivered'>--</strong> W</p>
+        <p>L3 delivered: <strong id='grid-l3-delivered'>--</strong> W</p>
+        <p>L1 returned: <strong id='grid-l1-returned'>--</strong> W</p>
+        <p>L2 returned: <strong id='grid-l2-returned'>--</strong> W</p>
+        <p>L3 returned: <strong id='grid-l3-returned'>--</strong> W</p>
+        <p>L1 voltage: <strong id='grid-l1-voltage'>--</strong> V</p>
+        <p>L2 voltage: <strong id='grid-l2-voltage'>--</strong> V</p>
+        <p>L3 voltage: <strong id='grid-l3-voltage'>--</strong> V</p>
+      </div>
+      <p id='dsmr-status-error' role='alert'></p>
+    </div>
+    <script>
+      function displayValue(value){ return value === undefined || value === null || value === '' ? '--' : value; }
+      async function loadDsmrStatus(){
+        const error = document.getElementById('dsmr-status-error');
+        try {
+          const res = await fetch('/api/dsmr/status');
+          if(!res.ok) throw new Error(`DSMR status request failed (${res.status})`);
+          const data = await res.json();
+          document.getElementById('grid-status').textContent = displayValue(data.grid_status);
+          document.getElementById('grid-timestamp').textContent = displayValue(data.grid_timestamp);
+          document.getElementById('grid-net-power').textContent = displayValue(data.grid_net_power_w);
+          document.getElementById('grid-delivered').textContent = displayValue(data.grid_delivered_w);
+          document.getElementById('grid-returned').textContent = displayValue(data.grid_returned_w);
+          document.getElementById('grid-l1-delivered').textContent = displayValue(data.grid_phase_delivered_l1_w);
+          document.getElementById('grid-l2-delivered').textContent = displayValue(data.grid_phase_delivered_l2_w);
+          document.getElementById('grid-l3-delivered').textContent = displayValue(data.grid_phase_delivered_l3_w);
+          document.getElementById('grid-l1-returned').textContent = displayValue(data.grid_phase_returned_l1_w);
+          document.getElementById('grid-l2-returned').textContent = displayValue(data.grid_phase_returned_l2_w);
+          document.getElementById('grid-l3-returned').textContent = displayValue(data.grid_phase_returned_l3_w);
+          document.getElementById('grid-l1-voltage').textContent = displayValue(data.grid_voltage_l1_v);
+          document.getElementById('grid-l2-voltage').textContent = displayValue(data.grid_voltage_l2_v);
+          document.getElementById('grid-l3-voltage').textContent = displayValue(data.grid_voltage_l3_v);
+          error.textContent = '';
+        } catch (err) {
+          error.textContent = err.message || 'Unable to load DSMR status';
+          error.className = 'error';
+        }
+      }
+      loadDsmrStatus(); setInterval(loadDsmrStatus, 10000);
     </script>
     """
 
@@ -245,5 +308,7 @@ async def section(section: str) -> str:
         return render_page(title, battery_settings_body())
     if title == "Control":
         return render_page(title, battery_control_body())
+    if title == "DSMR":
+        return render_page(title, dsmr_body())
     content = f"{title} module scaffold."
     return render_page(title, f"<div class='card'><h2>{title}</h2><p>{content}</p></div>")
