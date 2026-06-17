@@ -59,9 +59,10 @@ class ControlApp:
         self.inverter: GoodWeInverter | None = None
         self.settings: dict[str, Any] = {}
         self.setpoint_w = DEFAULT_SETPOINT_W
-        self.loop = asyncio.get_running_loop()
+        self.loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
+        self.loop = asyncio.get_running_loop()
         await self.reload_settings()
         await self.apply_override(await load_override())
         self.mqtt.start()
@@ -85,12 +86,24 @@ class ControlApp:
             start_duration=int(self.settings["start_duration"]),
             stop_duration=int(self.settings["stop_duration"]),
             cooldown=int(self.settings["cooldown"]),
-            on_start=lambda: asyncio.run_coroutine_threadsafe(self.start_charging(), self.loop),
-            on_stop=lambda: asyncio.run_coroutine_threadsafe(self.stop_charging(), self.loop),
+            on_start=self._schedule_start_charging,
+            on_stop=self._schedule_stop_charging,
         )
         LOGGER.info("Battery control settings loaded")
 
+    def _schedule_start_charging(self) -> None:
+        if self.loop is None:
+            raise RuntimeError("control app event loop is not initialized")
+        asyncio.run_coroutine_threadsafe(self.start_charging(), self.loop)
+
+    def _schedule_stop_charging(self) -> None:
+        if self.loop is None:
+            raise RuntimeError("control app event loop is not initialized")
+        asyncio.run_coroutine_threadsafe(self.stop_charging(), self.loop)
+
     def _on_mqtt(self, topic: str, payload: bytes) -> None:
+        if self.loop is None:
+            raise RuntimeError("control app event loop is not initialized")
         self.loop.call_soon_threadsafe(asyncio.create_task, self.handle_message(topic, payload))
 
     async def handle_message(self, topic: str, payload: bytes) -> None:
@@ -172,8 +185,13 @@ class ControlApp:
         await store_status(state=state.value, override_mode=mode)
 
 
+async def run_control_app() -> None:
+    app = ControlApp()
+    await app.start()
+
+
 def main() -> None:
-    asyncio.run(ControlApp().start())
+    asyncio.run(run_control_app())
 
 
 if __name__ == "__main__":
