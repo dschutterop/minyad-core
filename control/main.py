@@ -5,14 +5,12 @@ from __future__ import annotations
 import logging
 import time
 
-from shared.db import init_db
 from shared.mqtt_client import MinyadMqttClient
 
 logging.basicConfig(level=logging.INFO)
 
 
 def main() -> None:
-    init_db()
     mqtt = MinyadMqttClient("minyad-control")
     mqtt.start()
     mqtt.publish_measurement("control", "state", "IDLE")
