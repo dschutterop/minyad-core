@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from threading import Lock
+from threading import Event, Lock
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException
+import paho.mqtt.client as paho_mqtt
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +38,7 @@ MQTT_STATUS_KEYS = {
 }
 MQTT_STATUS_LOCK = Lock()
 MQTT_STATUS: dict[str, str] = {}
+RETAINED_STATUS_TIMEOUT_SECONDS = 1.0
 
 BATTERY_KEYS = {
     "start_w": (100, 5000),
@@ -63,6 +66,56 @@ def handle_status_mqtt(topic: str, payload: bytes) -> None:
 def latest_mqtt_status() -> dict[str, str]:
     with MQTT_STATUS_LOCK:
         return dict(MQTT_STATUS)
+
+
+def cached_status_is_incomplete(payload: dict[str, Any]) -> bool:
+    required_keys = (
+        "soc",
+        "soh",
+        "power_w",
+        "voltage",
+        "mode",
+        "mode_label",
+        "charge_i",
+        "bridge_status",
+        "bridge_last_seen",
+    )
+    return any(key not in payload or payload[key] in (None, "") for key in required_keys)
+
+
+def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOUT_SECONDS) -> dict[str, str]:
+    """Fetch retained status topics directly from MQTT as a startup/cache fallback."""
+    retained_status: dict[str, str] = {}
+    received = Event()
+    expected_keys = set(MQTT_STATUS_KEYS.values())
+
+    def on_message(_client: paho_mqtt.Client, _userdata: object, message: paho_mqtt.MQTTMessage) -> None:
+        key = MQTT_STATUS_KEYS.get(message.topic)
+        if key is None:
+            return
+        retained_status[key] = message.payload.decode()
+        if expected_keys.issubset(retained_status):
+            received.set()
+
+    client = paho_mqtt.Client(
+        paho_mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"minyad-api-retained-status-{uuid4()}",
+    )
+    client.on_message = on_message
+    client.connect(mqtt.config.host, mqtt.config.port, mqtt.config.keepalive)
+    client.loop_start()
+    try:
+        for topic in ("minyad/battery/+", "minyad/bridge/+", "minyad/control/+"):
+            client.subscribe(topic)
+        received.wait(timeout_seconds)
+    finally:
+        client.loop_stop()
+        client.disconnect()
+
+    if retained_status:
+        with MQTT_STATUS_LOCK:
+            MQTT_STATUS.update(retained_status)
+    return retained_status
 
 
 def parse_bridge_last_seen(value: str | None) -> datetime | None:
@@ -176,6 +229,11 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     status = await session.execute(text("select key, value from settings where key like 'battery.status.%'"))
     payload: dict[str, Any] = {row.key.removeprefix("battery.status."): row.value for row in status}
     payload.update(latest_mqtt_status())
+    if cached_status_is_incomplete(payload):
+        try:
+            payload.update(collect_retained_mqtt_status())
+        except OSError:
+            LOGGER.exception("Unable to fetch retained MQTT status snapshot")
     override = await session.execute(text("select mode from battery_override where id = 1"))
     payload.setdefault("state", "IDLE")
     payload["override_mode"] = override.scalar_one_or_none() or "none"
