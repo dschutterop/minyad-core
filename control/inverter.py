@@ -21,6 +21,10 @@ class InverterSettings:
     max_charge_a: int
 
 
+class InverterUnavailable(RuntimeError):
+    """Raised when the inverter cannot be reached after configured retries."""
+
+
 class GoodWeInverter:
     """Thin async wrapper around the goodwe library with safe W→A conversion."""
 
@@ -28,14 +32,23 @@ class GoodWeInverter:
         self.settings = settings
 
     async def connect(self) -> Any:
-        for attempt in range(self.settings.inverter_retries):
+        last_error: BaseException | None = None
+        retries = max(1, self.settings.inverter_retries)
+        for attempt in range(retries):
             try:
                 return await goodwe.connect(self.settings.inverter_ip)
-            except goodwe.exceptions.InverterError as exc:
-                LOGGER.warning("Connect attempt %s/%s failed: %s", attempt + 1, self.settings.inverter_retries, exc)
-                if attempt < self.settings.inverter_retries - 1:
+            except (goodwe.exceptions.InverterError, OSError, asyncio.TimeoutError) as exc:
+                last_error = exc
+                LOGGER.warning(
+                    "Inverter %s connect attempt %s/%s failed: %s",
+                    self.settings.inverter_ip,
+                    attempt + 1,
+                    retries,
+                    exc,
+                )
+                if attempt < retries - 1:
                     await asyncio.sleep(self.settings.inverter_delay)
-        raise RuntimeError("Inverter unreachable after all retries")
+        raise InverterUnavailable(f"Inverter {self.settings.inverter_ip} unreachable after {retries} attempt(s)") from last_error
 
     async def read_status(self) -> dict[str, Any]:
         inv = await self.connect()
