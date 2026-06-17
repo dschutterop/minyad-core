@@ -1,5 +1,5 @@
 goodwe
-paho-mqtt
+paho-mqtt>=1.6
 python-dotenv
 
 pymodbus>=3.6
