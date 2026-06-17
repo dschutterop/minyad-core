@@ -41,8 +41,18 @@ DEFAULT_SETTINGS = {
 }
 
 
+def ensure_settings_columns(bind: sa.engine.Connection) -> None:
+    """Bring older settings tables up to the baseline shape this migration expects."""
+    columns = {column["name"] for column in sa.inspect(bind).get_columns("settings")}
+    if "encrypted" not in columns:
+        op.add_column("settings", sa.Column("encrypted", sa.Boolean(), nullable=False, server_default=sa.false()))
+    if "updated_at" not in columns:
+        op.add_column("settings", sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()))
+
+
 def upgrade() -> None:
     bind = op.get_bind()
+    ensure_settings_columns(bind)
     battery_override_table.create(bind, checkfirst=True)
     for key, value in DEFAULT_SETTINGS.items():
         op.execute(
