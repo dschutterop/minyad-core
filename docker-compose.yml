@@ -39,14 +39,14 @@ services:
     container_name: minyad-mqtt
     restart: unless-stopped
     ports:
-      - "11883:11883"
+      - "192.168.110.5:1883:1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-p", "11883", "-t", "healthcheck", "-n"]
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-p", "1883", "-t", "healthcheck", "-n"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -62,7 +62,7 @@ services:
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
-      MQTT_PORT: 11883
+      MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -79,7 +79,7 @@ services:
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
-      MQTT_PORT: 11883
+      MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -96,7 +96,7 @@ services:
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
-      MQTT_PORT: 11883
+      MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -113,7 +113,7 @@ services:
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
-      MQTT_PORT: 11883
+      MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -133,7 +133,7 @@ services:
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
-      MQTT_PORT: 11883
+      MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -155,7 +155,7 @@ services:
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
-      MQTT_PORT: 11883
+      MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -172,7 +172,7 @@ services:
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
-      MQTT_PORT: 11883
+      MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
