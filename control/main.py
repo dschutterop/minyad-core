@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import text
 
 from hysteresis import HysteresisController, OverrideMode
-from inverter import GoodWeInverter, InverterSettings
+from inverter import GoodWeInverter, InverterSettings, InverterUnavailable
 from shared.db import AsyncSessionLocal
 from shared.mqtt_client import MinyadMqttClient
 from state import ControlState
@@ -121,6 +121,10 @@ class ControlApp:
             else:
                 await self.apply_override(command)
 
+    async def _mark_inverter_unavailable(self, exc: InverterUnavailable) -> None:
+        LOGGER.warning("Inverter unavailable: %s", exc)
+        await store_status(available=False, error=str(exc))
+
     async def apply_override(self, command: dict[str, Any]) -> None:
         if not self.controller or not self.inverter:
             return
@@ -132,29 +136,39 @@ class ControlApp:
             self.setpoint_w = 0
         else:
             self.controller.set_override(mode, int(duration) if duration else None)
-        if mode is OverrideMode.FORCE_ON:
-            await self.inverter.set_charge_power(watts)
-            self.setpoint_w = watts
-        elif mode is OverrideMode.FORCE_OFF:
-            await self.inverter.stop_charging()
-            self.setpoint_w = 0
-        elif mode is OverrideMode.FORCE_DISCHARGE:
-            await self.inverter.stop_charging()
-            await self.inverter.set_discharge_power(watts)
-            self.setpoint_w = -watts
-        elif mode is OverrideMode.PAUSE:
-            await self.inverter.stop_charging()
-            self.setpoint_w = 0
+        try:
+            if mode is OverrideMode.FORCE_ON:
+                await self.inverter.set_charge_power(watts)
+                self.setpoint_w = watts
+            elif mode is OverrideMode.FORCE_OFF:
+                await self.inverter.stop_charging()
+                self.setpoint_w = 0
+            elif mode is OverrideMode.FORCE_DISCHARGE:
+                await self.inverter.stop_charging()
+                await self.inverter.set_discharge_power(watts)
+                self.setpoint_w = -watts
+            elif mode is OverrideMode.PAUSE:
+                await self.inverter.stop_charging()
+                self.setpoint_w = 0
+        except InverterUnavailable as exc:
+            await self._mark_inverter_unavailable(exc)
         await self.publish_state(self.controller.state)
 
     async def start_charging(self) -> None:
         if self.inverter:
             self.setpoint_w = int(self.settings["max_charge_w"])
-            await self.inverter.set_charge_power(self.setpoint_w)
+            try:
+                await self.inverter.set_charge_power(self.setpoint_w)
+            except InverterUnavailable as exc:
+                self.setpoint_w = 0
+                await self._mark_inverter_unavailable(exc)
 
     async def stop_charging(self) -> None:
         if self.inverter:
-            await self.inverter.stop_charging()
+            try:
+                await self.inverter.stop_charging()
+            except InverterUnavailable as exc:
+                await self._mark_inverter_unavailable(exc)
             self.setpoint_w = 0
 
     async def poll_battery(self) -> None:
@@ -162,11 +176,19 @@ class ControlApp:
             try:
                 if self.inverter and self.controller:
                     status = await self.inverter.read_status()
-                    status.update(state=self.controller.state.value, override_mode=self.controller.override_mode.value)
+                    status.update(
+                        available=True,
+                        error="",
+                        state=self.controller.state.value,
+                        override_mode=self.controller.override_mode.value,
+                    )
                     await store_status(**status)
                     self.mqtt.publish_measurement("battery", "soc", status["soc"])
                     self.mqtt.publish_measurement("battery", "power_w", status["power_w"])
                     self.mqtt.publish_measurement("battery", "voltage", status["voltage"])
+            except InverterUnavailable as exc:
+                LOGGER.warning("Battery poll skipped: %s", exc)
+                await store_status(available=False, error=str(exc))
             except Exception:
                 LOGGER.exception("Battery poll failed")
             await asyncio.sleep(30)
