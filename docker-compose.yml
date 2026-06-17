@@ -3,10 +3,16 @@ services:
     image: postgres:16-alpine
     container_name: minyad-db
     restart: unless-stopped
+    env_file: .env
     environment:
       POSTGRES_DB: minyad
       POSTGRES_USER: minyad
-      POSTGRES_PASSWORD: minyad
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        export POSTGRES_PASSWORD="$$(printf '%s' "$$DB_URL" | sed -E 's#^[^:]+://[^:]+:([^@]+)@.*#\1#')"
+        exec docker-entrypoint.sh postgres
     volumes:
       - minyad-db-data:/var/lib/postgresql/data
     networks: [minyad-internal]
