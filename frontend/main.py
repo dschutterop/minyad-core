@@ -74,11 +74,22 @@ def battery_settings_body() -> str:
 
 def battery_control_body() -> str:
     return """
-    <div class='card'><h2>Battery override</h2>
+    <div class='card'><h2>Battery status</h2>
       <p>State: <strong id='battery-state' class='badge'>...</strong></p>
-      <p>SOC: <meter id='battery-soc-gauge' min='0' max='100' value='0'></meter> <span id='battery-soc'>--</span>%</p>
-      <p>Power flow: <strong id='battery-power'>--</strong> W</p>
-      <p>Override: <strong id='battery-override'>none</strong></p>
+      <div class='grid'>
+        <p>SOC: <meter id='battery-soc-gauge' min='0' max='100' value='0'></meter> <span id='battery-soc'>--</span>%</p>
+        <p>SOH: <strong id='battery-soh'>--</strong>%</p>
+        <p>Power flow: <strong id='battery-power'>--</strong> W</p>
+        <p>Voltage: <strong id='battery-voltage'>--</strong> V</p>
+        <p>Charge current: <strong id='battery-charge-current'>--</strong> A</p>
+        <p>Battery mode: <strong id='battery-mode'>--</strong></p>
+        <p>Setpoint: <strong id='battery-setpoint'>--</strong> W</p>
+        <p>Bridge: <strong id='battery-bridge'>--</strong></p>
+        <p>Override: <strong id='battery-override'>none</strong></p>
+      </div>
+      <p id='battery-status-error' role='alert'></p>
+    </div>
+    <div class='card'><h2>Battery override</h2>
       <button onclick='forceCharge()'>Force charge</button>
       <button onclick='sendOverride({mode:"force_off"})'>Force stop</button>
       <button onclick='forceDischarge()'>Force discharge</button>
@@ -86,14 +97,31 @@ def battery_control_body() -> str:
       <button onclick='resumeNormal()'>Resume normal</button>
     </div>
     <script>
+      function displayValue(value, suffix = ''){
+        return value === undefined || value === null || value === '' ? '--' : `${value}${suffix}`;
+      }
       async function loadBatteryStatus(){
-        const res = await fetch('/api/battery/status'); const data = await res.json();
-        const override = data.override_mode && data.override_mode !== 'none';
-        document.getElementById('battery-state').textContent = override ? 'OVERRIDE' : (data.state || 'IDLE');
-        document.getElementById('battery-soc-gauge').value = data.soc || 0;
-        document.getElementById('battery-soc').textContent = data.soc ?? '--';
-        document.getElementById('battery-power').textContent = data.power_w ?? '--';
-        document.getElementById('battery-override').textContent = data.override_mode || 'none';
+        const error = document.getElementById('battery-status-error');
+        try {
+          const res = await fetch('/api/battery/status');
+          if(!res.ok) throw new Error(`Battery status request failed (${res.status})`);
+          const data = await res.json();
+          const override = data.override_mode && data.override_mode !== 'none';
+          document.getElementById('battery-state').textContent = override ? 'OVERRIDE' : (data.state || 'IDLE');
+          document.getElementById('battery-soc-gauge').value = data.soc ?? 0;
+          document.getElementById('battery-soc').textContent = displayValue(data.soc);
+          document.getElementById('battery-soh').textContent = displayValue(data.soh);
+          document.getElementById('battery-power').textContent = displayValue(data.power_w);
+          document.getElementById('battery-voltage').textContent = displayValue(data.voltage);
+          document.getElementById('battery-charge-current').textContent = displayValue(data.charge_i);
+          document.getElementById('battery-mode').textContent = data.mode_label || displayValue(data.mode);
+          document.getElementById('battery-setpoint').textContent = displayValue(data.setpoint_w);
+          document.getElementById('battery-bridge').textContent = data.bridge_status || (data.available === true ? 'online' : data.available === false ? 'offline' : '--');
+          document.getElementById('battery-override').textContent = data.override_mode || 'none';
+          error.textContent = '';
+        } catch (err) {
+          error.textContent = err.message || 'Unable to load battery status';
+        }
       }
       async function sendOverride(payload){
         if(!confirm('Apply battery override?')) return;
