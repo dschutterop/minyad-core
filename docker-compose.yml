@@ -60,6 +60,8 @@ services:
     container_name: minyad-ingestion
     restart: unless-stopped
     env_file: .env
+    environment:
+      MQTT_HOST: minyad-mqtt
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -74,6 +76,8 @@ services:
     container_name: minyad-control
     restart: unless-stopped
     env_file: .env
+    environment:
+      MQTT_HOST: minyad-mqtt
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -88,6 +92,8 @@ services:
     container_name: minyad-deadman
     restart: unless-stopped
     env_file: .env
+    environment:
+      MQTT_HOST: minyad-mqtt
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -102,6 +108,8 @@ services:
     container_name: minyad-api
     restart: unless-stopped
     env_file: .env
+    environment:
+      MQTT_HOST: minyad-mqtt
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -119,6 +127,8 @@ services:
     container_name: minyad-frontend
     restart: unless-stopped
     env_file: .env
+    environment:
+      MQTT_HOST: minyad-mqtt
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -138,6 +148,8 @@ services:
     container_name: minyad-forecast
     restart: unless-stopped
     env_file: .env
+    environment:
+      MQTT_HOST: minyad-mqtt
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -152,6 +164,8 @@ services:
     container_name: minyad-reporting
     restart: unless-stopped
     env_file: .env
+    environment:
+      MQTT_HOST: minyad-mqtt
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
