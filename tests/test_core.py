@@ -142,29 +142,34 @@ def test_dsmr_current_power_state_merges_separate_current_topics():
     delivered = state.merge(
         parse_dsmr_message("dsmr/reading/electricity_currently_delivered", b"2.734")
     )
-    delivered_zero_while_importing = state.merge(
+    returned_zero_while_importing = state.merge(
+        parse_dsmr_message("dsmr/reading/electricity_currently_returned", b"0.0")
+    )
+    delivered_zero = state.merge(
+        parse_dsmr_message("dsmr/reading/electricity_currently_delivered", b"0.0")
+    )
+    returned = state.merge(
+        parse_dsmr_message("dsmr/reading/electricity_currently_returned", b"0.125")
+    )
+    delivered_zero_while_exporting = state.merge(
         parse_dsmr_message("dsmr/reading/electricity_currently_delivered", b"0.0")
     )
     returned_zero = state.merge(
         parse_dsmr_message("dsmr/reading/electricity_currently_returned", b"0.0")
     )
-    returned = state.merge(
-        parse_dsmr_message("dsmr/reading/electricity_currently_returned", b"0.125")
-    )
-    delivered_zero = state.merge(
-        parse_dsmr_message("dsmr/reading/electricity_currently_delivered", b"0.0")
-    )
 
     assert delivered["import_w"] == 2734
     assert delivered["export_w"] == 0
-    assert delivered_zero_while_importing["import_w"] == 2734
-    assert delivered_zero_while_importing["export_w"] == 0
-    assert returned_zero["import_w"] == 2734
-    assert returned_zero["export_w"] == 0
+    assert returned_zero_while_importing["import_w"] == 2734
+    assert returned_zero_while_importing["export_w"] == 0
+    assert delivered_zero["import_w"] == 0
+    assert delivered_zero["export_w"] == 0
     assert returned["import_w"] == 0
     assert returned["export_w"] == 125
-    assert delivered_zero["import_w"] == 0
-    assert delivered_zero["export_w"] == 125
+    assert delivered_zero_while_exporting["import_w"] == 0
+    assert delivered_zero_while_exporting["export_w"] == 125
+    assert returned_zero["import_w"] == 0
+    assert returned_zero["export_w"] == 0
 
 
 def test_parse_dsmr_json_current_power_is_exclusive():
