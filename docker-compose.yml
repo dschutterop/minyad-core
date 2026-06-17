@@ -38,8 +38,7 @@ services:
     image: eclipse-mosquitto:2
     container_name: minyad-mqtt
     restart: unless-stopped
-    ports:
-      - "192.168.110.5:1883:1883"
+    network_mode: host
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     depends_on:
@@ -51,7 +50,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
-    networks: [minyad-internal]
 
   minyad-ingestion:
     build:
@@ -61,7 +59,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: minyad-mqtt
+      MQTT_HOST: 192.168.110.5
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -78,7 +76,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: minyad-mqtt
+      MQTT_HOST: 192.168.110.5
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -95,7 +93,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: minyad-mqtt
+      MQTT_HOST: 192.168.110.5
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -112,7 +110,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: minyad-mqtt
+      MQTT_HOST: 192.168.110.5
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -132,7 +130,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: minyad-mqtt
+      MQTT_HOST: 192.168.110.5
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -154,7 +152,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: minyad-mqtt
+      MQTT_HOST: 192.168.110.5
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -171,7 +169,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: minyad-mqtt
+      MQTT_HOST: 192.168.110.5
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
