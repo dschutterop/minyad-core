@@ -1,0 +1,103 @@
+services:
+  minyad-mqtt:
+    image: eclipse-mosquitto:2
+    container_name: minyad-mqtt
+    restart: unless-stopped
+    expose:
+      - "1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks: [minyad-internal]
+
+  minyad-db:
+    image: postgres:16-alpine
+    container_name: minyad-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: minyad
+      POSTGRES_USER: minyad
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - minyad-db-data:/var/lib/postgresql/data
+    networks: [minyad-internal]
+
+  minyad-ingestion:
+    build:
+      context: .
+      dockerfile: ingestion/Dockerfile
+    container_name: minyad-ingestion
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [minyad-mqtt]
+    networks: [minyad-internal]
+
+  minyad-control:
+    build:
+      context: .
+      dockerfile: control/Dockerfile
+    container_name: minyad-control
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [minyad-mqtt, minyad-db]
+    networks: [minyad-internal]
+
+  minyad-deadman:
+    build:
+      context: .
+      dockerfile: deadman/Dockerfile
+    container_name: minyad-deadman
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [minyad-mqtt, minyad-db]
+    networks: [minyad-internal]
+
+  minyad-api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: minyad-api
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [minyad-mqtt, minyad-db]
+    ports:
+      - "8000:8000"
+    networks: [minyad-internal]
+
+  minyad-frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: minyad-frontend
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [minyad-api, minyad-mqtt, minyad-db]
+    ports:
+      - "8080:8080"
+    networks: [minyad-internal]
+
+  minyad-forecast:
+    build:
+      context: .
+      dockerfile: forecast/Dockerfile
+    container_name: minyad-forecast
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [minyad-mqtt, minyad-db]
+    networks: [minyad-internal]
+
+  minyad-reporting:
+    build:
+      context: .
+      dockerfile: reporting/Dockerfile
+    container_name: minyad-reporting
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [minyad-mqtt, minyad-db]
+    networks: [minyad-internal]
+
+networks:
+  minyad-internal:
+    internal: true
+
+volumes:
+  minyad-db-data:
