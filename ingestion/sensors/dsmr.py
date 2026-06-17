@@ -44,7 +44,15 @@ class P1Reader:
         self._client.on_disconnect = self._on_disconnect
 
     def start(self) -> None:
-        self._client.connect(self.broker, self.port, 60)
+        """Start the DSMR MQTT client without crashing when the broker is unreachable.
+
+        The DSMR broker can live outside the Docker network and may be offline or
+        unreachable while the ingestion service starts.  Use paho's asynchronous
+        connection mode so the network loop can retry the first connection instead
+        of raising an OSError that terminates the container.
+        """
+        self._client.reconnect_delay_set(min_delay=5, max_delay=60)
+        self._client.connect_async(self.broker, self.port, 60)
         self._client.loop_start()
 
     def stop(self) -> None:
