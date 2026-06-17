@@ -1,81 +1,47 @@
-"""Shared SQLAlchemy setup and encrypted setting primitives."""
+"""Shared async SQLAlchemy session factory and encrypted settings helpers."""
 
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from functools import lru_cache
 
 from cryptography.fernet import Fernet
-from sqlalchemy import Boolean, String, create_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-DB_URL = os.environ["DB_URL"]
+DB_URL_ENV = "DB_URL"
 ENCRYPTION_KEY_ENV = "ENCRYPTION_KEY"
 
-engine = create_engine(DB_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+def get_db_url() -> str:
+    """Return the bootstrap database URL supplied by the environment."""
+    return os.environ[DB_URL_ENV]
+
+
+engine = create_async_engine(get_db_url(), pool_pre_ping=True)
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
 @lru_cache(maxsize=1)
 def get_fernet() -> Fernet:
-    """Build the Fernet instance when encrypted values are actually used."""
+    """Build a Fernet instance for settings marked encrypted in PostgreSQL."""
     raw_key = os.environ.get(ENCRYPTION_KEY_ENV)
     if not raw_key:
-        raise ValueError(
-            f"{ENCRYPTION_KEY_ENV} must be set to a Fernet key. Generate one with: "
-            "python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
-        )
-
-    try:
-        return Fernet(raw_key.encode())
-    except ValueError as exc:
-        raise ValueError(
-            f"{ENCRYPTION_KEY_ENV} must be a 32-byte url-safe base64-encoded Fernet key. "
-            "Generate one with: python -c 'from cryptography.fernet import Fernet; "
-            "print(Fernet.generate_key().decode())'"
-        ) from exc
+        raise ValueError(f"{ENCRYPTION_KEY_ENV} must be set to a Fernet key")
+    return Fernet(raw_key.encode())
 
 
-class Base(DeclarativeBase):
-    pass
+def encrypt_setting(plaintext: str) -> str:
+    """Encrypt a runtime setting before storing it in the settings.value column."""
+    return get_fernet().encrypt(plaintext.encode()).decode()
 
 
-class Setting(Base):
-    __tablename__ = "settings"
-
-    key: Mapped[str] = mapped_column(String(255), primary_key=True)
-    value: Mapped[str | None] = mapped_column(String, nullable=True)
-    encrypted_value: Mapped[str | None] = mapped_column(String, nullable=True)
-    is_secret: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
-    def set_secret(self, plaintext: str) -> None:
-        self.encrypted_value = get_fernet().encrypt(plaintext.encode()).decode()
-        self.value = None
-        self.is_secret = True
-
-    def get_secret(self) -> str | None:
-        if not self.encrypted_value:
-            return None
-        return get_fernet().decrypt(self.encrypted_value.encode()).decode()
+def decrypt_setting(ciphertext: str) -> str:
+    """Decrypt a runtime setting read from the settings.value column."""
+    return get_fernet().decrypt(ciphertext.encode()).decode()
 
 
-class ApiKey(Base):
-    __tablename__ = "api_keys"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    encrypted_key: Mapped[str] = mapped_column(String, nullable=False)
-    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-
-
-def init_db() -> None:
-    Base.metadata.create_all(bind=engine)
-
-
-def get_session() -> Iterator[Session]:
-    session = SessionLocal()
-    try:
+async def get_session() -> AsyncIterator[AsyncSession]:
+    """FastAPI dependency yielding an async database session."""
+    async with AsyncSessionLocal() as session:
         yield session
-    finally:
-        session.close()
