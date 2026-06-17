@@ -31,9 +31,16 @@ def render_page(active: str, body: str) -> str:
           .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }}
           label {{ display:flex; flex-direction:column; gap:6px; font-weight:600; }}
           input {{ padding:8px; border:1px solid #cbd5e1; border-radius:8px; }}
-          button {{ margin:6px 6px 6px 0; padding:10px 14px; border:0; border-radius:8px; background:#2563eb; color:white; }}
+          button {{ margin:6px 6px 6px 0; padding:10px 14px; border:0; border-radius:8px; background:#2563eb; color:white; cursor:pointer; }}
+          button.secondary {{ background:#64748b; }}
           .badge {{ padding:4px 8px; border-radius:999px; background:#dbeafe; color:#1e40af; }}
           .error {{ color:#b91c1c; font-weight:700; }}
+          .toggle-row {{ display:flex; align-items:center; gap:12px; margin-bottom:12px; }}
+          .toggle-row label {{ flex-direction:row; align-items:center; gap:8px; margin:0; font-weight:600; }}
+          .status-dot {{ width:10px; height:10px; border-radius:50%; display:inline-block; }}
+          .dot-on {{ background:#22c55e; }}
+          .dot-off {{ background:#94a3b8; }}
+          pre.debug {{ background:#0f172a; color:#e2e8f0; border-radius:12px; padding:16px; font-size:12px; overflow:auto; max-height:600px; white-space:pre-wrap; word-break:break-all; }}
         </style>
       </head>
       <body><nav><h1>Minyad</h1>{links}</nav><main>{body}</main></body>
@@ -56,6 +63,27 @@ def battery_settings_body() -> str:
         <label>Retry delay s <input name='inverter_delay' type='number' min='1' max='30'></label>
         <button type='submit'>Save battery settings</button>
       </form><pre id='settings-result'></pre></div>
+
+    <div class='card'>
+      <h2>System</h2>
+      <div class='toggle-row'>
+        <span class='status-dot' id='debug-dot'></span>
+        <label><input type='checkbox' id='debug-toggle'> Debug logging</label>
+      </div>
+      <p style='color:#64748b;font-size:14px;margin:0 0 12px'>
+        Enables verbose DEBUG-level logging on the API and all MQTT events.
+        When enabled, the debug status panel below shows live diagnostics.
+      </p>
+      <div id='debug-status-section' style='display:none'>
+        <div style='display:flex;align-items:center;gap:10px;margin-bottom:8px'>
+          <strong>Debug status</strong>
+          <span style='font-size:12px;color:#64748b' id='debug-refresh-ts'></span>
+          <button class='secondary' style='padding:4px 10px;font-size:12px' onclick='loadDebugStatus()'>Refresh now</button>
+        </div>
+        <pre class='debug' id='debug-output'>Loading...</pre>
+      </div>
+    </div>
+
     <script>
       async function loadBatterySettings(){
         const res = await fetch('/api/battery/settings'); const data = await res.json();
@@ -68,7 +96,54 @@ def battery_settings_body() -> str:
         const res = await fetch('/api/battery/settings',{method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
         document.getElementById('settings-result').textContent = JSON.stringify(await res.json(), null, 2);
       });
+
+      let debugRefreshTimer = null;
+
+      function applyDebugState(enabled) {
+        const dot = document.getElementById('debug-dot');
+        const section = document.getElementById('debug-status-section');
+        dot.className = 'status-dot ' + (enabled ? 'dot-on' : 'dot-off');
+        if (enabled) {
+          section.style.display = 'block';
+          loadDebugStatus();
+          if (!debugRefreshTimer) debugRefreshTimer = setInterval(loadDebugStatus, 5000);
+        } else {
+          section.style.display = 'none';
+          clearInterval(debugRefreshTimer);
+          debugRefreshTimer = null;
+        }
+      }
+
+      async function loadDebugStatus() {
+        try {
+          const res = await fetch('/api/debug/status');
+          const data = await res.json();
+          document.getElementById('debug-output').textContent = JSON.stringify(data, null, 2);
+          document.getElementById('debug-refresh-ts').textContent = 'refreshed ' + new Date().toLocaleTimeString();
+        } catch(e) {
+          document.getElementById('debug-output').textContent = 'Error: ' + e.message;
+        }
+      }
+
+      document.getElementById('debug-toggle').addEventListener('change', async (e) => {
+        const enabled = e.target.checked;
+        await fetch('/api/system-settings', {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({debug_logging: enabled})
+        });
+        applyDebugState(enabled);
+      });
+
+      async function loadSystemSettings() {
+        const res = await fetch('/api/system-settings');
+        const data = await res.json();
+        document.getElementById('debug-toggle').checked = data.debug_logging;
+        applyDebugState(data.debug_logging);
+      }
+
       loadBatterySettings();
+      loadSystemSettings();
     </script>
     """
 
