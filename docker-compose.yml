@@ -1,4 +1,33 @@
 services:
+  minyad-db:
+    image: postgres:16-alpine
+    container_name: minyad-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: minyad
+      POSTGRES_USER: minyad
+      POSTGRES_PASSWORD: minyad
+    volumes:
+      - minyad-db-data:/var/lib/postgresql/data
+    networks: [minyad-internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minyad -d minyad"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  minyad-migrate:
+    build:
+      context: .
+      dockerfile: migrate/Dockerfile
+    container_name: minyad-migrate
+    env_file: .env
+    depends_on:
+      minyad-db:
+        condition: service_healthy
+    restart: "no"
+    networks: [minyad-internal]
+
   minyad-mqtt:
     image: eclipse-mosquitto:2
     container_name: minyad-mqtt
@@ -7,18 +36,9 @@ services:
       - "1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-    networks: [minyad-internal]
-
-  minyad-db:
-    image: postgres:16-alpine
-    container_name: minyad-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: minyad
-      POSTGRES_USER: minyad
-      POSTGRES_HOST_AUTH_METHOD: trust
-    volumes:
-      - minyad-db-data:/var/lib/postgresql/data
+    depends_on:
+      minyad-migrate:
+        condition: service_completed_successfully
     networks: [minyad-internal]
 
   minyad-ingestion:
@@ -28,7 +48,11 @@ services:
     container_name: minyad-ingestion
     restart: unless-stopped
     env_file: .env
-    depends_on: [minyad-mqtt]
+    depends_on:
+      minyad-migrate:
+        condition: service_completed_successfully
+      minyad-mqtt:
+        condition: service_started
     networks: [minyad-internal]
 
   minyad-control:
@@ -38,7 +62,11 @@ services:
     container_name: minyad-control
     restart: unless-stopped
     env_file: .env
-    depends_on: [minyad-mqtt, minyad-db]
+    depends_on:
+      minyad-migrate:
+        condition: service_completed_successfully
+      minyad-mqtt:
+        condition: service_started
     networks: [minyad-internal]
 
   minyad-deadman:
@@ -48,7 +76,11 @@ services:
     container_name: minyad-deadman
     restart: unless-stopped
     env_file: .env
-    depends_on: [minyad-mqtt, minyad-db]
+    depends_on:
+      minyad-migrate:
+        condition: service_completed_successfully
+      minyad-mqtt:
+        condition: service_started
     networks: [minyad-internal]
 
   minyad-api:
@@ -58,11 +90,14 @@ services:
     container_name: minyad-api
     restart: unless-stopped
     env_file: .env
-    depends_on: [minyad-mqtt, minyad-db]
+    depends_on:
+      minyad-migrate:
+        condition: service_completed_successfully
+      minyad-mqtt:
+        condition: service_started
     ports:
       - target: 8000
         published: "8002"
-        host_ip: 192.168.110.5
     networks: [minyad-internal, minyad-public]
 
   minyad-frontend:
@@ -72,11 +107,16 @@ services:
     container_name: minyad-frontend
     restart: unless-stopped
     env_file: .env
-    depends_on: [minyad-api, minyad-mqtt, minyad-db]
+    depends_on:
+      minyad-migrate:
+        condition: service_completed_successfully
+      minyad-api:
+        condition: service_started
+      minyad-mqtt:
+        condition: service_started
     ports:
       - target: 8080
         published: "8084"
-        host_ip: 192.168.110.5
     networks: [minyad-internal, minyad-public]
 
   minyad-forecast:
@@ -86,7 +126,11 @@ services:
     container_name: minyad-forecast
     restart: unless-stopped
     env_file: .env
-    depends_on: [minyad-mqtt, minyad-db]
+    depends_on:
+      minyad-migrate:
+        condition: service_completed_successfully
+      minyad-mqtt:
+        condition: service_started
     networks: [minyad-internal]
 
   minyad-reporting:
@@ -96,7 +140,11 @@ services:
     container_name: minyad-reporting
     restart: unless-stopped
     env_file: .env
-    depends_on: [minyad-mqtt, minyad-db]
+    depends_on:
+      minyad-migrate:
+        condition: service_completed_successfully
+      minyad-mqtt:
+        condition: service_started
     networks: [minyad-internal]
 
 networks:
