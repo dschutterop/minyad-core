@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import goodwe
+from goodwe.protocol import Aa55ProtocolCommand
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 
@@ -21,6 +22,7 @@ LOGGER_NAME = "goodwe_bridge"
 logger = logging.getLogger(LOGGER_NAME)
 
 MQTT_TOPIC_SETPOINT_W = "minyad/control/setpoint_w"
+MQTT_TOPIC_DISCHARGE_W = "minyad/control/discharge_w"
 MQTT_TOPIC_COMMAND = "minyad/control/command"
 MQTT_TOPIC_STATUS = "minyad/bridge/status"
 MQTT_TOPIC_LAST_SEEN = "minyad/bridge/last_seen"
@@ -50,6 +52,7 @@ class Config:
     mqtt_port: int
     poll_interval: int
     max_charge_a: int
+    max_discharge_w: int
     log_level: str
 
     @classmethod
@@ -68,6 +71,7 @@ class Config:
             mqtt_port=_get_env_int("MQTT_PORT", 1883),
             poll_interval=_get_env_int("POLL_INTERVAL", 30),
             max_charge_a=min(max_charge_a, 30),
+            max_discharge_w=_get_env_int("MAX_DISCHARGE_W", 5000),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
 
@@ -126,7 +130,7 @@ class GoodWeBridge:
     def on_connect(self, client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
         if rc == 0:
             logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
-            client.subscribe([(MQTT_TOPIC_SETPOINT_W, 1), (MQTT_TOPIC_COMMAND, 1)])
+            client.subscribe([(MQTT_TOPIC_SETPOINT_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1), (MQTT_TOPIC_COMMAND, 1)])
         else:
             logger.error("MQTT connection failed with rc=%s", rc)
 
@@ -141,13 +145,16 @@ class GoodWeBridge:
             return
 
         payload = message.payload.decode("utf-8", errors="replace").strip()
-        if message.topic == MQTT_TOPIC_SETPOINT_W:
+        if message.topic in {MQTT_TOPIC_SETPOINT_W, MQTT_TOPIC_DISCHARGE_W}:
             try:
                 setpoint_w = int(payload)
             except ValueError:
-                logger.warning("Ignoring invalid setpoint_w payload: %r", payload)
+                logger.warning("Ignoring invalid watt payload on %s: %r", message.topic, payload)
                 return
-            asyncio.run_coroutine_threadsafe(self.handle_setpoint(setpoint_w), self.loop)
+            if message.topic == MQTT_TOPIC_SETPOINT_W:
+                asyncio.run_coroutine_threadsafe(self.handle_setpoint(setpoint_w), self.loop)
+            else:
+                asyncio.run_coroutine_threadsafe(self.handle_discharge_setpoint(setpoint_w), self.loop)
         elif message.topic == MQTT_TOPIC_COMMAND:
             asyncio.run_coroutine_threadsafe(self.handle_command(payload.lower()), self.loop)
 
@@ -174,6 +181,19 @@ class GoodWeBridge:
             vbattery1,
         )
 
+    def watts_to_pct(self, watts: int) -> int:
+        if self.config.max_discharge_w <= 0:
+            return 0
+        pct = round((watts / self.config.max_discharge_w) * 100)
+        return max(0, min(100, pct))
+
+    async def write_discharge_percent(self, inv: Any, watts: int) -> None:
+        safe_watts = max(0, min(self.config.max_discharge_w, int(watts)))
+        pct = self.watts_to_pct(safe_watts)
+        await inv._read_from_socket(Aa55ProtocolCommand("032c050000000000", "03AC"))
+        await inv._read_from_socket(Aa55ProtocolCommand(f"032d050000173b{pct:02x}", "03AD"))
+        logger.info("Inverter discharge timestamp=%s setpoint_w=%s pct=%s", utc_now_iso(), safe_watts, pct)
+
     async def handle_setpoint(self, setpoint_w: int) -> None:
         if self.stopped:
             logger.warning("Ignoring setpoint_w=%s because bridge is stopped", setpoint_w)
@@ -186,9 +206,22 @@ class GoodWeBridge:
             if vbattery1 <= 0:
                 raise ValueError(f"Invalid live battery voltage: {vbattery1}")
             amps = self.watts_to_amps(setpoint_w, vbattery1)
+            await self.write_discharge_percent(inv, 0)
             await self.write_charge_current(inv, amps, setpoint_w=setpoint_w, vbattery1=vbattery1)
         except Exception:
             logger.exception("Failed to handle setpoint_w=%s", setpoint_w)
+            self.publish_status(STATUS_ERROR)
+
+    async def handle_discharge_setpoint(self, setpoint_w: int) -> None:
+        if self.stopped and setpoint_w > 0:
+            logger.warning("Ignoring discharge_w=%s because bridge is stopped", setpoint_w)
+            return
+        try:
+            inv = await self.get_inverter()
+            await self.write_charge_current(inv, 0, setpoint_w=0, vbattery1=0)
+            await self.write_discharge_percent(inv, setpoint_w)
+        except Exception:
+            logger.exception("Failed to handle discharge_w=%s", setpoint_w)
             self.publish_status(STATUS_ERROR)
 
     async def handle_command(self, command: str) -> None:
@@ -199,9 +232,13 @@ class GoodWeBridge:
                 data = await inv.read_runtime_data()
                 vbattery1 = float(data["vbattery1"])
                 await self.write_charge_current(inv, 0, setpoint_w=0, vbattery1=vbattery1)
+                await self.write_discharge_percent(inv, 0)
             except Exception:
                 logger.exception("Failed to stop charging")
                 self.publish_status(STATUS_ERROR)
+        elif command == "discharge":
+            self.stopped = False
+            logger.info("Resumed discharge setpoint handling")
         elif command == "resume":
             self.stopped = False
             logger.info("Resumed normal setpoint handling")
