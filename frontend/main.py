@@ -33,6 +33,7 @@ def render_page(active: str, body: str) -> str:
           input {{ padding:8px; border:1px solid #cbd5e1; border-radius:8px; }}
           button {{ margin:6px 6px 6px 0; padding:10px 14px; border:0; border-radius:8px; background:#2563eb; color:white; }}
           .badge {{ padding:4px 8px; border-radius:999px; background:#dbeafe; color:#1e40af; }}
+          .error {{ color:#b91c1c; font-weight:700; }}
         </style>
       </head>
       <body><nav><h1>Minyad</h1>{links}</nav><main>{body}</main></body>
@@ -84,7 +85,8 @@ def battery_control_body() -> str:
         <p>Charge current: <strong id='battery-charge-current'>--</strong> A</p>
         <p>Battery mode: <strong id='battery-mode'>--</strong></p>
         <p>Setpoint: <strong id='battery-setpoint'>--</strong> W</p>
-        <p>Bridge: <strong id='battery-bridge'>--</strong></p>
+        <p>Bridge status: <strong id='battery-bridge'>--</strong></p>
+        <p>Bridge last seen: <strong id='battery-bridge-last-seen'>--</strong></p>
         <p>Override: <strong id='battery-override'>none</strong></p>
       </div>
       <p id='battery-status-error' role='alert'></p>
@@ -116,9 +118,12 @@ def battery_control_body() -> str:
           document.getElementById('battery-charge-current').textContent = displayValue(data.charge_i);
           document.getElementById('battery-mode').textContent = data.mode_label || displayValue(data.mode);
           document.getElementById('battery-setpoint').textContent = displayValue(data.setpoint_w);
-          document.getElementById('battery-bridge').textContent = data.bridge_status || (data.available === true ? 'online' : data.available === false ? 'offline' : '--');
+          const bridgeStatus = data.bridge_status || (data.available === true ? 'online' : data.available === false ? 'offline' : '--');
+          document.getElementById('battery-bridge').textContent = data.bridge_last_seen_valid === false ? `${bridgeStatus} (error)` : bridgeStatus;
+          document.getElementById('battery-bridge-last-seen').textContent = data.bridge_last_seen ? `${data.bridge_last_seen} (${displayValue(data.bridge_last_seen_age_seconds, 's')} ago)` : '--';
           document.getElementById('battery-override').textContent = data.override_mode || 'none';
-          error.textContent = '';
+          error.textContent = data.bridge_last_seen_error || '';
+          error.className = data.bridge_last_seen_error ? 'error' : '';
         } catch (err) {
           error.textContent = err.message || 'Unable to load battery status';
         }

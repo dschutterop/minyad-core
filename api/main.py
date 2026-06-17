@@ -31,6 +31,36 @@ BATTERY_KEYS = {
 TEXT_KEYS = {"inverter_ip"}
 
 
+def parse_bridge_last_seen(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def enrich_bridge_health(payload: dict[str, Any]) -> None:
+    last_seen_value = payload.get("bridge_last_seen")
+    last_seen = parse_bridge_last_seen(last_seen_value if isinstance(last_seen_value, str) else None)
+    payload["bridge_last_seen_valid"] = False
+    if last_seen is None:
+        payload["bridge_last_seen_error"] = "missing or invalid bridge last_seen"
+        if payload.get("bridge_status") == "online":
+            payload["available"] = False
+        return
+
+    age_seconds = (datetime.now(timezone.utc) - last_seen).total_seconds()
+    payload["bridge_last_seen_age_seconds"] = max(0, round(age_seconds))
+    payload["bridge_last_seen_valid"] = age_seconds <= 60
+    if age_seconds > 60:
+        payload["bridge_last_seen_error"] = "bridge last_seen is older than 60 seconds"
+        payload["available"] = False
+
+
 class ApiKeyCreate(BaseModel):
     name: str
 
@@ -116,6 +146,11 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
             payload[key] = int(payload[key])
     if "voltage" in payload and payload["voltage"] is not None:
         payload["voltage"] = float(payload["voltage"])
+    if "mode" in payload and payload["mode"] is not None:
+        payload["mode"] = int(payload["mode"])
+    if "available" in payload and payload["available"] is not None:
+        payload["available"] = str(payload["available"]).lower() == "true"
+    enrich_bridge_health(payload)
     return payload
 
 
