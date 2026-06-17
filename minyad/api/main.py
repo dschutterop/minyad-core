@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from minyad.common.config import get_config
 from minyad.common.db import (
     connect,
     get_settings,
@@ -11,6 +12,7 @@ from minyad.common.db import (
     latest_forecast,
     recent_control_log,
 )
+from minyad.integrations.goodwe import build_goodwe_client
 
 app = FastAPI(title="Minyad API", version="0.1.0")
 
@@ -18,6 +20,70 @@ app = FastAPI(title="Minyad API", version="0.1.0")
 class SettingUpdate(BaseModel):
     value: str
     description: str | None = None
+
+
+def _value(data: dict[str, Any], key: str, default: Any = None) -> Any:
+    value = data.get(key, default)
+    return default if value == "" else value
+
+
+def _goodwe_setup_status(data: dict[str, Any]) -> dict[str, Any]:
+    battery_soc = _value(data, "battery_soc")
+    battery_errors = int(_value(data, "battery_error", 0) or 0)
+    battery_warnings = int(_value(data, "battery_warning", 0) or 0)
+    meter_status = int(_value(data, "meter_status", 0) or 0)
+    grid_mode = int(_value(data, "grid_mode", 0) or 0)
+    issues: list[str] = []
+    if battery_soc in (None, 0):
+        issues.append("Batterij-SOC is 0 of onbekend")
+    if battery_errors:
+        issues.append(f"Batterijfout actief ({battery_errors})")
+    if battery_warnings:
+        issues.append(f"Batterijwaarschuwing actief ({battery_warnings})")
+    if meter_status != 1:
+        issues.append("Meterstatus is niet verbonden/ok")
+    if grid_mode != 1:
+        issues.append("Omvormer is niet on-grid")
+
+    return {
+        "overall": "ok" if not issues else "warning",
+        "issues": issues,
+        "battery": {
+            "soc_pct": battery_soc,
+            "soh_pct": _value(data, "battery_soh"),
+            "voltage_v": _value(data, "vbattery1"),
+            "current_a": _value(data, "ibattery1"),
+            "power_w": _value(data, "pbattery1"),
+            "temperature_c": _value(data, "battery_temperature"),
+            "mode": _value(data, "battery_mode_label", _value(data, "battery_mode")),
+            "charge_limit_w": _value(data, "battery_charge_limit"),
+            "discharge_limit_w": _value(data, "battery_discharge_limit"),
+            "error": battery_errors,
+            "warning": battery_warnings,
+        },
+        "grid": {
+            "voltage_v": _value(data, "vgrid"),
+            "current_a": _value(data, "igrid"),
+            "power_w": _value(data, "pgrid"),
+            "frequency_hz": _value(data, "fgrid"),
+            "mode": _value(data, "grid_mode_label", _value(data, "grid_mode")),
+            "direction": _value(data, "grid_in_out_label", _value(data, "grid_in_out")),
+        },
+        "load": {
+            "voltage_v": _value(data, "vload"),
+            "current_a": _value(data, "iload"),
+            "power_w": _value(data, "pload"),
+            "house_consumption_w": _value(data, "house_consumption"),
+        },
+        "inverter": {
+            "work_mode": _value(data, "work_mode_label", _value(data, "work_mode")),
+            "temperature_c": _value(data, "temperature"),
+            "diagnose": _value(data, "diagnose_result_label", _value(data, "diagnose_result")),
+            "pv_power_w": _value(data, "ppv"),
+            "total_power_w": _value(data, "total_power"),
+        },
+        "raw": data,
+    }
 
 
 @app.get("/health")
@@ -48,6 +114,15 @@ def status() -> dict[str, Any]:
             "services": services,
         }
     )
+
+
+@app.get("/api/goodwe/status")
+def goodwe_status() -> dict[str, Any]:
+    try:
+        data = build_goodwe_client(get_config()).read_runtime_data()
+    except Exception as exc:  # noqa: BLE001 - API boundary returns diagnostics
+        raise HTTPException(status_code=502, detail=f"Could not read GoodWe runtime data: {exc}") from exc
+    return json_safe(_goodwe_setup_status(data))
 
 
 @app.get("/api/settings")
