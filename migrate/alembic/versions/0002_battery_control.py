@@ -33,6 +33,7 @@ DEFAULT_SETTINGS = {
     "battery.stop_duration": "300",
     "battery.cooldown": "600",
     "battery.max_charge_w": "1440",
+    "battery.max_discharge_w": "5000",
     "battery.max_charge_a": "30",
     "battery.nominal_v": "48",
     "battery.inverter_ip": "192.168.1.50",
