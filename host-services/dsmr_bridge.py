@@ -20,7 +20,8 @@ load_dotenv()
 LOGGER_NAME = "dsmr_bridge"
 logger = logging.getLogger(LOGGER_NAME)
 
-CLIENT_ID = "minyad-dsmr-bridge"
+SOURCE_CLIENT_ID = "minyad-dsmr-bridge-source"
+TARGET_CLIENT_ID = "minyad-dsmr-bridge-target"
 STATUS_OK = "ok"
 STATUS_STALE = "stale"
 STATUS_DISCONNECTED = "disconnected"
@@ -61,12 +62,24 @@ def _get_env_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer, got {value!r}") from exc
 
 
+def _get_first_env_int(names: tuple[str, ...], default: int) -> int:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and value != "":
+            return _get_env_int(name, default)
+    return default
+
+
 @dataclass(frozen=True)
 class Config:
-    mqtt_host: str
-    mqtt_port: int
-    mqtt_user: str | None
-    mqtt_pass: str | None
+    dsmr_mqtt_host: str
+    dsmr_mqtt_port: int
+    dsmr_mqtt_user: str | None
+    dsmr_mqtt_pass: str | None
+    minyad_mqtt_host: str
+    minyad_mqtt_port: int
+    minyad_mqtt_user: str | None
+    minyad_mqtt_pass: str | None
     dsmr_topic_prefix: str
     minyad_topic_prefix: str
     stale_timeout: int
@@ -75,9 +88,18 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        mqtt_host = os.getenv("MQTT_BROKER") or os.getenv("MQTT_HOST")
-        if not mqtt_host:
-            raise ValueError("MQTT_BROKER is required")
+        dsmr_mqtt_host = os.getenv("DSMR_MQTT_BROKER") or os.getenv("DSMR_MQTT_HOST")
+        if not dsmr_mqtt_host:
+            raise ValueError("DSMR_MQTT_BROKER is required")
+
+        minyad_mqtt_host = os.getenv("MQTT_BROKER") or os.getenv("MINYAD_MQTT_BROKER") or os.getenv("MQTT_HOST")
+        if not minyad_mqtt_host:
+            raise ValueError("MQTT_BROKER is required for the Minyad target broker")
+
+        dsmr_mqtt_port = _get_env_int("DSMR_MQTT_PORT", 1883)
+        minyad_mqtt_port = _get_first_env_int(("MQTT_PORT", "MINYAD_MQTT_PORT"), 1883)
+        if dsmr_mqtt_host == minyad_mqtt_host and dsmr_mqtt_port == minyad_mqtt_port:
+            raise ValueError("DSMR_MQTT_BROKER must point to a different broker than the Minyad target MQTT_BROKER")
 
         stale_timeout = _get_env_int("STALE_TIMEOUT", 60)
         dead_timeout = _get_env_int("DEAD_TIMEOUT", 300)
@@ -87,10 +109,14 @@ class Config:
             raise ValueError("DEAD_TIMEOUT must be greater than STALE_TIMEOUT")
 
         return cls(
-            mqtt_host=mqtt_host,
-            mqtt_port=_get_env_int("MQTT_PORT", 1883),
-            mqtt_user=os.getenv("MQTT_USER") or None,
-            mqtt_pass=os.getenv("MQTT_PASS") or None,
+            dsmr_mqtt_host=dsmr_mqtt_host,
+            dsmr_mqtt_port=dsmr_mqtt_port,
+            dsmr_mqtt_user=os.getenv("DSMR_MQTT_USER") or None,
+            dsmr_mqtt_pass=os.getenv("DSMR_MQTT_PASS") or None,
+            minyad_mqtt_host=minyad_mqtt_host,
+            minyad_mqtt_port=minyad_mqtt_port,
+            minyad_mqtt_user=os.getenv("MQTT_USER") or os.getenv("MINYAD_MQTT_USER") or None,
+            minyad_mqtt_pass=os.getenv("MQTT_PASS") or os.getenv("MINYAD_MQTT_PASS") or None,
             dsmr_topic_prefix=os.getenv("DSMR_TOPIC_PREFIX", "dsmr/reading").strip("/"),
             minyad_topic_prefix=os.getenv("MINYAD_TOPIC_PREFIX", "minyad/grid").strip("/"),
             stale_timeout=stale_timeout,
@@ -113,18 +139,26 @@ class DsmrBridge:
         self.state: dict[str, float | str] = {}
         self.state_lock = threading.Lock()
         self.last_update_monotonic: float | None = None
-        self.connected = False
+        self.source_connected = False
+        self.target_connected = False
         self.status_thread: threading.Thread | None = None
         self.status_stop_event = threading.Event()
 
-        self.mqtt_client = mqtt.Client(client_id=CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
-        self.mqtt_client.will_set(self.minyad_topic("status"), STATUS_DISCONNECTED, retain=True)
-        if config.mqtt_user:
-            self.mqtt_client.username_pw_set(config.mqtt_user, config.mqtt_pass)
-        self.mqtt_client.on_connect = self.on_connect
-        self.mqtt_client.on_disconnect = self.on_disconnect
-        self.mqtt_client.on_message = self.on_message
-        self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=60)
+        self.source_client = mqtt.Client(client_id=SOURCE_CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
+        if config.dsmr_mqtt_user:
+            self.source_client.username_pw_set(config.dsmr_mqtt_user, config.dsmr_mqtt_pass)
+        self.source_client.on_connect = self.on_source_connect
+        self.source_client.on_disconnect = self.on_source_disconnect
+        self.source_client.on_message = self.on_message
+        self.source_client.reconnect_delay_set(min_delay=1, max_delay=60)
+
+        self.target_client = mqtt.Client(client_id=TARGET_CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
+        self.target_client.will_set(self.minyad_topic("status"), STATUS_DISCONNECTED, retain=True)
+        if config.minyad_mqtt_user:
+            self.target_client.username_pw_set(config.minyad_mqtt_user, config.minyad_mqtt_pass)
+        self.target_client.on_connect = self.on_target_connect
+        self.target_client.on_disconnect = self.on_target_disconnect
+        self.target_client.reconnect_delay_set(min_delay=1, max_delay=60)
 
     def dsmr_topic(self, field: str) -> str:
         return f"{self.config.dsmr_topic_prefix}/{field}"
@@ -134,27 +168,48 @@ class DsmrBridge:
 
     def publish(self, field: str, payload: object) -> None:
         topic = self.minyad_topic(field)
-        result = self.mqtt_client.publish(topic, str(payload), retain=True)
+        result = self.target_client.publish(topic, str(payload), retain=True)
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
             logger.warning("MQTT publish failed for %s with rc=%s", topic, result.rc)
             return
         logger.debug("Published %s=%s", topic, payload)
 
-    def on_connect(self, client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
+    def on_source_connect(self, client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
         if rc != 0:
-            self.connected = False
-            logger.warning("MQTT connection failed with rc=%s", rc)
+            self.source_connected = False
+            logger.warning("DSMR source MQTT connection failed with rc=%s", rc)
             return
 
-        self.connected = True
-        logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
+        self.source_connected = True
+        logger.info(
+            "DSMR source MQTT connected to %s:%s",
+            self.config.dsmr_mqtt_host,
+            self.config.dsmr_mqtt_port,
+        )
         subscriptions = [(self.dsmr_topic(field), 1) for field in sorted(SUBSCRIBED_FIELDS)]
         client.subscribe(subscriptions)
 
-    def on_disconnect(self, _client: mqtt.Client, _userdata: Any, rc: int) -> None:
-        self.connected = False
-        logger.warning("MQTT disconnected with rc=%s", rc)
+    def on_source_disconnect(self, _client: mqtt.Client, _userdata: Any, rc: int) -> None:
+        self.source_connected = False
+        logger.warning("DSMR source MQTT disconnected with rc=%s", rc)
         self.publish("status", STATUS_DISCONNECTED)
+
+    def on_target_connect(self, _client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
+        if rc != 0:
+            self.target_connected = False
+            logger.warning("Minyad target MQTT connection failed with rc=%s", rc)
+            return
+
+        self.target_connected = True
+        logger.info(
+            "Minyad target MQTT connected to %s:%s",
+            self.config.minyad_mqtt_host,
+            self.config.minyad_mqtt_port,
+        )
+
+    def on_target_disconnect(self, _client: mqtt.Client, _userdata: Any, rc: int) -> None:
+        self.target_connected = False
+        logger.warning("Minyad target MQTT disconnected with rc=%s", rc)
 
     def on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         try:
@@ -212,9 +267,10 @@ class DsmrBridge:
     def current_status(self) -> str:
         with self.state_lock:
             last_update = self.last_update_monotonic
-            connected = self.connected
+            source_connected = self.source_connected
+            target_connected = self.target_connected
 
-        if not connected or last_update is None:
+        if not source_connected or not target_connected or last_update is None:
             return STATUS_DISCONNECTED
 
         age = time.monotonic() - last_update
@@ -234,15 +290,19 @@ class DsmrBridge:
     async def run(self) -> None:
         self.status_thread = threading.Thread(target=self.status_loop, name="dsmr-status", daemon=True)
         self.status_thread.start()
-        self.mqtt_client.connect_async(self.config.mqtt_host, self.config.mqtt_port, keepalive=60)
-        self.mqtt_client.loop_start()
+        self.target_client.connect_async(self.config.minyad_mqtt_host, self.config.minyad_mqtt_port, keepalive=60)
+        self.source_client.connect_async(self.config.dsmr_mqtt_host, self.config.dsmr_mqtt_port, keepalive=60)
+        self.target_client.loop_start()
+        self.source_client.loop_start()
         await self.shutdown_event.wait()
         self.publish("status", STATUS_DISCONNECTED)
         self.status_stop_event.set()
         if self.status_thread:
             self.status_thread.join(timeout=5)
-        self.mqtt_client.loop_stop()
-        self.mqtt_client.disconnect()
+        self.source_client.loop_stop()
+        self.target_client.loop_stop()
+        self.source_client.disconnect()
+        self.target_client.disconnect()
 
     def request_shutdown(self) -> None:
         logger.info("Shutdown requested")
