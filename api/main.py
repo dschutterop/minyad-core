@@ -42,6 +42,7 @@ MQTT_STATUS_KEYS = {
     "minyad/control/state": "state",
     "minyad/control/override_mode": "override_mode",
     "minyad/control/setpoint_w": "setpoint_w",
+    "minyad/control/discharge_w": "discharge_w",
 }
 MQTT_STATUS_LOCK = Lock()
 MQTT_STATUS: dict[str, str] = {}
@@ -54,6 +55,7 @@ BATTERY_KEYS = {
     "stop_duration": (10, 3600),
     "cooldown": (60, 7200),
     "max_charge_w": (100, 5000),
+    "max_discharge_w": (0, 5000),
     "nominal_v": (40, 60),
     "inverter_retries": (1, 10),
     "inverter_delay": (1, 30),
@@ -246,6 +248,7 @@ class BatterySettingsUpdate(BaseModel):
     stop_duration: int | None = None
     cooldown: int | None = None
     max_charge_w: int | None = None
+    max_discharge_w: int | None = None
     inverter_ip: str | None = None
     inverter_retries: int | None = None
     inverter_delay: int | None = None
@@ -390,8 +393,11 @@ async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSe
     configured_max_w = int(settings.get("max_charge_w", 0))
     hardware_max_w = int(settings.get("max_charge_a", 30)) * int(settings.get("nominal_v", 48))
     max_charge_w = min(configured_max_w, hardware_max_w)
-    if request.watts is not None and request.watts > max_charge_w:
-        raise HTTPException(status_code=422, detail=f"watts must not exceed MAX_CHARGE_W ({max_charge_w})")
+    max_discharge_w = int(settings.get("max_discharge_w", 5000))
+    max_allowed_w = max_discharge_w if request.mode == "force_discharge" else max_charge_w
+    if request.watts is not None and request.watts > max_allowed_w:
+        limit_name = "MAX_DISCHARGE_W" if request.mode == "force_discharge" else "MAX_CHARGE_W"
+        raise HTTPException(status_code=422, detail=f"watts must not exceed {limit_name} ({max_allowed_w})")
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=request.duration_seconds) if request.duration_seconds else None
     await session.execute(
         text("""

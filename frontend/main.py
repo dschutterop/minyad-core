@@ -58,6 +58,7 @@ def battery_settings_body() -> str:
         <label>Stop duration s <input name='stop_duration' type='number' min='10' max='3600'></label>
         <label>Cooldown s <input name='cooldown' type='number' min='60' max='7200'></label>
         <label>Max charge W <input name='max_charge_w' type='number' min='100' max='5000'></label>
+        <label>Max discharge W <input name='max_discharge_w' type='number' min='0' max='5000'></label>
         <label>Inverter IP <input name='inverter_ip' type='text' pattern='^([0-9]{1,3}\\.){3}[0-9]{1,3}$'></label>
         <label>Retries <input name='inverter_retries' type='number' min='1' max='10'></label>
         <label>Retry delay s <input name='inverter_delay' type='number' min='1' max='30'></label>
@@ -159,7 +160,8 @@ def battery_control_body() -> str:
         <p>Voltage: <strong id='battery-voltage'>--</strong> V</p>
         <p>Charge current: <strong id='battery-charge-current'>--</strong> A</p>
         <p>Battery mode: <strong id='battery-mode'>--</strong></p>
-        <p>Setpoint: <strong id='battery-setpoint'>--</strong> W</p>
+        <p>Charge setpoint: <strong id='battery-setpoint'>--</strong> W</p>
+        <p>Discharge setpoint: <strong id='battery-discharge-setpoint'>--</strong> W</p>
         <p>Bridge status: <strong id='battery-bridge'>--</strong></p>
         <p>Bridge last seen: <strong id='battery-bridge-last-seen'>--</strong></p>
         <p>Override: <strong id='battery-override'>none</strong></p>
@@ -193,6 +195,7 @@ def battery_control_body() -> str:
           document.getElementById('battery-charge-current').textContent = displayValue(data.charge_i);
           document.getElementById('battery-mode').textContent = data.mode_label || displayValue(data.mode);
           document.getElementById('battery-setpoint').textContent = displayValue(data.setpoint_w);
+          document.getElementById('battery-discharge-setpoint').textContent = displayValue(data.discharge_w);
           const bridgeStatus = data.bridge_status || (data.available === true ? 'online' : data.available === false ? 'offline' : '--');
           document.getElementById('battery-bridge').textContent = data.bridge_last_seen_valid === false ? `${bridgeStatus} (error)` : bridgeStatus;
           document.getElementById('battery-bridge-last-seen').textContent = data.bridge_last_seen ? `${data.bridge_last_seen} (${displayValue(data.bridge_last_seen_age_seconds, 's')} ago)` : '--';
@@ -209,7 +212,7 @@ def battery_control_body() -> str:
         loadBatteryStatus();
       }
       function forceCharge(){ const watts = Number(prompt('Charge watts?')); if(watts) sendOverride({mode:'force_on', watts}); }
-      function forceDischarge(){ const watts = Number(prompt('Discharge watts?')); if(watts) sendOverride({mode:'force_discharge', watts}); }
+      function forceDischarge(){ const watts = Number(prompt('Discharge watts naar huis/net via GoodWe bridge?')); if(watts) sendOverride({mode:'force_discharge', watts}); }
       async function resumeNormal(){ if(confirm('Resume normal hysteresis control?')){ await fetch('/api/battery/override',{method:'DELETE'}); loadBatteryStatus(); } }
       loadBatteryStatus(); setInterval(loadBatteryStatus, 10000);
     </script>
