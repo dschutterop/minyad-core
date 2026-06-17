@@ -60,8 +60,10 @@ services:
     env_file: .env
     depends_on: [minyad-mqtt, minyad-db]
     ports:
-      - "8000:8000"
-    networks: [minyad-internal]
+      - target: 8000
+        published: "8002"
+        host_ip: 192.168.110.5
+    networks: [minyad-internal, minyad-public]
 
   minyad-frontend:
     build:
@@ -72,8 +74,10 @@ services:
     env_file: .env
     depends_on: [minyad-api, minyad-mqtt, minyad-db]
     ports:
-      - "8080:8080"
-    networks: [minyad-internal]
+      - target: 8080
+        published: "8084"
+        host_ip: 192.168.110.5
+    networks: [minyad-internal, minyad-public]
 
   minyad-forecast:
     build:
@@ -98,6 +102,7 @@ services:
 networks:
   minyad-internal:
     internal: true
+  minyad-public: {}
 
 volumes:
   minyad-db-data:
