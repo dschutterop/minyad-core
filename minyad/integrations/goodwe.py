@@ -25,6 +25,9 @@ class GoodWeClient(ABC):
     def read_state(self) -> BatteryState: ...
 
     @abstractmethod
+    def read_runtime_data(self) -> dict[str, Any]: ...
+
+    @abstractmethod
     def set_charge_power(self, watts: int) -> None: ...
 
     @abstractmethod
@@ -57,9 +60,15 @@ class LocalGoodWeClient(GoodWeClient):
         inverter = await self._get_inverter()
         return await inverter.read_runtime_data()
 
+    def read_runtime_data(self) -> dict[str, Any]:
+        return with_backoff(
+            lambda: asyncio.run(self._read_runtime_data()),
+            label="goodwe runtime data",
+        )
+
     def read_state(self) -> BatteryState:
         def call() -> BatteryState:
-            data = asyncio.run(self._read_runtime_data())
+            data = self.read_runtime_data()
             soc = data.get("battery_soc") or data.get("soc") or data.get("battery_state_of_charge")
             battery_power = int(data.get("battery_power") or data.get("pbattery1") or 0)
             charge_w = abs(battery_power) if battery_power < 0 else 0
@@ -98,6 +107,9 @@ class ModbusGoodWeClient(GoodWeClient):
     def __init__(self, config: AppConfig):
         self.config = config
 
+    def read_runtime_data(self) -> dict[str, Any]:
+        raise NotImplementedError("Modbus/RS485 fallback is scaffolded; configure site-specific registers.")
+
     def read_state(self) -> BatteryState:
         raise NotImplementedError("Modbus/RS485 fallback is scaffolded; configure site-specific registers.")
 
@@ -115,6 +127,13 @@ class FallbackGoodWeClient(GoodWeClient):
     def __init__(self, primary: GoodWeClient, fallback: GoodWeClient):
         self.primary = primary
         self.fallback = fallback
+
+    def read_runtime_data(self) -> dict[str, Any]:
+        try:
+            return self.primary.read_runtime_data()
+        except Exception as exc:  # noqa: BLE001 - fallback boundary
+            LOG.warning("Primary GoodWe runtime data failed, trying Modbus fallback: %s", exc)
+            return self.fallback.read_runtime_data()
 
     def read_state(self) -> BatteryState:
         try:

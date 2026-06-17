@@ -35,3 +35,19 @@ th, td { padding: .65rem; border-bottom: 1px solid #29364f; text-align: left; ve
   .sidebar { position: static; height: auto; }
   nav { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
 }
+
+.panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.status-pill { border-radius: 999px; padding: .35rem .75rem; font-weight: 700; color: #08111f; }
+.ok-bg { background: #86efac; }
+.warning-bg { background: #fde68a; }
+.error-bg { background: #fca5a5; }
+.notice { margin-bottom: 1rem; padding: .75rem; border: 1px solid #fca5a5; border-radius: 12px; background: #451a1a; color: #fecaca; }
+.hidden { display: none; }
+.setup-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 1rem; }
+.metric-card { box-shadow: none; }
+.metric-card h3, .diagnostics h3 { color: #9fb3d9; font-size: .85rem; margin-top: 0; text-transform: uppercase; letter-spacing: .07em; }
+.diagnostics { border: 1px solid #29364f; border-radius: 14px; background: #111a2c; padding: 1rem; margin-bottom: 1rem; }
+.diagnostics ul { margin: 0 0 .75rem 1.25rem; padding: 0; color: #fde68a; }
+details { border: 1px solid #29364f; border-radius: 14px; background: #0b1220; padding: .75rem; }
+summary { cursor: pointer; color: #dbeafe; font-weight: 700; }
+pre { max-height: 360px; overflow: auto; white-space: pre-wrap; color: #bfd0ee; }
