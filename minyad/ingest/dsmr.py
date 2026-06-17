@@ -192,12 +192,12 @@ class DsmrCurrentPowerState:
         import_w = int(reading.get("import_w") or 0)
         export_w = int(reading.get("export_w") or 0)
         if "electricity_currently_delivered" in normalized_topic:
+            self.import_w = import_w
             if import_w > 0:
-                self.import_w = import_w
                 self.export_w = 0
         elif "electricity_currently_returned" in normalized_topic:
+            self.export_w = export_w
             if export_w > 0:
-                self.export_w = export_w
                 self.import_w = 0
 
         merged = dict(reading)
