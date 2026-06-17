@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from threading import Event, Lock
 from typing import Any, Literal
@@ -15,12 +17,17 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.db import get_session
+from shared.db import AsyncSessionLocal, get_session
 from shared.mqtt_client import MinyadMqttClient
 
 app = FastAPI(title="Minyad API")
 mqtt = MinyadMqttClient("minyad-api")
 LOGGER = logging.getLogger(__name__)
+
+STARTUP_AT = datetime.now(timezone.utc)
+MQTT_EVENTS: deque[dict[str, str]] = deque(maxlen=100)
+LAST_RETAINED_FETCH: dict[str, Any] = {}
+_debug_enabled = False
 
 MQTT_STATUS_KEYS = {
     "minyad/battery/soc": "soc",
@@ -54,13 +61,43 @@ BATTERY_KEYS = {
 TEXT_KEYS = {"inverter_ip"}
 
 
+def _apply_log_level(debug: bool) -> None:
+    global _debug_enabled
+    _debug_enabled = debug
+    level = logging.DEBUG if debug else logging.INFO
+    logging.getLogger().setLevel(level)
+    logging.getLogger("paho").setLevel(level)
+    LOGGER.info("Log level set to %s (debug_logging=%s)", logging.getLevelName(level), debug)
+
+
+async def _refresh_debug_setting() -> None:
+    while True:
+        await asyncio.sleep(30)
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(text("select value from settings where key = 'system.debug_logging'"))
+                val = result.scalar_one_or_none() or "false"
+                new_debug = val == "true"
+                if new_debug != _debug_enabled:
+                    _apply_log_level(new_debug)
+        except Exception:
+            LOGGER.debug("Could not refresh debug setting from DB")
+
+
 def handle_status_mqtt(topic: str, payload: bytes) -> None:
     key = MQTT_STATUS_KEYS.get(topic)
+    decoded = payload.decode()
     if key is None:
         LOGGER.debug("Ignoring unsupported status MQTT topic %s", topic)
         return
+    LOGGER.debug("MQTT status update: topic=%s key=%s value=%r", topic, key, decoded)
     with MQTT_STATUS_LOCK:
-        MQTT_STATUS[key] = payload.decode()
+        MQTT_STATUS[key] = decoded
+    MQTT_EVENTS.append({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "topic": topic,
+        "payload": decoded[:200],
+    })
 
 
 def latest_mqtt_status() -> dict[str, str]:
@@ -85,6 +122,12 @@ def cached_status_is_incomplete(payload: dict[str, Any]) -> bool:
 
 def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOUT_SECONDS) -> dict[str, str]:
     """Fetch retained status topics directly from MQTT as a startup/cache fallback."""
+    global LAST_RETAINED_FETCH
+    attempt_ts = datetime.now(timezone.utc).isoformat()
+    LOGGER.debug(
+        "collect_retained_mqtt_status: connecting to %s:%s timeout=%.1fs",
+        mqtt.config.host, mqtt.config.port, timeout_seconds,
+    )
     retained_status: dict[str, str] = {}
     received = Event()
     expected_keys = set(MQTT_STATUS_KEYS.values())
@@ -93,28 +136,54 @@ def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOU
         key = MQTT_STATUS_KEYS.get(message.topic)
         if key is None:
             return
-        retained_status[key] = message.payload.decode()
+        decoded = message.payload.decode()
+        LOGGER.debug(
+            "collect_retained_mqtt_status: rx topic=%s key=%s value=%r retain=%d",
+            message.topic, key, decoded, message.retain,
+        )
+        retained_status[key] = decoded
         if expected_keys.issubset(retained_status):
             received.set()
 
     client = paho_mqtt.Client(
         paho_mqtt.CallbackAPIVersion.VERSION2,
-        client_id=f"minyad-api-retained-status-{uuid4()}",
+        client_id=f"minyad-api-retained-{uuid4()}",
     )
     client.on_message = on_message
-    client.connect(mqtt.config.host, mqtt.config.port, mqtt.config.keepalive)
-    client.loop_start()
     try:
-        for topic in ("minyad/battery/+", "minyad/bridge/+", "minyad/control/+"):
-            client.subscribe(topic)
-        received.wait(timeout_seconds)
-    finally:
-        client.loop_stop()
-        client.disconnect()
+        client.connect(mqtt.config.host, mqtt.config.port, mqtt.config.keepalive)
+        LOGGER.debug("collect_retained_mqtt_status: connected, subscribing")
+        client.loop_start()
+        try:
+            for topic in ("minyad/battery/+", "minyad/bridge/+", "minyad/control/+"):
+                client.subscribe(topic)
+                LOGGER.debug("collect_retained_mqtt_status: subscribed %s", topic)
+            completed = received.wait(timeout_seconds)
+            LOGGER.debug(
+                "collect_retained_mqtt_status: done completed=%s keys=%d/%d received=%s",
+                completed, len(retained_status), len(expected_keys), sorted(retained_status.keys()),
+            )
+        finally:
+            client.loop_stop()
+            client.disconnect()
+    except OSError as exc:
+        LOGGER.exception(
+            "collect_retained_mqtt_status: connection failed host=%s port=%s: %s",
+            mqtt.config.host, mqtt.config.port, exc,
+        )
+        LAST_RETAINED_FETCH = {"ts": attempt_ts, "success": False, "error": str(exc), "result": {}}
+        raise
 
     if retained_status:
         with MQTT_STATUS_LOCK:
             MQTT_STATUS.update(retained_status)
+    LAST_RETAINED_FETCH = {
+        "ts": attempt_ts,
+        "success": True,
+        "all_keys_received": received.is_set(),
+        "keys_received": sorted(retained_status.keys()),
+        "result": retained_status,
+    }
     return retained_status
 
 
@@ -150,6 +219,10 @@ def enrich_bridge_health(payload: dict[str, Any]) -> None:
 
 class ApiKeyCreate(BaseModel):
     name: str
+
+
+class SystemSettingsUpdate(BaseModel):
+    debug_logging: bool | None = None
 
 
 class BatteryOverrideRequest(BaseModel):
@@ -190,15 +263,66 @@ class BatterySettingsUpdate(BaseModel):
 
 @app.on_event("startup")
 async def startup() -> None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(text("select value from settings where key = 'system.debug_logging'"))
+        val = result.scalar_one_or_none() or "false"
+        _apply_log_level(val == "true")
     mqtt.start()
     mqtt.subscribe("minyad/battery/+", handle_status_mqtt)
     mqtt.subscribe("minyad/bridge/+", handle_status_mqtt)
     mqtt.subscribe("minyad/control/+", handle_status_mqtt)
+    asyncio.create_task(_refresh_debug_setting())
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/debug/status")
+async def debug_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    result = await session.execute(text("select value from settings where key = 'system.debug_logging'"))
+    debug_val = result.scalar_one_or_none() or "false"
+    with MQTT_STATUS_LOCK:
+        cache = dict(MQTT_STATUS)
+    with mqtt._subscriptions_lock:
+        subscriptions = list(mqtt._subscriptions.keys())
+    missing_keys = [k for k in ("soc", "soh", "power_w", "voltage", "mode", "mode_label", "charge_i", "bridge_status", "bridge_last_seen") if not cache.get(k)]
+    return {
+        "startup_at": STARTUP_AT.isoformat(),
+        "debug_logging": debug_val == "true",
+        "log_level": logging.getLevelName(logging.getLogger().level),
+        "mqtt": mqtt.connection_info(),
+        "mqtt_subscriptions": subscriptions,
+        "mqtt_status_cache": cache,
+        "mqtt_status_cache_complete": not cached_status_is_incomplete(cache),
+        "mqtt_status_missing_keys": missing_keys,
+        "recent_mqtt_events": list(MQTT_EVENTS)[-50:],
+        "last_retained_fetch": LAST_RETAINED_FETCH,
+    }
+
+
+@app.get("/system-settings")
+async def get_system_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    result = await session.execute(text("select value from settings where key = 'system.debug_logging'"))
+    val = result.scalar_one_or_none() or "false"
+    return {"debug_logging": val == "true"}
+
+
+@app.put("/system-settings")
+async def update_system_settings(update: SystemSettingsUpdate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    if update.debug_logging is not None:
+        val = "true" if update.debug_logging else "false"
+        await session.execute(
+            text("""
+                insert into settings (key, value, encrypted, updated_at) values ('system.debug_logging', :val, false, now())
+                on conflict (key) do update set value=:val, updated_at=now()
+            """),
+            {"val": val},
+        )
+        await session.commit()
+        _apply_log_level(update.debug_logging)
+    return await get_system_settings(session)
 
 
 @app.get("/settings")
@@ -228,12 +352,21 @@ async def battery_settings(session: AsyncSession) -> dict[str, Any]:
 async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     status = await session.execute(text("select key, value from settings where key like 'battery.status.%'"))
     payload: dict[str, Any] = {row.key.removeprefix("battery.status."): row.value for row in status}
-    payload.update(latest_mqtt_status())
+    LOGGER.debug("battery_status: db keys=%s", sorted(payload.keys()))
+    mqtt_cache = latest_mqtt_status()
+    LOGGER.debug("battery_status: mqtt cache keys=%s", sorted(mqtt_cache.keys()))
+    payload.update(mqtt_cache)
     if cached_status_is_incomplete(payload):
+        missing = [k for k in ("soc", "soh", "power_w", "voltage", "mode", "mode_label", "charge_i", "bridge_status", "bridge_last_seen") if not payload.get(k)]
+        LOGGER.debug("battery_status: incomplete, missing=%s — attempting retained fetch", missing)
         try:
-            payload.update(collect_retained_mqtt_status())
+            retained = collect_retained_mqtt_status()
+            LOGGER.debug("battery_status: retained fetch returned keys=%s", sorted(retained.keys()))
+            payload.update(retained)
         except OSError:
             LOGGER.exception("Unable to fetch retained MQTT status snapshot")
+    else:
+        LOGGER.debug("battery_status: cache complete, skipping retained fetch")
     override = await session.execute(text("select mode from battery_override where id = 1"))
     payload.setdefault("state", "IDLE")
     payload["override_mode"] = override.scalar_one_or_none() or "none"
@@ -247,6 +380,7 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     if "available" in payload and payload["available"] is not None:
         payload["available"] = str(payload["available"]).lower() == "true"
     enrich_bridge_health(payload)
+    LOGGER.debug("battery_status: final keys=%s", sorted(payload.keys()))
     return payload
 
 
