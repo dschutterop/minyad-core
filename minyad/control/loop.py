@@ -132,6 +132,9 @@ class DisabledGoodWeClient(GoodWeClient):
     def read_state(self) -> None:
         raise RuntimeError("GoodWe steering client does not support reads")
 
+    def read_runtime_data(self) -> dict[str, Any]:
+        raise RuntimeError("GoodWe steering client does not support runtime-data reads")
+
     def set_charge_power(self, watts: int) -> None:
         LOG.info("GoodWe steering disabled; skipping charge target %sW", watts)
 
