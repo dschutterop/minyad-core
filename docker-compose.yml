@@ -45,7 +45,7 @@ services:
       minyad-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-p", "1883", "-t", "healthcheck", "-n"]
+      test: ["CMD", "mosquitto_pub", "-h", "192.168.110.5", "-p", "1883", "-t", "healthcheck", "-n"]
       interval: 5s
       timeout: 5s
       retries: 10
