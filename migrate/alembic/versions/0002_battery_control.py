@@ -48,6 +48,9 @@ def ensure_settings_columns(bind: sa.engine.Connection) -> None:
         op.add_column("settings", sa.Column("encrypted", sa.Boolean(), nullable=False, server_default=sa.false()))
     if "updated_at" not in columns:
         op.add_column("settings", sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()))
+    if "is_secret" in columns:
+        op.execute(sa.text("update settings set is_secret = false where is_secret is null"))
+        op.alter_column("settings", "is_secret", server_default=sa.false(), existing_type=sa.Boolean())
 
 
 def upgrade() -> None:
