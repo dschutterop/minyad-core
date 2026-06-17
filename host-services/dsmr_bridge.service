@@ -1,0 +1,18 @@
+[Unit]
+Description=Minyad DSMR Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=minyad
+WorkingDirectory=/opt/minyad/host-services
+EnvironmentFile=/opt/minyad/host-services/.env
+ExecStart=/opt/minyad/host-services/venv/bin/python dsmr_bridge.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
