@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-side GoodWe inverter to MQTT bridge for Minyad VPP."""
+"""Host-side inverter to MQTT bridge for Minyad VPP."""
 
 from __future__ import annotations
 
@@ -11,27 +11,23 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-import goodwe
-from goodwe.protocol import Aa55ProtocolCommand
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
+
+from backends import GoodWeBackend, InverterBackend, ModbusBackend
 
 load_dotenv()
 
 LOGGER_NAME = "goodwe_bridge"
 logger = logging.getLogger(LOGGER_NAME)
 
-MQTT_TOPIC_SETPOINT_W = "minyad/control/setpoint_w"
+MQTT_TOPIC_CHARGE_W = "minyad/control/charge_w"
 MQTT_TOPIC_DISCHARGE_W = "minyad/control/discharge_w"
-MQTT_TOPIC_COMMAND = "minyad/control/command"
-MQTT_TOPIC_STATUS = "minyad/bridge/status"
-MQTT_TOPIC_LAST_SEEN = "minyad/bridge/last_seen"
 
-STATUS_ONLINE = "online"
-STATUS_OFFLINE = "offline"
+MQTT_TOPIC_INVERTER_STATUS = "minyad/inverter/status"
+STATUS_OK = "ok"
+STATUS_UNREACHABLE = "unreachable"
 STATUS_ERROR = "error"
-
-WORK_MODE_ECO = 3
 CLIENT_ID = "goodwe-bridge"
 
 
@@ -45,33 +41,54 @@ def _get_env_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer, got {value!r}") from exc
 
 
+def _get_env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number, got {value!r}") from exc
+
+
 @dataclass(frozen=True)
 class Config:
+    inverter_backend: str
     inverter_ip: str
+    inverter_max_w: int
+    modbus_gw_ip: str
+    modbus_gw_port: int
+    modbus_slave_id: int
+    modbus_timeout: float
     mqtt_host: str
     mqtt_port: int
+    mqtt_user: str | None
+    mqtt_pass: str | None
     poll_interval: int
     max_charge_a: int
-    max_discharge_w: int
     log_level: str
 
     @classmethod
     def from_env(cls) -> "Config":
-        inverter_ip = os.getenv("INVERTER_IP")
-        mqtt_host = os.getenv("MQTT_HOST")
-        if not inverter_ip:
-            raise ValueError("INVERTER_IP is required")
+        mqtt_host = os.getenv("MQTT_BROKER") or os.getenv("MQTT_HOST")
         if not mqtt_host:
-            raise ValueError("MQTT_HOST is required")
+            raise ValueError("MQTT_BROKER is required")
 
         max_charge_a = _get_env_int("MAX_CHARGE_A", 30)
         return cls(
-            inverter_ip=inverter_ip,
+            inverter_backend=os.getenv("INVERTER_BACKEND", "modbus").lower(),
+            inverter_ip=os.getenv("INVERTER_IP", "192.168.1.57"),
+            inverter_max_w=_get_env_int("INVERTER_MAX_W", _get_env_int("MAX_DISCHARGE_W", 5000)),
+            modbus_gw_ip=os.getenv("MODBUS_GW_IP", "192.168.1.58"),
+            modbus_gw_port=_get_env_int("MODBUS_GW_PORT", 502),
+            modbus_slave_id=_get_env_int("MODBUS_SLAVE_ID", 247),
+            modbus_timeout=_get_env_float("MODBUS_TIMEOUT", 5.0),
             mqtt_host=mqtt_host,
             mqtt_port=_get_env_int("MQTT_PORT", 1883),
+            mqtt_user=os.getenv("MQTT_USER"),
+            mqtt_pass=os.getenv("MQTT_PASS"),
             poll_interval=_get_env_int("POLL_INTERVAL", 30),
             max_charge_a=min(max_charge_a, 30),
-            max_discharge_w=_get_env_int("MAX_DISCHARGE_W", 5000),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
 
@@ -87,57 +104,47 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class GoodWeBridge:
-    def __init__(self, config: Config) -> None:
-        self.config = config
-        self.loop: asyncio.AbstractEventLoop | None = None
-        self.stopped = False
-        self.last_status: str | None = None
-        self.shutdown_event = asyncio.Event()
-        self.mqtt_client = mqtt.Client(
-            client_id=CLIENT_ID,
-            clean_session=False,
-            protocol=mqtt.MQTTv311,
+def build_backend(config: Config) -> InverterBackend:
+    if config.inverter_backend == "modbus":
+        return ModbusBackend(
+            host=config.modbus_gw_ip,
+            port=config.modbus_gw_port,
+            slave_id=config.modbus_slave_id,
+            timeout=config.modbus_timeout,
+            max_w=config.inverter_max_w,
         )
-        self.mqtt_client.will_set(MQTT_TOPIC_STATUS, STATUS_OFFLINE, retain=True)
+    if config.inverter_backend == "goodwe":
+        return GoodWeBackend(config.inverter_ip, config.inverter_max_w)
+    raise ValueError("INVERTER_BACKEND must be 'modbus' or 'goodwe'")
+
+
+class GoodWeBridge:
+    def __init__(self, config: Config, backend: InverterBackend) -> None:
+        self.config = config
+        self.backend = backend
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.shutdown_event = asyncio.Event()
+        self.mqtt_client = mqtt.Client(client_id=CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
+        self.mqtt_client.will_set(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
+        if config.mqtt_user:
+            self.mqtt_client.username_pw_set(config.mqtt_user, config.mqtt_pass)
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_disconnect = self.on_disconnect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=60)
 
-    async def get_inverter(self, retries: int = 5, delay: int = 3) -> Any:
-        for attempt in range(retries):
-            try:
-                return await goodwe.connect(
-                    self.config.inverter_ip,
-                    family="ES",
-                )
-            except goodwe.exceptions.InverterError as e:
-                logger.warning("Connect attempt %s/%s failed: %s", attempt + 1, retries, e)
-                if attempt < retries - 1:
-                    await asyncio.sleep(delay)
-        raise RuntimeError(f"Inverter unreachable after {retries} attempts")
-
     def publish(self, topic: str, payload: object, retain: bool = True) -> None:
         self.mqtt_client.publish(topic, str(payload), retain=retain)
-
-    def publish_status(self, status: str) -> None:
-        self.publish(MQTT_TOPIC_STATUS, status, retain=True)
-        if status != self.last_status:
-            logger.info("Bridge status transition: %s -> %s", self.last_status, status)
-            self.last_status = status
 
     def on_connect(self, client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
         if rc == 0:
             logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
-            client.subscribe([(MQTT_TOPIC_SETPOINT_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1), (MQTT_TOPIC_COMMAND, 1)])
+            client.subscribe([(MQTT_TOPIC_CHARGE_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1)])
         else:
             logger.error("MQTT connection failed with rc=%s", rc)
 
     def on_disconnect(self, _client: mqtt.Client, _userdata: Any, rc: int) -> None:
         logger.warning("MQTT disconnected with rc=%s", rc)
-        if rc == 0:
-            self.publish_status(STATUS_OFFLINE)
 
     def on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         if self.loop is None:
@@ -145,138 +152,63 @@ class GoodWeBridge:
             return
 
         payload = message.payload.decode("utf-8", errors="replace").strip()
-        if message.topic in {MQTT_TOPIC_SETPOINT_W, MQTT_TOPIC_DISCHARGE_W}:
-            try:
-                setpoint_w = int(payload)
-            except ValueError:
-                logger.warning("Ignoring invalid watt payload on %s: %r", message.topic, payload)
-                return
-            if message.topic == MQTT_TOPIC_SETPOINT_W:
-                asyncio.run_coroutine_threadsafe(self.handle_setpoint(setpoint_w), self.loop)
-            else:
-                asyncio.run_coroutine_threadsafe(self.handle_discharge_setpoint(setpoint_w), self.loop)
-        elif message.topic == MQTT_TOPIC_COMMAND:
-            asyncio.run_coroutine_threadsafe(self.handle_command(payload.lower()), self.loop)
-
-    def watts_to_amps(self, watts: int, vbattery1: float) -> int:
-        amps = round(watts / vbattery1)
-        return max(0, min(self.config.max_charge_a, amps))
-
-    async def write_charge_current(
-        self,
-        inv: Any,
-        amps: int,
-        *,
-        setpoint_w: int | None,
-        vbattery1: float,
-    ) -> None:
-        safe_amps = max(0, min(self.config.max_charge_a, int(amps)))
-        await inv.write_setting("work_mode", WORK_MODE_ECO)
-        await inv.write_setting("charge_i", safe_amps)
-        logger.info(
-            "Inverter write timestamp=%s setpoint_w=%s amps=%s vbattery1=%.3f",
-            utc_now_iso(),
-            setpoint_w,
-            safe_amps,
-            vbattery1,
-        )
-
-    def watts_to_pct(self, watts: int) -> int:
-        if self.config.max_discharge_w <= 0:
-            return 0
-        pct = round((watts / self.config.max_discharge_w) * 100)
-        return max(0, min(100, pct))
-
-    async def write_discharge_percent(self, inv: Any, watts: int) -> None:
-        safe_watts = max(0, min(self.config.max_discharge_w, int(watts)))
-        pct = self.watts_to_pct(safe_watts)
-        await inv._read_from_socket(Aa55ProtocolCommand("032c050000000000", "03AC"))
-        await inv._read_from_socket(Aa55ProtocolCommand(f"032d050000173b{pct:02x}", "03AD"))
-        logger.info("Inverter discharge timestamp=%s setpoint_w=%s pct=%s", utc_now_iso(), safe_watts, pct)
-
-    async def handle_setpoint(self, setpoint_w: int) -> None:
-        if self.stopped:
-            logger.warning("Ignoring setpoint_w=%s because bridge is stopped", setpoint_w)
+        try:
+            watts = int(payload)
+        except ValueError:
+            logger.warning("Ignoring invalid watt payload on %s: %r", message.topic, payload)
             return
 
-        try:
-            inv = await self.get_inverter()
-            data = await inv.read_runtime_data()
-            vbattery1 = float(data["vbattery1"])
-            if vbattery1 <= 0:
-                raise ValueError(f"Invalid live battery voltage: {vbattery1}")
-            amps = self.watts_to_amps(setpoint_w, vbattery1)
-            await self.write_discharge_percent(inv, 0)
-            await self.write_charge_current(inv, amps, setpoint_w=setpoint_w, vbattery1=vbattery1)
-        except Exception:
-            logger.exception("Failed to handle setpoint_w=%s", setpoint_w)
-            self.publish_status(STATUS_ERROR)
+        if message.topic == MQTT_TOPIC_CHARGE_W:
+            asyncio.run_coroutine_threadsafe(self.handle_charge_setpoint(watts), self.loop)
+        elif message.topic == MQTT_TOPIC_DISCHARGE_W:
+            asyncio.run_coroutine_threadsafe(self.handle_discharge_setpoint(watts), self.loop)
 
-    async def handle_discharge_setpoint(self, setpoint_w: int) -> None:
-        if self.stopped and setpoint_w > 0:
-            logger.warning("Ignoring discharge_w=%s because bridge is stopped", setpoint_w)
-            return
+    async def handle_charge_setpoint(self, watts: int) -> None:
         try:
-            inv = await self.get_inverter()
-            await self.write_charge_current(inv, 0, setpoint_w=0, vbattery1=0)
-            await self.write_discharge_percent(inv, setpoint_w)
+            await self.backend.set_charge(watts)
         except Exception:
-            logger.exception("Failed to handle discharge_w=%s", setpoint_w)
-            self.publish_status(STATUS_ERROR)
+            logger.exception("Failed to handle charge_w=%s", watts)
+            self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
 
-    async def handle_command(self, command: str) -> None:
-        if command == "stop":
-            self.stopped = True
-            try:
-                inv = await self.get_inverter()
-                data = await inv.read_runtime_data()
-                vbattery1 = float(data["vbattery1"])
-                await self.write_charge_current(inv, 0, setpoint_w=0, vbattery1=vbattery1)
-                await self.write_discharge_percent(inv, 0)
-            except Exception:
-                logger.exception("Failed to stop charging")
-                self.publish_status(STATUS_ERROR)
-        elif command == "discharge":
-            self.stopped = False
-            logger.info("Resumed discharge setpoint handling")
-        elif command == "resume":
-            self.stopped = False
-            logger.info("Resumed normal setpoint handling")
-        else:
-            logger.warning("Ignoring unknown command: %r", command)
+    async def handle_discharge_setpoint(self, watts: int) -> None:
+        try:
+            await self.backend.set_discharge(watts)
+        except Exception:
+            logger.exception("Failed to handle discharge_w=%s", watts)
+            self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
 
     async def poll_once(self) -> None:
-        inv = await self.get_inverter()
-        data = await inv.read_runtime_data()
-        charge_i = await inv.read_setting("charge_i")
-
+        state = await self.backend.read_state()
         values = {
-            "minyad/battery/soc": int(data["battery_soc"]),
-            "minyad/battery/soh": int(data["battery_soh"]),
-            "minyad/battery/power_w": int(data["pbattery1"]),
-            "minyad/battery/voltage": float(data["vbattery1"]),
-            "minyad/battery/mode": int(data["battery_mode"]),
-            "minyad/battery/mode_label": str(data["battery_mode_label"]),
-            "minyad/battery/charge_i": int(charge_i),
+            "minyad/battery/soc": state.battery_soc,
+            "minyad/battery/soh": state.battery_soh,
+            "minyad/battery/power_w": state.battery_power_w,
+            "minyad/battery/voltage_v": state.battery_voltage_v,
+            "minyad/battery/temperature_c": state.battery_temperature_c,
+            "minyad/battery/mode": state.battery_mode,
+            "minyad/inverter/temperature_c": state.inverter_temperature_c,
+            "minyad/inverter/grid_power_w": state.grid_power_w,
+            MQTT_TOPIC_INVERTER_STATUS: STATUS_OK,
         }
         for topic, value in values.items():
             self.publish(topic, value, retain=True)
-        self.publish_status(STATUS_ONLINE)
-        self.publish(MQTT_TOPIC_LAST_SEEN, utc_now_iso(), retain=True)
         logger.info(
-            "Poll timestamp=%s soc=%s power_w=%s charge_i=%s",
+            "Poll timestamp=%s soc=%s power_w=%s grid_power_w=%s",
             utc_now_iso(),
-            values["minyad/battery/soc"],
-            values["minyad/battery/power_w"],
-            values["minyad/battery/charge_i"],
+            state.battery_soc,
+            state.battery_power_w,
+            state.grid_power_w,
         )
 
     async def polling_loop(self) -> None:
         while not self.shutdown_event.is_set():
             try:
                 await self.poll_once()
+            except (ConnectionError, TimeoutError) as exc:
+                self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
+                logger.warning("Polling failed: %s", exc, exc_info=True)
             except Exception as exc:
-                self.publish_status(STATUS_ERROR)
+                self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
                 logger.warning("Polling failed: %s", exc, exc_info=True)
 
             try:
@@ -289,7 +221,7 @@ class GoodWeBridge:
         self.mqtt_client.connect_async(self.config.mqtt_host, self.config.mqtt_port, keepalive=60)
         self.mqtt_client.loop_start()
         await self.polling_loop()
-        self.publish_status(STATUS_OFFLINE)
+        self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
 
@@ -301,7 +233,9 @@ class GoodWeBridge:
 async def main() -> None:
     config = Config.from_env()
     configure_logging(config.log_level)
-    bridge = GoodWeBridge(config)
+    backend = build_backend(config)
+    logger.info("Using inverter backend: %s", config.inverter_backend)
+    bridge = GoodWeBridge(config, backend)
 
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
