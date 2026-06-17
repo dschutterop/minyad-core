@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -16,6 +18,24 @@ from shared.mqtt_client import MinyadMqttClient
 
 app = FastAPI(title="Minyad API")
 mqtt = MinyadMqttClient("minyad-api")
+LOGGER = logging.getLogger(__name__)
+
+MQTT_STATUS_KEYS = {
+    "minyad/battery/soc": "soc",
+    "minyad/battery/soh": "soh",
+    "minyad/battery/power_w": "power_w",
+    "minyad/battery/voltage": "voltage",
+    "minyad/battery/mode": "mode",
+    "minyad/battery/mode_label": "mode_label",
+    "minyad/battery/charge_i": "charge_i",
+    "minyad/bridge/status": "bridge_status",
+    "minyad/bridge/last_seen": "bridge_last_seen",
+    "minyad/control/state": "state",
+    "minyad/control/override_mode": "override_mode",
+    "minyad/control/setpoint_w": "setpoint_w",
+}
+MQTT_STATUS_LOCK = Lock()
+MQTT_STATUS: dict[str, str] = {}
 
 BATTERY_KEYS = {
     "start_w": (100, 5000),
@@ -29,6 +49,20 @@ BATTERY_KEYS = {
     "inverter_delay": (1, 30),
 }
 TEXT_KEYS = {"inverter_ip"}
+
+
+def handle_status_mqtt(topic: str, payload: bytes) -> None:
+    key = MQTT_STATUS_KEYS.get(topic)
+    if key is None:
+        LOGGER.debug("Ignoring unsupported status MQTT topic %s", topic)
+        return
+    with MQTT_STATUS_LOCK:
+        MQTT_STATUS[key] = payload.decode()
+
+
+def latest_mqtt_status() -> dict[str, str]:
+    with MQTT_STATUS_LOCK:
+        return dict(MQTT_STATUS)
 
 
 def parse_bridge_last_seen(value: str | None) -> datetime | None:
@@ -104,6 +138,9 @@ class BatterySettingsUpdate(BaseModel):
 @app.on_event("startup")
 async def startup() -> None:
     mqtt.start()
+    mqtt.subscribe("minyad/battery/+", handle_status_mqtt)
+    mqtt.subscribe("minyad/bridge/+", handle_status_mqtt)
+    mqtt.subscribe("minyad/control/+", handle_status_mqtt)
 
 
 @app.get("/health")
@@ -138,6 +175,7 @@ async def battery_settings(session: AsyncSession) -> dict[str, Any]:
 async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     status = await session.execute(text("select key, value from settings where key like 'battery.status.%'"))
     payload: dict[str, Any] = {row.key.removeprefix("battery.status."): row.value for row in status}
+    payload.update(latest_mqtt_status())
     override = await session.execute(text("select mode from battery_override where id = 1"))
     payload.setdefault("state", "IDLE")
     payload["override_mode"] = override.scalar_one_or_none() or "none"
