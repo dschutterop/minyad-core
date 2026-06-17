@@ -4,17 +4,37 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from functools import lru_cache
 
 from cryptography.fernet import Fernet
 from sqlalchemy import Boolean, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 DB_URL = os.environ["DB_URL"]
-ENCRYPTION_KEY = os.environ["ENCRYPTION_KEY"].encode()
+ENCRYPTION_KEY_ENV = "ENCRYPTION_KEY"
 
 engine = create_engine(DB_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-fernet = Fernet(ENCRYPTION_KEY)
+
+
+@lru_cache(maxsize=1)
+def get_fernet() -> Fernet:
+    """Build the Fernet instance when encrypted values are actually used."""
+    raw_key = os.environ.get(ENCRYPTION_KEY_ENV)
+    if not raw_key:
+        raise ValueError(
+            f"{ENCRYPTION_KEY_ENV} must be set to a Fernet key. Generate one with: "
+            "python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+        )
+
+    try:
+        return Fernet(raw_key.encode())
+    except ValueError as exc:
+        raise ValueError(
+            f"{ENCRYPTION_KEY_ENV} must be a 32-byte url-safe base64-encoded Fernet key. "
+            "Generate one with: python -c 'from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())'"
+        ) from exc
 
 
 class Base(DeclarativeBase):
@@ -30,14 +50,14 @@ class Setting(Base):
     is_secret: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     def set_secret(self, plaintext: str) -> None:
-        self.encrypted_value = fernet.encrypt(plaintext.encode()).decode()
+        self.encrypted_value = get_fernet().encrypt(plaintext.encode()).decode()
         self.value = None
         self.is_secret = True
 
     def get_secret(self) -> str | None:
         if not self.encrypted_value:
             return None
-        return fernet.decrypt(self.encrypted_value.encode()).decode()
+        return get_fernet().decrypt(self.encrypted_value.encode()).decode()
 
 
 class ApiKey(Base):
