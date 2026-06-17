@@ -62,7 +62,7 @@ class MinyadMqttClient:
                 time.sleep(5)
 
     def start(self) -> None:
-        self.client.connect(self.config.host, self.config.port, self.config.keepalive)
+        self.client.connect_async(self.config.host, self.config.port, self.config.keepalive)
         self.client.loop_start()
 
     def publish_measurement(self, source: str, measurement: str, payload: str | int | float) -> None:

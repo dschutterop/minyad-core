@@ -45,6 +45,12 @@ services:
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 1883 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
     networks: [minyad-internal]
 
   minyad-ingestion:
@@ -58,7 +64,7 @@ services:
       minyad-migrate:
         condition: service_completed_successfully
       minyad-mqtt:
-        condition: service_started
+        condition: service_healthy
     networks: [minyad-internal]
 
   minyad-control:
@@ -72,7 +78,7 @@ services:
       minyad-migrate:
         condition: service_completed_successfully
       minyad-mqtt:
-        condition: service_started
+        condition: service_healthy
     networks: [minyad-internal]
 
   minyad-deadman:
@@ -86,7 +92,7 @@ services:
       minyad-migrate:
         condition: service_completed_successfully
       minyad-mqtt:
-        condition: service_started
+        condition: service_healthy
     networks: [minyad-internal]
 
   minyad-api:
@@ -100,7 +106,7 @@ services:
       minyad-migrate:
         condition: service_completed_successfully
       minyad-mqtt:
-        condition: service_started
+        condition: service_healthy
     ports:
       - target: 8000
         published: "8002"
@@ -119,7 +125,7 @@ services:
       minyad-api:
         condition: service_started
       minyad-mqtt:
-        condition: service_started
+        condition: service_healthy
     ports:
       - target: 8080
         published: "8084"
@@ -136,7 +142,7 @@ services:
       minyad-migrate:
         condition: service_completed_successfully
       minyad-mqtt:
-        condition: service_started
+        condition: service_healthy
     networks: [minyad-internal]
 
   minyad-reporting:
@@ -150,7 +156,7 @@ services:
       minyad-migrate:
         condition: service_completed_successfully
       minyad-mqtt:
-        condition: service_started
+        condition: service_healthy
     networks: [minyad-internal]
 
 networks:
