@@ -2,6 +2,7 @@ const apiBase = window.MINYAD_API_BASE || window.location.origin;
 const fmtW = (v) => `${Math.round(Number(v || 0))} W`;
 const fmtValue = (v, unit = '') => v == null ? '—' : `${v}${unit}`;
 const fmtTime = (v) => v ? new Date(v).toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam' }) : '—';
+let latestGoodWeBattery = null;
 
 function setText(id, value) { document.getElementById(id).textContent = value; }
 
@@ -23,6 +24,8 @@ function drawForecast(rows) {
 }
 
 function renderGoodWeStatus(data) {
+  latestGoodWeBattery = data.battery || null;
+  renderBatteryOverview();
   const pill = document.getElementById('goodweOverall');
   const error = document.getElementById('goodweError');
   pill.textContent = data.overall === 'ok' ? 'OK' : 'Aandacht nodig';
@@ -58,19 +61,38 @@ async function refreshGoodWeStatus() {
   }
 }
 
+function getDashboardBattery(battery = {}) {
+  const goodwe = latestGoodWeBattery || {};
+  const goodwePower = Number(goodwe.power_w || 0);
+  return {
+    ...battery,
+    soc_pct: battery.soc_pct ?? goodwe.soc_pct,
+    mode: battery.mode ?? goodwe.mode,
+    charge_w: battery.charge_w ?? (goodwePower < 0 ? Math.abs(goodwePower) : 0),
+    discharge_w: battery.discharge_w ?? (goodwePower > 0 ? goodwePower : 0),
+  };
+}
+
+function renderBatteryOverview(battery = {}) {
+  const dashboardBattery = getDashboardBattery(battery);
+  const chargeW = Number(dashboardBattery.charge_w || 0);
+  const dischargeW = Number(dashboardBattery.discharge_w || 0);
+  setText('soc', dashboardBattery.soc_pct == null ? '—%' : `${Number(dashboardBattery.soc_pct).toFixed(0)}%`);
+  setText('batteryMode', `${dashboardBattery.mode || '—'} (${chargeW ? 'laden ' + fmtW(chargeW) : dischargeW ? 'ontladen ' + fmtW(dischargeW) : 'idle'})`);
+  return { battery: dashboardBattery, chargeW, dischargeW };
+}
+
 async function refresh() {
   const res = await fetch(`${apiBase}/api/status`);
   const data = await res.json();
   const grid = data.grid || {}, solar = data.solar || {}, battery = data.battery || {}, control = data.last_control || {};
   const importW = Number(grid.import_w || 0), exportW = Number(grid.export_w || 0);
-  const chargeW = Number(battery.charge_w || 0), dischargeW = Number(battery.discharge_w || 0);
-  const batteryNet = dischargeW - chargeW;
+  const overview = renderBatteryOverview(battery);
+  const batteryNet = overview.dischargeW - overview.chargeW;
   const houseLoad = Math.max(0, importW - exportW + Number(solar.production_w || 0) - batteryNet);
 
   setText('solarW', fmtW(solar.production_w));
   setText('solarDay', `Lifetime: ${((Number(solar.lifetime_wh || 0)) / 1000).toFixed(1)} kWh`);
-  setText('soc', battery.soc_pct == null ? '—%' : `${Number(battery.soc_pct).toFixed(0)}%`);
-  setText('batteryMode', `${battery.mode || '—'} (${chargeW ? 'laden ' + fmtW(chargeW) : dischargeW ? 'ontladen ' + fmtW(dischargeW) : 'idle'})`);
   const gridCard = document.getElementById('gridCard');
   gridCard.classList.remove('grid-consuming-high', 'grid-consuming', 'grid-returning');
   if (exportW > 0) {
