@@ -35,7 +35,7 @@ async def load_settings() -> dict[str, Any]:
     async with AsyncSessionLocal() as session:
         result = await session.execute(text("select key, value from settings where key like 'battery.%'"))
         rows = {row.key.removeprefix("battery."): row.value for row in result}
-    int_keys = {"start_w", "stop_w", "start_duration", "stop_duration", "cooldown", "max_charge_w", "max_charge_a"}
+    int_keys = {"start_w", "stop_w", "start_duration", "stop_duration", "cooldown", "max_charge_w", "max_charge_a", "max_discharge_w"}
     return {key: int(value) if key in int_keys else value for key, value in rows.items() if not key.startswith("status.")}
 
 
@@ -186,7 +186,9 @@ class ControlApp:
             self.controller.set_override(mode, int(duration) if duration else None)
         if mode is OverrideMode.FORCE_ON:
             await self.publish_setpoint(watts)
-        elif mode in {OverrideMode.FORCE_OFF, OverrideMode.FORCE_DISCHARGE, OverrideMode.PAUSE}:
+        elif mode is OverrideMode.FORCE_DISCHARGE:
+            await self.publish_discharge_setpoint(watts)
+        elif mode in {OverrideMode.FORCE_OFF, OverrideMode.PAUSE}:
             await self.stop_charging()
         await self.publish_state(self.controller.state)
 
@@ -198,15 +200,28 @@ class ControlApp:
         self.mqtt.publish_measurement("control", "command", "stop")
         if self.bridge_is_available:
             self.mqtt.publish_measurement("control", "setpoint_w", 0)
+            self.mqtt.publish_measurement("control", "discharge_w", 0)
 
     async def publish_setpoint(self, watts: int) -> None:
         if not self.bridge_is_available:
-            LOGGER.warning("GoodWe bridge is %s; setpoint %sW not published", self.bridge_status, watts)
+            LOGGER.warning("GoodWe bridge is %s; charge setpoint %sW not published", self.bridge_status, watts)
             self.setpoint_w = 0
             return
         self.setpoint_w = max(0, watts)
         self.mqtt.publish_measurement("control", "command", "resume" if self.setpoint_w else "stop")
+        self.mqtt.publish_measurement("control", "discharge_w", 0)
         self.mqtt.publish_measurement("control", "setpoint_w", self.setpoint_w)
+
+    async def publish_discharge_setpoint(self, watts: int) -> None:
+        if not self.bridge_is_available:
+            LOGGER.warning("GoodWe bridge is %s; discharge setpoint %sW not published", self.bridge_status, watts)
+            self.setpoint_w = 0
+            return
+        max_discharge_w = int(self.settings.get("max_discharge_w", 5000))
+        self.setpoint_w = max(0, min(watts, max_discharge_w))
+        self.mqtt.publish_measurement("control", "command", "discharge" if self.setpoint_w else "stop")
+        self.mqtt.publish_measurement("control", "setpoint_w", 0)
+        self.mqtt.publish_measurement("control", "discharge_w", self.setpoint_w)
 
     async def publish_state_loop(self) -> None:
         while True:
