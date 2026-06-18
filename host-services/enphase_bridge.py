@@ -25,7 +25,6 @@ logger = logging.getLogger(LOGGER_NAME)
 
 CLIENT_ID = "minyad-enphase-bridge"
 TOKEN_SETTING_KEY = "enphase_token"
-DEFAULT_ENVOY_HOST = "192.168.1.35"
 
 MQTT_TOPIC_PRODUCTION_W = "minyad/solar/production_w"
 MQTT_TOPIC_PRODUCTION_UPDATED_AT = "minyad/solar/production_updated_at"
@@ -97,7 +96,7 @@ class Config:
             raise ValueError("ENPHASE_INVERTER_POLL_INTERVAL must be greater than 0")
 
         return cls(
-            envoy_host=os.getenv("ENPHASE_ENVOY_HOST", DEFAULT_ENVOY_HOST).strip(),
+            envoy_host=_get_required_env("ENPHASE_ENVOY_HOST"),
             envoy_timeout=_get_env_float("ENPHASE_ENVOY_TIMEOUT", 10.0),
             db_url=_get_required_env("MINYAD_DB_URL"),
             mqtt_host=mqtt_host,
