@@ -58,6 +58,90 @@ def test_discharge_starts_after_sustained_grid_import_and_stops_after_recovery()
     assert controller.tick(-90) is ControlState.IDLE
 
 
+def test_charge_timer_does_not_bleed_into_discharge_trigger():
+    """Charge timer built up in IDLE must not contribute to discharge start_duration."""
+    clock = FakeClock()
+    events = []
+    controller = make_controller(clock, events)
+
+    # Accumulate nearly-full charge timer (9 of 10 s)
+    controller.tick(600)
+    clock.advance(9)
+    assert controller.tick(600) is None   # not yet charged
+
+    # Surplus swings hard negative — discharge condition now active
+    # With shared timer this would fire immediately; with split timers it must not
+    assert controller.tick(-400) is None  # discharge timer starts fresh from here
+    clock.advance(1)
+    assert controller.tick(-400) is None  # only 1s into discharge timer
+    clock.advance(9)
+    assert controller.tick(-400) is ControlState.DISCHARGING  # full 10s now elapsed
+    assert events == ["discharge_start"]
+
+
+def test_discharge_timer_does_not_bleed_into_charge_trigger():
+    """Discharge timer built up in IDLE must not contribute to charge start_duration."""
+    clock = FakeClock()
+    events = []
+    controller = make_controller(clock, events)
+
+    controller.tick(-400)
+    clock.advance(9)
+    assert controller.tick(-400) is None
+
+    assert controller.tick(600) is None   # charge timer starts fresh
+    clock.advance(1)
+    assert controller.tick(600) is None
+    clock.advance(9)
+    assert controller.tick(600) is ControlState.CHARGING
+    assert events == ["charge_start"]
+
+
+def test_opposite_direction_bypasses_cooldown_after_sustained_trigger():
+    """Strong solar surplus during discharge cooldown should skip to CHARGING without waiting."""
+    clock = FakeClock()
+    events = []
+    controller = make_controller(clock, events)
+
+    # Enter DISCHARGING
+    controller.tick(-400)
+    clock.advance(10)
+    assert controller.tick(-400) is ControlState.DISCHARGING
+
+    # Stop discharging (surplus recovered), enter COOLDOWN
+    controller.tick(-90)
+    clock.advance(5)
+    assert controller.tick(-90) is ControlState.COOLDOWN
+
+    # Solar kicks in hard — sustain charge trigger for start_duration (10s) during cooldown
+    # Cooldown is 20s; without bypass we'd be stuck here
+    controller.tick(600)
+    clock.advance(10)
+    result = controller.tick(600)
+    assert result is ControlState.CHARGING, f"expected CHARGING during cooldown bypass, got {result}"
+    assert events[-1] == "charge_start"
+
+
+def test_cooldown_still_applies_when_same_direction_trigger_persists():
+    """No bypass when the same-direction condition reappears during cooldown."""
+    clock = FakeClock()
+    events = []
+    controller = make_controller(clock, events)
+
+    controller.tick(-400)
+    clock.advance(10)
+    assert controller.tick(-400) is ControlState.DISCHARGING
+
+    controller.tick(-90)
+    clock.advance(5)
+    assert controller.tick(-90) is ControlState.COOLDOWN
+
+    # Import reappears (same direction as the just-finished discharge)
+    clock.advance(10)
+    assert controller.tick(-400) is None  # still in cooldown, no bypass
+    assert controller.state is ControlState.COOLDOWN
+
+
 def test_charge_and_discharge_paths_are_mutually_exclusive():
     clock = FakeClock()
     events = []

@@ -64,9 +64,11 @@ class HysteresisController:
         self._clock = clock
         self._lock = threading.RLock()
         self._state = ControlState.IDLE
-        self._start_since: float | None = None
+        self._charge_since: float | None = None
+        self._discharge_since: float | None = None
         self._stop_since: float | None = None
         self._cooldown_until: float | None = None
+        self._cooldown_direction: ControlState | None = None
         self._override_mode = OverrideMode.NONE
         self._pause_until: float | None = None
 
@@ -107,21 +109,40 @@ class HysteresisController:
             if self._state is ControlState.COOLDOWN:
                 if self._cooldown_until is not None and now >= self._cooldown_until:
                     return self._transition(ControlState.IDLE, "cooldown elapsed")
+                # Allow the opposite direction to bypass remaining cooldown if its
+                # trigger has been sustained for start_duration — this prevents a
+                # 10-minute blind spot when e.g. solar appears right after discharge.
+                if self._cooldown_direction is ControlState.DISCHARGING and surplus_w >= self.start_w:
+                    if self._charge_since is None:
+                        self._charge_since = now
+                    if now - self._charge_since >= self.start_duration:
+                        return self._transition(ControlState.CHARGING, f"charge trigger sustained during discharge cooldown; bypassing cooldown")
+                elif self._cooldown_direction is ControlState.CHARGING and surplus_w <= self.discharge_start_w:
+                    if self._discharge_since is None:
+                        self._discharge_since = now
+                    if now - self._discharge_since >= self.start_duration:
+                        return self._transition(ControlState.DISCHARGING, f"discharge trigger sustained during charge cooldown; bypassing cooldown")
+                else:
+                    self._charge_since = None
+                    self._discharge_since = None
                 return None
 
             if self._state is ControlState.IDLE:
                 if surplus_w >= self.start_w:
-                    if self._start_since is None:
-                        self._start_since = now
-                    if now - self._start_since >= self.start_duration:
+                    self._discharge_since = None
+                    if self._charge_since is None:
+                        self._charge_since = now
+                    if now - self._charge_since >= self.start_duration:
                         return self._transition(ControlState.CHARGING, f"surplus {surplus_w}W sustained above {self.start_w}W")
                 elif surplus_w <= self.discharge_start_w:
-                    if self._start_since is None:
-                        self._start_since = now
-                    if now - self._start_since >= self.start_duration:
+                    self._charge_since = None
+                    if self._discharge_since is None:
+                        self._discharge_since = now
+                    if now - self._discharge_since >= self.start_duration:
                         return self._transition(ControlState.DISCHARGING, f"import {surplus_w}W sustained below {self.discharge_start_w}W")
                 else:
-                    self._start_since = None
+                    self._charge_since = None
+                    self._discharge_since = None
                 return None
 
             if self._state is ControlState.CHARGING:
@@ -130,6 +151,7 @@ class HysteresisController:
                         self._stop_since = now
                     if now - self._stop_since >= self.stop_duration:
                         self._cooldown_until = now + self.cooldown
+                        self._cooldown_direction = ControlState.CHARGING
                         return self._transition(ControlState.COOLDOWN, f"surplus {surplus_w}W sustained below {self.stop_w}W")
                 else:
                     self._stop_since = None
@@ -141,6 +163,7 @@ class HysteresisController:
                         self._stop_since = now
                     if now - self._stop_since >= self.stop_duration:
                         self._cooldown_until = now + self.cooldown
+                        self._cooldown_direction = ControlState.DISCHARGING
                         return self._transition(ControlState.COOLDOWN, f"import {surplus_w}W sustained above {self.discharge_stop_w}W")
                 else:
                     self._stop_since = None
@@ -149,8 +172,11 @@ class HysteresisController:
     def _transition(self, new_state: ControlState, reason: str) -> ControlState:
         old_state = self._state
         self._state = new_state
-        self._start_since = None
+        self._charge_since = None
+        self._discharge_since = None
         self._stop_since = None
+        if new_state is not ControlState.COOLDOWN:
+            self._cooldown_direction = None
         LOGGER.info("%s control transition %s -> %s: %s", self._timestamp(), old_state.value, new_state.value, reason)
         if old_state is not ControlState.CHARGING and new_state is ControlState.CHARGING:
             self._on_start()

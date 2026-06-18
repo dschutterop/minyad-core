@@ -184,3 +184,84 @@ def test_discharge_target_ignores_grid_export():
     app.latest_grid_power_w = -133
 
     assert app.discharge_target_w() == 0
+
+
+class FakeHysteresisController:
+    def __init__(self, state=None):
+        self.start_w = 500
+        self.discharge_start_w = -300
+        self._state = state or control_main.ControlState.IDLE
+        self.override_mode = control_main.OverrideMode.NONE
+        self.ticked = []
+        self._charge_since = None
+        self._discharge_since = None
+        self._stop_since = None
+        self._cooldown_until = None
+        self._lock = __import__("threading").RLock()
+
+    @property
+    def state(self):
+        return self._state
+
+    def tick(self, surplus_w):
+        self.ticked.append(surplus_w)
+        return None
+
+
+def make_app_with_soc(soc, controller_state=None, settings=None):
+    app = make_available_app()
+    app.latest_battery_soc = soc
+    app.settings = settings or {}
+    app.controller = FakeHysteresisController(controller_state)
+    return app
+
+
+def test_soc_guard_masks_discharge_trigger_at_floor(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_app_with_soc(soc=20)  # at floor default
+
+    # Surplus of -400 would normally trigger discharge; guard must clamp it
+    surplus = app._apply_soc_guard(-400)
+
+    assert surplus > app.controller.discharge_start_w
+
+
+def test_soc_guard_masks_charge_trigger_at_ceiling(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_app_with_soc(soc=90)  # at ceiling default
+
+    surplus = app._apply_soc_guard(800)
+
+    assert surplus < app.controller.start_w
+
+
+def test_soc_guard_forces_idle_when_discharging_at_floor(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_app_with_soc(soc=15, controller_state=control_main.ControlState.DISCHARGING)
+
+    app._apply_soc_guard(-400)
+
+    assert app.controller.state is control_main.ControlState.IDLE
+
+
+def test_soc_guard_does_not_interfere_above_floor(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_app_with_soc(soc=50)
+
+    surplus = app._apply_soc_guard(-400)
+
+    assert surplus == -400
+
+
+def test_battery_soc_topic_updates_latest_soc(monkeypatch):
+    stored = {}
+
+    async def capture_store_status(**values):
+        stored.update(values)
+
+    monkeypatch.setattr(control_main, "store_status", capture_store_status)
+    app = control_main.ControlApp()
+
+    asyncio.run(app.handle_battery_topic("minyad/battery/soc", "67"))
+
+    assert app.latest_battery_soc == 67
