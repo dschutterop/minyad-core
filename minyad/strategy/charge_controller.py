@@ -1,4 +1,4 @@
-"""Forecast-driven battery charge/discharge strategy for Minyad.
+"""Real-time battery charge/discharge strategy for Minyad.
 
 The controller only talks to the inverter through MQTT topics consumed by the
 host-level ``goodwe_bridge`` service.  It never opens an inverter or Modbus
@@ -39,7 +39,9 @@ ABSOLUTE_FLOOR = 10
 ABSOLUTE_DAILY_CEILING = 95
 ABSOLUTE_OVERRIDE_CEILING = 100
 DEFAULT_MAX_CHARGE_W = 1440
+DEFAULT_MAX_DISCHARGE_W = 5000
 DEFAULT_DEBOUNCE_SECONDS = 300
+DEFAULT_JITTER_W = 50
 ACK_TIMEOUT_SECONDS = 30
 
 TOPIC_SETPOINT_JSON = "minyad/battery/setpoint"
@@ -47,7 +49,11 @@ TOPIC_STRATEGY_ACTIVE = "minyad/strategy/active"
 TOPIC_BRIDGE_CHARGE_W = "minyad/control/charge_w"
 TOPIC_BRIDGE_DISCHARGE_W = "minyad/control/discharge_w"
 TOPIC_BATTERY_PREFIX = "minyad/battery/"
+TOPIC_GRID_PREFIX = "minyad/grid/"
 TOPIC_DSMR_NET_POWER = "minyad/dsmr/net_power_w"
+TOPIC_GRID_NET_POWER = "minyad/grid/net_power_w"
+TOPIC_PROMPT_GOODWE_BATTERY = "goodwe/battery"
+TOPIC_PROMPT_DSMR_READING = "dsmr/reading"
 
 
 @dataclass(frozen=True)
@@ -65,7 +71,7 @@ class ModeConfig:
 
 @dataclass(frozen=True)
 class StrategyDecision:
-    """A concrete setpoint decision produced by :class:`ChargeController`."""
+    """A concrete real-time power-balancing setpoint decision."""
 
     mode: str
     soc_floor: int
@@ -74,17 +80,22 @@ class StrategyDecision:
     discharge_allowed: bool
     reason: str
     valid_until: datetime
+    grid_power_at_eval: int
+    battery_power_at_eval: int
+    home_load_at_eval: int
+    setpoint_delta: int
 
 
 class ChargeController:
-    """Battery strategy engine with MQTT-only inverter control.
+    """MQTT-only strategy engine built around real-time grid balancing.
 
-    The prompt topic names were checked against the repository bridge code after
-    live broker inspection could not run because ``mosquitto_sub`` is absent in
-    this container.  Current bridge code consumes ``minyad/control/charge_w`` and
-    ``minyad/control/discharge_w`` while publishing battery telemetry below
-    ``minyad/battery/``; therefore ``apply`` publishes the requested JSON
-    contract for observability and also the bridge-compatible watt topics.
+    Live broker inspection was attempted with the required ``mosquitto_sub``
+    commands before code changes, but this container does not have the binary.
+    Repository reconciliation shows actual bridge topics differ from the prompt:
+    GoodWe publishes scalar retained topics under ``minyad/battery/`` and
+    consumes ``minyad/control/charge_w`` / ``minyad/control/discharge_w``;
+    DSMR publishes ``minyad/grid/net_power_w``.  The prompt JSON topics are
+    still supported for forward compatibility and observability.
     """
 
     def __init__(
@@ -95,54 +106,83 @@ class ChargeController:
         now: Any | None = None,
         ack_timeout_seconds: int = ACK_TIMEOUT_SECONDS,
         debounce_seconds: int = DEFAULT_DEBOUNCE_SECONDS,
+        jitter_w: int = DEFAULT_JITTER_W,
     ) -> None:
         self.mqtt = mqtt or MinyadMqttClient("minyad-strategy")
         self.db_session_factory = db_session_factory if db_session_factory is not None else AsyncSessionLocal
         self._now = now or (lambda: datetime.now(timezone.utc))
         self.ack_timeout_seconds = ack_timeout_seconds
         self.debounce_seconds = debounce_seconds
+        self.jitter_w = jitter_w
         self._lock = Lock()
         self._battery_state: dict[str, Any] = {}
         self._grid_power_w: int | None = None
         self._last_apply_monotonic: float | None = None
+        self._last_setpoint_w: int = 0
         self._ack_event = Event()
         self._last_ack_latency_ms: int | None = None
         self._last_mode: ModeConfig | None = None
         if hasattr(self.mqtt, "subscribe"):
-            self.mqtt.subscribe(f"{TOPIC_BATTERY_PREFIX}+", self.handle_mqtt_message)
-            self.mqtt.subscribe(TOPIC_DSMR_NET_POWER, self.handle_mqtt_message)
+            for topic in (f"{TOPIC_BATTERY_PREFIX}+", f"{TOPIC_GRID_PREFIX}+", TOPIC_DSMR_NET_POWER, TOPIC_PROMPT_GOODWE_BATTERY, TOPIC_PROMPT_DSMR_READING):
+                self.mqtt.subscribe(topic, self.handle_mqtt_message)
 
     def handle_mqtt_message(self, topic: str, payload: bytes) -> None:
         """Record incoming MQTT telemetry and wake pending setpoint ACKs."""
-        decoded = payload.decode("utf-8", errors="replace")
+        decoded = payload.decode("utf-8", errors="replace") if isinstance(payload, bytes) else str(payload)
+        value = self._coerce_payload(decoded)
         with self._lock:
-            if topic.startswith(TOPIC_BATTERY_PREFIX):
-                key = topic.removeprefix(TOPIC_BATTERY_PREFIX)
-                self._battery_state[key] = self._coerce_payload(decoded)
+            if topic == TOPIC_PROMPT_GOODWE_BATTERY and isinstance(value, dict):
+                self._battery_state.update(value)
                 self._ack_event.set()
-            elif topic == TOPIC_DSMR_NET_POWER:
-                self._grid_power_w = int(float(decoded))
+            elif topic == TOPIC_PROMPT_DSMR_READING and isinstance(value, dict):
+                usage = self._w_from_any(value.get("current_electricity_usage", 0))
+                delivery = self._w_from_any(value.get("current_electricity_delivery", 0))
+                self._grid_power_w = usage - delivery
+            elif topic.startswith(TOPIC_BATTERY_PREFIX):
+                key = topic.removeprefix(TOPIC_BATTERY_PREFIX)
+                self._battery_state[key] = value
+                self._ack_event.set()
+            elif topic in {TOPIC_GRID_NET_POWER, TOPIC_DSMR_NET_POWER}:
+                self._grid_power_w = int(float(value))
 
     def evaluate(self) -> StrategyDecision:
-        """Evaluate the active mode against latest telemetry and health limits."""
+        """Run the primary grid-balancing loop, then apply SoC boundaries."""
         mode = self.get_active_mode()
         with self._lock:
             soc = self._battery_state.get("soc")
-            grid_power = self._grid_power_w
-        charge_rate = mode.charge_rate_w
+            battery_power = self._battery_power_w_locked()
+            grid_power = int(self._grid_power_w or 0)
+
+        grid_target = int(self._float_setting_sync("strategy.grid_target_w", 0))
+        setpoint_delta = grid_power - grid_target
+        requested_sp = battery_power + setpoint_delta
+        max_charge = self._max_charge_w_sync()
+        max_discharge = self._max_discharge_w_sync()
+        new_sp = max(-max_charge, min(max_discharge, requested_sp))
         discharge_allowed = True
-        reason = mode.reason
+        reason = f"balancing grid to {grid_target}W target"
+
         if isinstance(soc, (int, float)) and soc <= mode.soc_floor:
-            charge_rate = self._max_charge_w_sync()
+            if new_sp > 0:
+                new_sp = 0
             discharge_allowed = False
-            reason = f"SoC floor breach ({soc}% <= {mode.soc_floor}%); charging re-enabled"
+            reason = f"SoC floor breach ({soc}% <= {mode.soc_floor}%); discharge blocked after balancing"
         elif isinstance(soc, (int, float)) and soc >= mode.soc_ceiling:
-            charge_rate = 0
-            discharge_allowed = True
-            reason = f"SoC ceiling reached ({soc}% >= {mode.soc_ceiling}%); charging stopped"
-        if isinstance(soc, (int, float)) and grid_power is not None and grid_power < 0 and soc < mode.soc_floor:
+            if new_sp < 0:
+                new_sp = 0
+            reason = f"SoC ceiling reached ({soc}% >= {mode.soc_ceiling}%); charging blocked after balancing"
+
+        if isinstance(soc, (int, float)) and grid_power < 0 and soc < mode.soc_floor:
             LOGGER.warning("Grid export while battery below floor: soc=%s floor=%s grid_power_w=%s", soc, mode.soc_floor, grid_power)
-        return StrategyDecision(mode.mode, mode.soc_floor, mode.soc_ceiling, charge_rate, discharge_allowed, reason, mode.valid_until)
+
+        if abs(new_sp - self._last_setpoint_w) <= self.jitter_w:
+            reason = f"{reason}; jitter suppressed; setpoint change {new_sp - self._last_setpoint_w}W <= {self.jitter_w}W"
+            new_sp = self._last_setpoint_w
+
+        return StrategyDecision(
+            mode.mode, mode.soc_floor, mode.soc_ceiling, int(new_sp), discharge_allowed, reason, mode.valid_until,
+            grid_power, int(battery_power), int(grid_power + battery_power), int(setpoint_delta)
+        )
 
     def apply(self, decision: StrategyDecision) -> None:
         """Publish a setpoint through MQTT and log whether bridge telemetry ACKed it."""
@@ -150,6 +190,7 @@ class ChargeController:
         if self._last_apply_monotonic is not None and now_mono - self._last_apply_monotonic < self.debounce_seconds:
             LOGGER.info("Suppressing setpoint change inside %ss debounce window", self.debounce_seconds)
             return
+        setpoint_w = int(decision.charge_rate_w or 0)
         payload = {
             "target_soc": decision.soc_ceiling,
             "soc_floor": decision.soc_floor,
@@ -158,20 +199,19 @@ class ChargeController:
         }
         with self._lock:
             battery_soc = self._battery_state.get("soc")
-            grid_power = self._grid_power_w
             self._ack_event.clear()
         started = time.monotonic()
         self._publish(TOPIC_SETPOINT_JSON, json.dumps(payload))
-        self._publish(TOPIC_BRIDGE_CHARGE_W, str(max(0, decision.charge_rate_w or 0)))
-        if not decision.discharge_allowed:
-            self._publish(TOPIC_BRIDGE_DISCHARGE_W, "0")
+        self._publish(TOPIC_BRIDGE_CHARGE_W, str(abs(setpoint_w) if setpoint_w < 0 else 0))
+        self._publish(TOPIC_BRIDGE_DISCHARGE_W, str(setpoint_w if decision.discharge_allowed and setpoint_w > 0 else 0))
         ack_received = self._ack_event.wait(self.ack_timeout_seconds)
         ack_latency = int((time.monotonic() - started) * 1000) if ack_received else None
         self._last_ack_latency_ms = ack_latency
         self._last_apply_monotonic = now_mono
-        self._insert_setpoint_log_sync(decision, battery_soc, grid_power, ack_received, ack_latency)
+        self._last_setpoint_w = setpoint_w
+        self._insert_setpoint_log_sync(decision, battery_soc, ack_received, ack_latency)
         if not ack_received:
-            LOGGER.error("Setpoint write was not confirmed by %s within %ss", TOPIC_BATTERY_PREFIX, self.ack_timeout_seconds)
+            LOGGER.error("Setpoint write was not confirmed by battery telemetry within %ss", self.ack_timeout_seconds)
 
     def get_active_mode(self) -> ModeConfig:
         """Return the DB-selected active mode, or NORMAL if none exists."""
@@ -251,14 +291,27 @@ class ChargeController:
                 except json.JSONDecodeError:
                     return value
 
+    @staticmethod
+    def _w_from_any(value: Any) -> int:
+        numeric = float(value or 0)
+        return int(round(numeric * 1000)) if abs(numeric) < 100 else int(round(numeric))
+
+    def _battery_power_w_locked(self) -> int:
+        for key in ("power_w", "battery_power", "battery_power_w"):
+            if key in self._battery_state:
+                return int(float(self._battery_state[key]))
+        return 0
+
     def _mode_payload(self, mode: ModeConfig) -> dict[str, Any]:
         return {"mode": mode.mode, "soc_floor": mode.soc_floor, "soc_ceiling": mode.soc_ceiling, "reason": mode.reason, "valid_until": mode.valid_until.isoformat(), "forecast_ghi": mode.forecast_ghi}
 
     def _max_charge_w_sync(self) -> int:
         return int(self._float_setting_sync("battery.max_charge_w", DEFAULT_MAX_CHARGE_W))
 
+    def _max_discharge_w_sync(self) -> int:
+        return int(self._float_setting_sync("battery.max_discharge_w", DEFAULT_MAX_DISCHARGE_W))
+
     def _float_setting_sync(self, key: str, default: float) -> float:
-        # Tests and deployments may inject a simple mapping instead of a DB.
         if isinstance(self.db_session_factory, dict):
             return float(self.db_session_factory.get(key, default))
         if self.db_session_factory is None:
@@ -276,7 +329,6 @@ class ChargeController:
 
     def _load_active_mode_sync(self) -> ModeConfig | None:
         if not isinstance(self.db_session_factory, dict):
-            # Active mode is persisted as settings for restart recovery.
             if self.db_session_factory is None:
                 return None
             try:
@@ -340,8 +392,14 @@ class ChargeController:
         except RuntimeError:
             LOGGER.warning("Unable to insert strategy decision from a running event loop")
 
-    def _insert_setpoint_log_sync(self, decision: StrategyDecision, battery_soc: Any, grid_power: Any, ack_received: bool, ack_latency_ms: int | None) -> None:
-        row = {"timestamp": self._now().isoformat(), "source": "strategy", "soc_floor": decision.soc_floor, "soc_ceiling": decision.soc_ceiling, "charge_rate_w": decision.charge_rate_w, "discharge_allowed": decision.discharge_allowed, "battery_soc_at_time": battery_soc, "grid_power_at_time": grid_power, "trigger_reason": decision.reason, "ack_received": ack_received, "ack_latency_ms": ack_latency_ms}
+    def _insert_setpoint_log_sync(self, decision: StrategyDecision, battery_soc: Any, ack_received: bool, ack_latency_ms: int | None) -> None:
+        row = {
+            "timestamp": self._now().isoformat(), "source": "strategy", "soc_floor": decision.soc_floor, "soc_ceiling": decision.soc_ceiling,
+            "charge_rate_w": decision.charge_rate_w, "discharge_allowed": decision.discharge_allowed, "battery_soc_at_time": battery_soc,
+            "grid_power_at_time": decision.grid_power_at_eval, "battery_power_at_time": decision.battery_power_at_eval,
+            "home_load_at_time": decision.home_load_at_eval, "setpoint_delta": decision.setpoint_delta,
+            "trigger_reason": decision.reason, "ack_received": ack_received, "ack_latency_ms": ack_latency_ms,
+        }
         if isinstance(self.db_session_factory, dict):
             self.db_session_factory.setdefault("setpoint_log", []).append(row)
             return
@@ -352,8 +410,8 @@ class ChargeController:
             async def insert_row() -> None:
                 async with self.db_session_factory() as session:
                     await session.execute(text("""
-                        insert into setpoint_log (timestamp, source, soc_floor, soc_ceiling, charge_rate_w, discharge_allowed, battery_soc_at_time, grid_power_at_time, trigger_reason, ack_received, ack_latency_ms)
-                        values (:timestamp, :source, :soc_floor, :soc_ceiling, :charge_rate_w, :discharge_allowed, :battery_soc_at_time, :grid_power_at_time, :trigger_reason, :ack_received, :ack_latency_ms)
+                        insert into setpoint_log (timestamp, source, soc_floor, soc_ceiling, charge_rate_w, discharge_allowed, battery_soc_at_time, grid_power_at_time, battery_power_at_time, home_load_at_time, setpoint_delta, trigger_reason, ack_received, ack_latency_ms)
+                        values (:timestamp, :source, :soc_floor, :soc_ceiling, :charge_rate_w, :discharge_allowed, :battery_soc_at_time, :grid_power_at_time, :battery_power_at_time, :home_load_at_time, :setpoint_delta, :trigger_reason, :ack_received, :ack_latency_ms)
                     """), row)
                     await session.commit()
             asyncio.run(insert_row())
