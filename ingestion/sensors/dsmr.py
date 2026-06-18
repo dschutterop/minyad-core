@@ -33,7 +33,7 @@ REQUIRED_TOPICS = frozenset(
 class P1Reader:
     """Subscribe to DSMR-reader topics and emit computed net watt values."""
 
-    def __init__(self, broker: str, port: int, on_update: Callable[[int, dict, datetime], None]) -> None:
+    def __init__(self, broker: str, port: int, on_update: Callable[[int, dict, datetime, int, int], None]) -> None:
         self.broker = broker
         self.port = port
         self.on_update = on_update
@@ -92,7 +92,7 @@ class P1Reader:
         timestamp = self._values[TIMESTAMP_TOPIC]
         if not isinstance(timestamp, datetime):
             timestamp = datetime.now(timezone.utc)
-        self.on_update(net_power_w, per_phase_w, timestamp)
+        self.on_update(net_power_w, per_phase_w, timestamp, round(delivered * 1000), round(returned * 1000))
 
 
 def _parse_timestamp(payload: str) -> datetime:
