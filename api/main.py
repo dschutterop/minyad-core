@@ -240,6 +240,14 @@ def coerce_float_status_value(key: str, value: Any) -> float | Any:
         return value
 
 
+def grid_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key.startswith("grid_")}
+
+
+def battery_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if not key.startswith("grid_")}
+
+
 def coerce_grid_status(payload: dict[str, Any]) -> dict[str, Any]:
     coerced = dict(payload)
     int_keys = {
@@ -512,16 +520,16 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     status = await session.execute(text("select key, value from settings where key like 'battery.status.%'"))
     payload: dict[str, Any] = {row.key.removeprefix("battery.status."): row.value for row in status}
     LOGGER.debug("battery_status: db keys=%s", sorted(payload.keys()))
-    mqtt_cache = latest_mqtt_status()
+    mqtt_cache = battery_status_payload(latest_mqtt_status())
     LOGGER.debug("battery_status: mqtt cache keys=%s", sorted(mqtt_cache.keys()))
-    payload.update(coerce_grid_status(mqtt_cache))
+    payload.update(mqtt_cache)
     if cached_status_is_incomplete(payload):
         missing = [k for k in ("soc", "soh", "power_w", "voltage", "mode", "mode_label", "charge_i", "bridge_status", "bridge_last_seen") if not payload.get(k)]
         LOGGER.debug("battery_status: incomplete, missing=%s — attempting retained fetch", missing)
         try:
             retained = collect_retained_mqtt_status()
             LOGGER.debug("battery_status: retained fetch returned keys=%s", sorted(retained.keys()))
-            payload.update(coerce_grid_status(retained))
+            payload.update(battery_status_payload(retained))
         except OSError:
             LOGGER.exception("Unable to fetch retained MQTT status snapshot")
     else:
@@ -544,15 +552,20 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
 
 
 
-@app.get("/dsmr/status")
-async def dsmr_status() -> dict[str, Any]:
-    grid_payload = {key: value for key, value in latest_mqtt_status().items() if key.startswith("grid_")}
+@app.get("/grid/status")
+async def grid_status() -> dict[str, Any]:
+    grid_payload = grid_status_payload(latest_mqtt_status())
     if not grid_payload:
         try:
-            grid_payload.update(collect_retained_mqtt_status())
+            grid_payload.update(grid_status_payload(collect_retained_mqtt_status()))
         except OSError:
             LOGGER.exception("Unable to fetch retained MQTT grid snapshot")
-    return coerce_grid_status({key: value for key, value in grid_payload.items() if key.startswith("grid_")})
+    return coerce_grid_status(grid_payload)
+
+
+@app.get("/dsmr/status")
+async def dsmr_status() -> dict[str, Any]:
+    return await grid_status()
 
 
 @app.post("/battery/override")
