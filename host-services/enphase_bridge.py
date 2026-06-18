@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 import paho.mqtt.client as mqtt
-import psycopg
 import requests
 import urllib3
 from dotenv import load_dotenv
@@ -24,7 +23,6 @@ LOGGER_NAME = "enphase_bridge"
 logger = logging.getLogger(LOGGER_NAME)
 
 CLIENT_ID = "minyad-enphase-bridge"
-TOKEN_SETTING_KEY = "enphase_token"
 
 MQTT_TOPIC_PRODUCTION_W = "minyad/solar/production_w"
 MQTT_TOPIC_PRODUCTION_UPDATED_AT = "minyad/solar/production_updated_at"
@@ -73,7 +71,6 @@ def _get_required_env(name: str) -> str:
 class Config:
     envoy_host: str
     envoy_timeout: float
-    db_url: str
     mqtt_host: str
     mqtt_port: int
     mqtt_user: str | None
@@ -98,7 +95,6 @@ class Config:
         return cls(
             envoy_host=_get_required_env("ENPHASE_ENVOY_HOST"),
             envoy_timeout=_get_env_float("ENPHASE_ENVOY_TIMEOUT", 10.0),
-            db_url=_get_required_env("MINYAD_DB_URL"),
             mqtt_host=mqtt_host,
             mqtt_port=_get_env_int("MQTT_PORT", 1883),
             mqtt_user=os.getenv("MQTT_USER") or None,
@@ -132,16 +128,6 @@ def slugify_array_name(name: object) -> str:
     slug = re.sub(r"\s+", "_", str(name).strip().lower())
     slug = re.sub(r"[^a-z0-9_\-]", "", slug)
     return slug or "unknown"
-
-
-def load_enphase_token(db_url: str) -> str:
-    with psycopg.connect(db_url) as conn:
-        with conn.cursor() as cur:
-            cur.execute("select value from settings where key = %s", (TOKEN_SETTING_KEY,))
-            row = cur.fetchone()
-    if row is None or not str(row[0]).strip():
-        raise ValueError(f"settings key {TOKEN_SETTING_KEY!r} is missing or empty")
-    return str(row[0]).strip()
 
 
 class EnvoyClient:
@@ -227,7 +213,7 @@ class EnphaseBridge:
         self.publish(MQTT_TOPIC_BRIDGE_LAST_SEEN, utc_now_iso())
 
     async def handle_auth_error(self, exc: EnvoyAuthError) -> None:
-        logger.critical("%s; update settings.%s and restart when a valid token is available", exc, TOKEN_SETTING_KEY)
+        logger.critical("%s; update ENPHASE_TOKEN in the host-services .env file and restart", exc)
         self.publish_bridge_error()
 
     async def production_loop(self) -> None:
@@ -315,7 +301,7 @@ class EnphaseBridge:
 async def main() -> None:
     config = Config.from_env()
     configure_logging(config.log_level)
-    token = load_enphase_token(config.db_url)
+    token = _get_required_env("ENPHASE_TOKEN")
     envoy = EnvoyClient(config.envoy_host, token, config.envoy_timeout)
     logger.info(
         "Using Envoy host %s with production interval=%ss and inverter interval=%ss",

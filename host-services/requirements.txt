@@ -4,4 +4,3 @@ python-dotenv
 
 pymodbus>=3.6
 requests>=2.32
-psycopg[binary]>=3.2
