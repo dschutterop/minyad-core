@@ -51,10 +51,17 @@ def _get_env_float(name: str, default: float) -> float:
         raise ValueError(f"{name} must be a number, got {value!r}") from exc
 
 
+def _get_required_env(name: str) -> str:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        raise ValueError(f"{name} is required")
+    return value.strip()
+
+
 @dataclass(frozen=True)
 class Config:
     inverter_backend: str
-    inverter_ip: str
+    goodwe_api_host: str
     inverter_max_w: int
     modbus_gw_ip: str
     modbus_gw_port: int
@@ -74,12 +81,16 @@ class Config:
         if not mqtt_host:
             raise ValueError("MQTT_BROKER is required")
 
+        inverter_backend = os.getenv("INVERTER_BACKEND", "goodwe").lower()
+        if inverter_backend not in {"modbus", "goodwe"}:
+            raise ValueError("INVERTER_BACKEND must be 'modbus' or 'goodwe'")
+
         max_charge_a = _get_env_int("MAX_CHARGE_A", 30)
         return cls(
-            inverter_backend=os.getenv("INVERTER_BACKEND", "modbus").lower(),
-            inverter_ip=os.getenv("INVERTER_IP", "192.168.1.57"),
+            inverter_backend=inverter_backend,
+            goodwe_api_host=_get_required_env("GOODWE_API_HOST"),
             inverter_max_w=_get_env_int("INVERTER_MAX_W", _get_env_int("MAX_DISCHARGE_W", 5000)),
-            modbus_gw_ip=os.getenv("MODBUS_GW_IP", "192.168.1.58"),
+            modbus_gw_ip=_get_required_env("MODBUS_GW_IP"),
             modbus_gw_port=_get_env_int("MODBUS_GW_PORT", 502),
             modbus_slave_id=_get_env_int("MODBUS_SLAVE_ID", 247),
             modbus_timeout=_get_env_float("MODBUS_TIMEOUT", 5.0),
@@ -114,7 +125,7 @@ def build_backend(config: Config) -> InverterBackend:
             max_w=config.inverter_max_w,
         )
     if config.inverter_backend == "goodwe":
-        return GoodWeBackend(config.inverter_ip, config.inverter_max_w)
+        return GoodWeBackend(config.goodwe_api_host, config.inverter_max_w)
     raise ValueError("INVERTER_BACKEND must be 'modbus' or 'goodwe'")
 
 
