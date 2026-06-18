@@ -83,6 +83,7 @@ class ControlApp:
         self.controller: HysteresisController | None = None
         self.settings: dict[str, Any] = {}
         self.setpoint_w = DEFAULT_SETPOINT_W
+        self.latest_grid_power_w = 0
         self.bridge_status = "offline"
         self.bridge_last_seen: datetime | None = None
         self.bridge_last_seen_raw: str | None = None
@@ -165,6 +166,7 @@ class ControlApp:
         LOGGER.debug("MQTT message topic=%s payload=%r", topic, decoded)
         if topic in {"minyad/dsmr/net_power_w", "minyad/grid/net_power_w"}:
             grid_power_w = int(decoded)
+            self.latest_grid_power_w = grid_power_w
             # DSMR/grid net power is positive for grid import and negative for export.
             # HysteresisController expects surplus-style samples: positive export/available
             # power starts charging, while negative import starts discharging.
@@ -193,6 +195,8 @@ class ControlApp:
                 self.controller.state.value,
                 " transitioned_from=" + previous_state.value if state else "",
             )
+            if self.controller.state is ControlState.DISCHARGING:
+                await self.publish_discharge_setpoint(self.discharge_target_w())
             if state:
                 await self.publish_state(state)
             return
@@ -330,8 +334,18 @@ class ControlApp:
     async def start_charging(self) -> None:
         await self.publish_setpoint(int(self.settings["max_charge_w"]))
 
+    def discharge_target_w(self) -> int:
+        """Return the discharge setpoint needed to offset current grid import.
+
+        Grid net power is positive while importing from the grid. Discharge should
+        follow that measured import instead of jumping to the configured maximum,
+        otherwise a small household load can request full inverter discharge and
+        push excess power back to the grid.
+        """
+        return max(0, int(self.latest_grid_power_w))
+
     async def start_discharging(self) -> None:
-        await self.publish_discharge_setpoint(int(self.settings["max_discharge_w"]))
+        await self.publish_discharge_setpoint(self.discharge_target_w())
 
     async def stop_discharging(self) -> None:
         await self.stop_charging()
