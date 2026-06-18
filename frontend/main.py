@@ -255,10 +255,6 @@ def battery_control_body() -> str:
         <p>Bridge status: <strong id='battery-bridge'>--</strong></p>
         <p>Bridge last seen: <strong id='battery-bridge-last-seen'>--</strong></p>
         <p>Override: <strong id='battery-override'>none</strong></p>
-        <p>Grid net power: <strong id='battery-grid-net-power'>--</strong> W</p>
-        <p>Grid delivered: <strong id='battery-grid-delivered'>--</strong> W</p>
-        <p>Grid returned: <strong id='battery-grid-returned'>--</strong> W</p>
-        <p>Grid status: <strong id='battery-grid-status'>--</strong></p>
       </div>
       <p id='battery-status-error' role='alert'></p>
     </div>
@@ -294,10 +290,6 @@ def battery_control_body() -> str:
           document.getElementById('battery-bridge').textContent = data.bridge_last_seen_valid === false ? `${bridgeStatus} (error)` : bridgeStatus;
           document.getElementById('battery-bridge-last-seen').textContent = data.bridge_last_seen ? `${data.bridge_last_seen} (${displayValue(data.bridge_last_seen_age_seconds, 's')} ago)` : '--';
           document.getElementById('battery-override').textContent = data.override_mode || 'none';
-          document.getElementById('battery-grid-net-power').textContent = displayValue(data.grid_net_power_w);
-          document.getElementById('battery-grid-delivered').textContent = displayValue(data.grid_delivered_w);
-          document.getElementById('battery-grid-returned').textContent = displayValue(data.grid_returned_w);
-          document.getElementById('battery-grid-status').textContent = displayValue(data.grid_status);
           error.textContent = data.bridge_last_seen_error || '';
           error.className = data.bridge_last_seen_error ? 'error' : '';
         } catch (err) {
@@ -344,8 +336,8 @@ def dsmr_body() -> str:
       async function loadDsmrStatus(){
         const error = document.getElementById('dsmr-status-error');
         try {
-          const res = await fetch('/api/dsmr/status');
-          if(!res.ok) throw new Error(`DSMR status request failed (${res.status})`);
+          const res = await fetch('/api/grid/status');
+          if(!res.ok) throw new Error(`Grid status request failed (${res.status})`);
           const data = await res.json();
           document.getElementById('grid-status').textContent = displayValue(data.grid_status);
           document.getElementById('grid-timestamp').textContent = displayValue(data.grid_timestamp);
@@ -431,8 +423,8 @@ def energy_dashboard_body() -> str:
       function setBar(id,v,max,color){const el=$(id); if(!el)return; const pct=Math.min(100,Math.abs(v)/max*50); el.style.background=color; if(v<0){el.style.left=(50-pct)+'%';el.style.width=pct+'%'}else{el.style.left='50%';el.style.width=pct+'%'}}
       function setSoc(soc){$('soc-text').textContent=Math.round(soc)+'%'; const c=$('soc-cells'); c.innerHTML=''; for(let i=0;i<10;i++){const cell=document.createElement('i'); if(i<Math.round(soc/10))cell.className='on'; c.appendChild(cell)}}
       function drawChart(){const svg=$('day-chart'), W=960,H=300, left=42,right=16,top=16,bot=28, mid=150, now=new Date(), hour=now.getHours()+now.getMinutes()/60; const x=t=>left+(W-left-right)*t/24, y=kw=>mid-kw/5*(mid-top); let out=''; for(let h=0;h<=24;h+=6)out+=`<line class="gridline" x1="${x(h)}" y1="${top}" x2="${x(h)}" y2="${H-bot}"/><text x="${x(h)}" y="${H-7}" fill="var(--p-mut)" font-family="var(--mono)" font-size="11" text-anchor="middle">${String(h).padStart(2,'0')}:00</text>`; for(let kw=-5;kw<=5;kw+=2.5)out+=`<text x="8" y="${y(kw)+4}" fill="var(--p-mut)" font-family="var(--mono)" font-size="10">${kw}</text>`; out+=`<line class="zero-line" x1="${left}" y1="${mid}" x2="${W-right}" y2="${mid}"/>`; const pts=[...Array(49)].map((_,i)=>i/2); const bell=t=>Math.max(0,Math.sin((t-6)/12*Math.PI)); const path=(fn)=>pts.map((t,i)=>`${i?'L':'M'}${x(t).toFixed(1)} ${y(fn(t)).toFixed(1)}`).join(' '); const area=(fn,base=0)=>`M${x(0)} ${y(base)} `+pts.map(t=>`L${x(t).toFixed(1)} ${y(fn(t)).toFixed(1)}`).join(' ')+` L${x(24)} ${y(base)} Z`; out+=`<path class="forecast-fill" d="${area(t=>4.6*bell(t))}"/><path class="forecast-line" d="${path(t=>4.6*bell(t))}"/><path class="prod-fill" d="${area(t=>last.solar*0.22+4.1*bell(t))}"/><path class="prod-line" d="${path(t=>last.solar*0.22+4.1*bell(t))}"/><path class="bat-line" d="${path(t=>1.2*Math.sin((t-15)/24*Math.PI*4))}"/><path class="imp-fill" d="${area(t=>Math.min(0,1.2*Math.sin((t-12)/24*Math.PI*4)),0)}"/><path class="exp-fill" d="${area(t=>Math.max(0,1.0*Math.sin((t-10)/24*Math.PI*3)),0)}"/>`; out+=`<line class="now" x1="${x(hour)}" y1="${top}" x2="${x(hour)}" y2="${H-bot}"/><circle cx="${x(hour)}" cy="${y(last.solar)}" r="4" fill="var(--produce-d)"/><text x="${x(hour)+7}" y="${top+12}" fill="var(--p-ink)" font-family="var(--mono)" font-size="10">NOW</text>`; svg.innerHTML=out}
-      async function update(){const d=new Date(); $('clock').textContent=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); $('date').textContent=d.toLocaleDateString([], {day:'2-digit',month:'short',year:'numeric'}); let battery={},grid={}; try{[grid,battery]=await Promise.all([fetch('/api/dsmr/status').then(r=>r.ok?r.json():{}),fetch('/api/battery/status').then(r=>r.ok?r.json():{})])}catch(e){}
-        const hour=d.getHours()+d.getMinutes()/60; const syntheticSolar=Math.max(0,Math.sin((hour-6)/12*Math.PI))*4.7; const solarW=n(grid.solar_power_w); last.solar=solarW==null?syntheticSolar:solarW/1000; last.battery=(n(battery.power_w)??0)/1000; const rawGrid=(n(grid.grid_net_power_w??battery.grid_net_power_w)??650)/1000; last.grid=-rawGrid; last.soc=n(battery.soc)??last.soc; last.soh=n(battery.soh)??98; const home=Math.max(0,last.solar+last.battery-last.grid);
+      async function update(){const d=new Date(); $('clock').textContent=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); $('date').textContent=d.toLocaleDateString([], {day:'2-digit',month:'short',year:'numeric'}); let battery={},grid={}; try{[grid,battery]=await Promise.all([fetch('/api/grid/status').then(r=>r.ok?r.json():{}),fetch('/api/battery/status').then(r=>r.ok?r.json():{})])}catch(e){}
+        const hour=d.getHours()+d.getMinutes()/60; const syntheticSolar=Math.max(0,Math.sin((hour-6)/12*Math.PI))*4.7; const solarW=n(grid.solar_power_w); last.solar=solarW==null?syntheticSolar:solarW/1000; last.battery=(n(battery.power_w)??0)/1000; const rawGrid=(n(grid.grid_net_power_w)??650)/1000; last.grid=-rawGrid; last.soc=n(battery.soc)??last.soc; last.soh=n(battery.soh)??98; const home=Math.max(0,last.solar+last.battery-last.grid);
         renderReadings(); $('solar-bar').style.width=Math.min(100,last.solar/solarMax*100)+'%'; $('solar-status').textContent=last.solar>0.05?'Producing':'Standby';
         $('battery-status-word').textContent=Math.abs(last.battery)<.03?'Standby':last.battery>0?'Discharging':'Charging'; setBar('battery-bar',last.battery,signedMax,'var(--store-d)'); setSoc(last.soc); $('soh-text').textContent=`${Math.round(last.soh)}% · ${(nominalKwh*last.soh/100).toFixed(1)} / 10 kWh`; $('soh-bar').style.width=last.soh+'%';
         const gExport=last.grid>=0; $('grid-status-word').textContent=Math.abs(last.grid)<.03?'Standby':gExport?'Exporting':'Importing'; $('grid-phrase').className='phrase '+(gExport?'produce-c':'import-c'); $('grid-pill').className='status-pill '+(gExport?'produce-c':'import-c'); $('grid-tile').className='tile '+(gExport?'produce':'import'); setBar('grid-bar',last.grid,signedMax,gExport?'var(--produce-d)':'var(--import-d)');
