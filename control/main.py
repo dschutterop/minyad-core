@@ -179,7 +179,10 @@ class ControlApp:
     def _mark_bridge_health_seen(self) -> None:
         if self.bridge_health_event is None:
             return
-        if self.bridge_status in BRIDGE_OFFLINE_STATUSES or self.bridge_is_available:
+        # A retained status message is enough to prove the bridge status topic is flowing.
+        # last_seen may arrive later, so do not keep startup blocked just because only
+        # minyad/bridge/status has been delivered so far.
+        if self.bridge_status not in {"offline"}:
             self.bridge_health_event.set()
 
     def parse_bridge_last_seen(self, value: str) -> datetime | None:
@@ -198,8 +201,12 @@ class ControlApp:
 
     @property
     def bridge_is_available(self) -> bool:
+        if self.bridge_status in BRIDGE_OFFLINE_STATUSES:
+            return False
         age = self.bridge_last_seen_age_seconds()
-        return self.bridge_status not in BRIDGE_OFFLINE_STATUSES and age is not None and age <= BRIDGE_LAST_SEEN_STALE_SECONDS
+        if age is None:
+            return True
+        return age <= BRIDGE_LAST_SEEN_STALE_SECONDS
 
     async def handle_bridge_status(self, status: str) -> None:
         self.bridge_status = status
@@ -297,7 +304,7 @@ class ControlApp:
 
     async def publish_state_loop(self) -> None:
         while True:
-            if not self.bridge_is_available and self.bridge_status not in BRIDGE_OFFLINE_STATUSES:
+            if self.bridge_last_seen is not None and not self.bridge_is_available and self.bridge_status not in BRIDGE_OFFLINE_STATUSES:
                 self.bridge_last_seen_error = "bridge last_seen is stale"
                 await store_status(bridge_last_seen_valid=False, bridge_last_seen_error=self.bridge_last_seen_error, available=False)
                 await self.mark_bridge_unavailable()
