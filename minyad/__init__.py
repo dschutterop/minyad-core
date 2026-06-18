@@ -1,0 +1,1 @@
+"""Minyad application package."""
