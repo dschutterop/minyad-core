@@ -25,6 +25,10 @@ MQTT_TOPIC_CHARGE_W = "minyad/control/charge_w"
 MQTT_TOPIC_DISCHARGE_W = "minyad/control/discharge_w"
 
 MQTT_TOPIC_INVERTER_STATUS = "minyad/inverter/status"
+MQTT_TOPIC_BRIDGE_STATUS = "minyad/bridge/status"
+MQTT_TOPIC_BRIDGE_LAST_SEEN = "minyad/bridge/last_seen"
+BRIDGE_STATUS_ONLINE = "online"
+BRIDGE_STATUS_OFFLINE = "offline"
 STATUS_OK = "ok"
 STATUS_UNREACHABLE = "unreachable"
 STATUS_ERROR = "error"
@@ -136,7 +140,7 @@ class GoodWeBridge:
         self.loop: asyncio.AbstractEventLoop | None = None
         self.shutdown_event = asyncio.Event()
         self.mqtt_client = mqtt.Client(client_id=CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
-        self.mqtt_client.will_set(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
+        self.mqtt_client.will_set(MQTT_TOPIC_BRIDGE_STATUS, BRIDGE_STATUS_OFFLINE, retain=True)
         if config.mqtt_user:
             self.mqtt_client.username_pw_set(config.mqtt_user, config.mqtt_pass)
         self.mqtt_client.on_connect = self.on_connect
@@ -151,11 +155,18 @@ class GoodWeBridge:
         if rc == 0:
             logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
             client.subscribe([(MQTT_TOPIC_CHARGE_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1)])
+            self.publish_bridge_alive()
         else:
             logger.error("MQTT connection failed with rc=%s", rc)
 
     def on_disconnect(self, _client: mqtt.Client, _userdata: Any, rc: int) -> None:
         logger.warning("MQTT disconnected with rc=%s", rc)
+
+    def publish_bridge_alive(self) -> None:
+        timestamp = utc_now_iso()
+        self.publish(MQTT_TOPIC_BRIDGE_STATUS, BRIDGE_STATUS_ONLINE, retain=True)
+        self.publish(MQTT_TOPIC_BRIDGE_LAST_SEEN, timestamp, retain=True)
+        logger.debug("Published bridge heartbeat timestamp=%s", timestamp)
 
     def on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         if self.loop is None:
@@ -203,6 +214,7 @@ class GoodWeBridge:
         }
         for topic, value in values.items():
             self.publish(topic, value, retain=True)
+        self.publish_bridge_alive()
         logger.info(
             "Poll timestamp=%s soc=%s power_w=%s grid_power_w=%s",
             utc_now_iso(),
@@ -216,9 +228,11 @@ class GoodWeBridge:
             try:
                 await self.poll_once()
             except (ConnectionError, TimeoutError) as exc:
+                self.publish_bridge_alive()
                 self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
                 logger.warning("Polling failed: %s", exc, exc_info=True)
             except Exception as exc:
+                self.publish_bridge_alive()
                 self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
                 logger.warning("Polling failed: %s", exc, exc_info=True)
 
@@ -232,6 +246,7 @@ class GoodWeBridge:
         self.mqtt_client.connect_async(self.config.mqtt_host, self.config.mqtt_port, keepalive=60)
         self.mqtt_client.loop_start()
         await self.polling_loop()
+        self.publish(MQTT_TOPIC_BRIDGE_STATUS, BRIDGE_STATUS_OFFLINE, retain=True)
         self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
