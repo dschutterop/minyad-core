@@ -80,6 +80,18 @@ BATTERY_KEYS = {
 }
 TEXT_KEYS = {"inverter_ip"}
 
+STRATEGY_DEFAULTS = {
+    "ghi_solar_rich_threshold": "4.5",
+    "ghi_solar_poor_threshold": "1.5",
+    "dynamic_tariff_ceiling_eur_kwh": "0.10",
+    "daily_recalculate_local_time": "22:00",
+}
+STRATEGY_NUMERIC_LIMITS = {
+    "ghi_solar_rich_threshold": (0.0, 20.0),
+    "ghi_solar_poor_threshold": (0.0, 20.0),
+    "dynamic_tariff_ceiling_eur_kwh": (-1.0, 5.0),
+}
+
 
 def _apply_log_level(debug: bool) -> None:
     global _debug_enabled
@@ -268,6 +280,24 @@ class SystemSettingsUpdate(BaseModel):
     debug_logging: bool | None = None
 
 
+class AssetSteeringSettingsUpdate(BaseModel):
+    ghi_solar_rich_threshold: float | None = None
+    ghi_solar_poor_threshold: float | None = None
+    dynamic_tariff_ceiling_eur_kwh: float | None = None
+    daily_recalculate_local_time: str | None = None
+
+    @field_validator("daily_recalculate_local_time")
+    @classmethod
+    def validate_local_time(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            datetime.strptime(value, "%H:%M")
+        except ValueError as exc:
+            raise ValueError("daily_recalculate_local_time must use HH:MM format") from exc
+        return value
+
+
 class BatteryOverrideRequest(BaseModel):
     mode: Literal["none", "force_on", "force_off", "force_discharge", "pause"]
     watts: int | None = Field(default=None, ge=0)
@@ -368,6 +398,70 @@ async def update_system_settings(update: SystemSettingsUpdate, session: AsyncSes
         await session.commit()
         _apply_log_level(update.debug_logging)
     return await get_system_settings(session)
+
+
+async def asset_steering_settings(session: AsyncSession) -> dict[str, Any]:
+    result = await session.execute(text("select key, value from settings where key like 'strategy.%'"))
+    values = {row.key.removeprefix("strategy."): row.value for row in result}
+    merged = {**STRATEGY_DEFAULTS, **values}
+    return {
+        "ghi_solar_rich_threshold": float(merged["ghi_solar_rich_threshold"]),
+        "ghi_solar_poor_threshold": float(merged["ghi_solar_poor_threshold"]),
+        "dynamic_tariff_ceiling_eur_kwh": float(merged["dynamic_tariff_ceiling_eur_kwh"]),
+        "daily_recalculate_local_time": merged["daily_recalculate_local_time"],
+    }
+
+
+@app.get("/asset-steering/settings")
+async def get_asset_steering_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    return await asset_steering_settings(session)
+
+
+@app.put("/asset-steering/settings")
+async def update_asset_steering_settings(
+    update: AssetSteeringSettingsUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    data = update.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        if key in STRATEGY_NUMERIC_LIMITS:
+            lo, hi = STRATEGY_NUMERIC_LIMITS[key]
+            if not lo <= float(value) <= hi:
+                raise HTTPException(status_code=422, detail=f"{key} must be between {lo} and {hi}")
+        elif key != "daily_recalculate_local_time":
+            raise HTTPException(status_code=422, detail=f"unknown setting {key}")
+        await session.execute(
+            text("""
+                insert into settings (key, value, encrypted, updated_at) values (:key, :value, false, now())
+                on conflict (key) do update set value=:value, encrypted=false, updated_at=now()
+            """),
+            {"key": f"strategy.{key}", "value": str(value)},
+        )
+    await session.commit()
+    return await asset_steering_settings(session)
+
+
+@app.get("/asset-steering/status")
+async def asset_steering_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    latest_decision = (await session.execute(text("""
+        select id, timestamp, mode, soc_floor, soc_ceiling, forecast_ghi, trigger_reason, applied_at
+        from strategy_decisions order by timestamp desc limit 1
+    """))).mappings().first()
+    latest_setpoint = (await session.execute(text("""
+        select id, timestamp, source, soc_floor, soc_ceiling, charge_rate_w, discharge_allowed,
+               battery_soc_at_time, grid_power_at_time, trigger_reason, ack_received, ack_latency_ms
+        from setpoint_log order by timestamp desc limit 1
+    """))).mappings().first()
+    recent_setpoints = (await session.execute(text("""
+        select id, timestamp, source, charge_rate_w, discharge_allowed, trigger_reason, ack_received
+        from setpoint_log order by timestamp desc limit 10
+    """))).mappings().all()
+    return {
+        "settings": await asset_steering_settings(session),
+        "latest_decision": dict(latest_decision) if latest_decision else None,
+        "latest_setpoint": dict(latest_setpoint) if latest_setpoint else None,
+        "recent_setpoints": [dict(row) for row in recent_setpoints],
+    }
 
 
 @app.get("/settings")
