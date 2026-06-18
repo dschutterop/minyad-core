@@ -77,6 +77,11 @@ a { color: inherit; }
 .page-title { margin: 10px 0 12px; font-size: clamp(38px, 6vw, 86px); line-height: .92; letter-spacing: -.065em; font-weight: 760; }
 .page-copy { max-width: 760px; margin: 0; color: var(--muted); font-size: 15px; line-height: 1.8; }
 .hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(330px, .9fr); gap: 38px; align-items: stretch; margin-bottom: 34px; }
+.overview-card { padding: 28px; }
+.overview-card h1 { margin: 0 0 18px; font-size: 15px; letter-spacing: .22em; text-transform: uppercase; }
+.overview-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+.overview-metric { min-height: 138px; background: var(--canvas); padding: 20px; display: flex; flex-direction: column; justify-content: space-between; }
+.overview-metric .metric-value { font-size: clamp(34px, 5vw, 56px); }
 .status-card, .card, .panel {
   background: rgba(255,255,255,.78);
   border: 1px solid var(--rule);
@@ -406,10 +411,14 @@ def energy_dashboard_body() -> str:
     # TODO(SOLAR): Solar live data is not yet available; keep all solar values scaffolded.
     return """
     <section class="hero" aria-labelledby="dashboard-title">
-      <div>
-        <span class="kicker">Positioning</span>
-        <h1 class="page-title" id="dashboard-title">Domestic energy, composed.</h1>
-        <p class="page-copy">Minyad translates DSMR grid telemetry, GoodWe battery state, and pending solar forecasting into a calm operational interface: precise, sparse, and brand-led.</p>
+      <div class="overview-card card">
+        <h1 id="dashboard-title">Metrics overview</h1>
+        <div class="overview-metrics" aria-label="Current energy metrics">
+          <div class="overview-metric"><span class="label">Grid net</span><span><span class="metric-value value" id="overview-grid-power">--</span><span class="unit">W</span></span></div>
+          <div class="overview-metric"><span class="label">Home load</span><span><span class="metric-value value" id="overview-home-load">--</span><span class="unit">W</span></span></div>
+          <div class="overview-metric"><span class="label">Battery SOC</span><span><span class="metric-value value" id="overview-battery-soc">--</span><span class="unit">%</span></span></div>
+          <div class="overview-metric"><span class="label">Battery flow</span><span><span class="metric-value value" id="overview-battery-flow">--</span><span class="unit">W</span></span></div>
+        </div>
       </div>
       <aside class="status-card" aria-label="Live source health">
         <div class="status-grid">
@@ -460,12 +469,12 @@ def energy_dashboard_body() -> str:
         const dsmrOk = settled[0].status === 'fulfilled' && dsmr.grid_status !== 'offline' && Object.keys(dsmr).length > 0; const batteryOk = settled[1].status === 'fulfilled' && battery.bridge_status !== 'offline' && battery.available !== false && Object.keys(battery).length > 0;
         setDot('dash-dsmr-dot', dsmrOk ? 'green' : 'red'); setDot('dash-battery-dot', batteryOk ? 'green' : 'red'); setText('dash-dsmr-last-seen', dsmr.grid_timestamp ? localIso(dsmr.grid_timestamp) : '--'); setText('dash-battery-last-seen', battery.bridge_last_seen ? localIso(battery.bridge_last_seen) : '--');
         const gridPower = numberOrNull(dsmr.grid_net_power_w ?? battery.grid_net_power_w); if (gridPower !== null) { gridHistory.push(gridPower); while (gridHistory.length > 60) gridHistory.shift(); }
-        setText('dash-grid-power', signedWatts(gridPower)); setText('dash-flow-grid', signedWatts(gridPower)); setText('dash-grid-direction', gridPower === null ? 'No data' : Math.abs(gridPower) < 25 ? 'Balanced' : gridPower > 0 ? 'Importing' : 'Exporting'); drawSparkline();
-        const batteryPower = numberOrNull(battery.power_w); const soc = numberOrNull(battery.soc); setText('dash-battery-flow', signedWatts(batteryPower)); setText('dash-flow-battery', batteryPower === null ? '--' : String(Math.round(Math.abs(batteryPower)))); setText('dash-battery-soc', soc === null ? '--' : String(Math.round(soc))); const socFill = document.getElementById('dash-battery-soc-fill'); if (socFill) socFill.style.width = `${Math.max(0, Math.min(100, soc ?? 0))}%`;
+        setText('dash-grid-power', signedWatts(gridPower)); setText('dash-flow-grid', signedWatts(gridPower)); setText('overview-grid-power', signedWatts(gridPower)); setText('dash-grid-direction', gridPower === null ? 'No data' : Math.abs(gridPower) < 25 ? 'Balanced' : gridPower > 0 ? 'Importing' : 'Exporting'); drawSparkline();
+        const batteryPower = numberOrNull(battery.power_w); const soc = numberOrNull(battery.soc); setText('dash-battery-flow', signedWatts(batteryPower)); setText('overview-battery-flow', signedWatts(batteryPower)); setText('dash-flow-battery', batteryPower === null ? '--' : String(Math.round(Math.abs(batteryPower)))); setText('dash-battery-soc', soc === null ? '--' : String(Math.round(soc))); setText('overview-battery-soc', soc === null ? '--' : String(Math.round(soc))); const socFill = document.getElementById('dash-battery-soc-fill'); if (socFill) socFill.style.width = `${Math.max(0, Math.min(100, soc ?? 0))}%`;
         const batteryState = batteryPower === null ? (battery.state || '--') : Math.abs(batteryPower) < 25 ? 'Idle' : batteryPower > 0 ? 'Charging' : 'Discharging'; setText('dash-battery-state', batteryState);
         if (soc !== null && batteryPower !== null && Math.abs(batteryPower) >= 25) { const remainingKwh = batteryPower > 0 ? usableBatteryKwh * (100 - soc) / 100 : usableBatteryKwh * soc / 100; setText('dash-battery-runtime', (remainingKwh / (Math.abs(batteryPower) / 1000)).toFixed(1)); } else { setText('dash-battery-runtime', '--'); }
         const chargeEnergy = numberOrNull(battery.total_charge_energy); const dischargeEnergy = numberOrNull(battery.total_discharge_energy); const cycleEstimate = chargeEnergy !== null && dischargeEnergy !== null ? Math.round(Math.min(chargeEnergy, dischargeEnergy) / usableBatteryKwh) : null; setText('dash-battery-cycles', cycleEstimate === null ? '--' : String(cycleEstimate));
-        const homeLoad = gridPower !== null && batteryPower !== null ? gridPower - batteryPower : null; setText('dash-home-load', homeLoad === null ? '--' : String(Math.max(0, Math.round(homeLoad))));
+        const homeLoad = gridPower !== null && batteryPower !== null ? gridPower - batteryPower : null; const homeLoadText = homeLoad === null ? '--' : String(Math.max(0, Math.round(homeLoad))); setText('dash-home-load', homeLoadText); setText('overview-home-load', homeLoadText);
         setText('dash-system-status', !dsmrOk || !batteryOk ? 'Degraded' : 'Solar pending'); setDot('dash-system-dot', !dsmrOk || !batteryOk ? 'amber' : 'grey');
       }
       loadEnergyDashboard(); setInterval(loadEnergyDashboard, 10000);
