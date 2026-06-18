@@ -95,6 +95,7 @@ class ControlApp:
         self.bridge_health_event = asyncio.Event()
         await self.reload_settings()
         self.mqtt.subscribe("minyad/dsmr/net_power_w", self._on_mqtt)
+        self.mqtt.subscribe("minyad/grid/net_power_w", self._on_mqtt)
         self.mqtt.subscribe("minyad/battery/+", self._on_mqtt)
         self.mqtt.subscribe("minyad/bridge/+", self._on_mqtt)
         self.mqtt.subscribe("minyad/control/override", self._on_mqtt)
@@ -162,12 +163,38 @@ class ControlApp:
     async def handle_message(self, topic: str, payload: bytes) -> None:
         decoded = payload.decode()
         LOGGER.debug("MQTT message topic=%s payload=%r", topic, decoded)
-        if topic == "minyad/dsmr/net_power_w":
-            surplus = int(decoded)
-            if self.controller and self.bridge_is_available:
-                state = self.controller.tick(surplus)
-                if state:
-                    await self.publish_state(state)
+        if topic in {"minyad/dsmr/net_power_w", "minyad/grid/net_power_w"}:
+            grid_power_w = int(decoded)
+            # DSMR/grid net power is positive for grid import and negative for export.
+            # HysteresisController expects surplus-style samples: positive export/available
+            # power starts charging, while negative import starts discharging.
+            surplus_w = -grid_power_w
+            if not self.controller:
+                LOGGER.info("Skipping grid control sample topic=%s grid_power=%sW: controller not ready", topic, grid_power_w)
+                return
+            if not self.bridge_is_available:
+                LOGGER.info(
+                    "Skipping grid control sample topic=%s grid_power=%sW surplus=%sW: GoodWe bridge unavailable status=%s last_seen=%s error=%s",
+                    topic,
+                    grid_power_w,
+                    surplus_w,
+                    self.bridge_status,
+                    self.bridge_last_seen_raw,
+                    self.bridge_last_seen_error,
+                )
+                return
+            previous_state = self.controller.state
+            state = self.controller.tick(surplus_w)
+            LOGGER.info(
+                "Grid control sample topic=%s grid_power=%sW surplus=%sW state=%s%s",
+                topic,
+                grid_power_w,
+                surplus_w,
+                self.controller.state.value,
+                " transitioned_from=" + previous_state.value if state else "",
+            )
+            if state:
+                await self.publish_state(state)
             return
         if topic == "minyad/control/override":
             command = json.loads(decoded)

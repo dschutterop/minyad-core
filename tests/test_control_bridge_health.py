@@ -134,3 +134,34 @@ def test_invalid_numeric_battery_payload_is_ignored(monkeypatch):
     asyncio.run(app.handle_battery_topic("minyad/battery/soc", "charge"))
 
     assert stored == {}
+
+
+class FakeGridController:
+    def __init__(self):
+        self.samples = []
+        self.state = control_main.ControlState.IDLE
+        self.override_mode = control_main.OverrideMode.NONE
+
+    def tick(self, surplus_w):
+        self.samples.append(surplus_w)
+        if surplus_w <= -300:
+            self.state = control_main.ControlState.DISCHARGING
+            return self.state
+        return None
+
+
+def test_grid_net_power_import_is_converted_to_negative_surplus(monkeypatch):
+    stored = {}
+
+    async def capture_store_status(**values):
+        stored.update(values)
+
+    monkeypatch.setattr(control_main, "store_status", capture_store_status)
+    app = make_available_app()
+    app.controller = FakeGridController()
+
+    asyncio.run(app.handle_message("minyad/grid/net_power_w", b"1200"))
+
+    assert app.controller.samples == [-1200]
+    assert ("control", "state", "DISCHARGING") in app.mqtt.published
+    assert stored["state"] == "DISCHARGING"
