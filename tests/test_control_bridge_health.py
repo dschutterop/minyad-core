@@ -165,3 +165,22 @@ def test_grid_net_power_import_is_converted_to_negative_surplus(monkeypatch):
     assert app.controller.samples == [-1200]
     assert ("control", "state", "DISCHARGING") in app.mqtt.published
     assert stored["state"] == "DISCHARGING"
+
+
+def test_start_discharging_tracks_current_grid_import(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_discharge_w": 5000}
+    app.latest_grid_power_w = 635
+
+    asyncio.run(app.start_discharging())
+
+    assert ("control", "discharge_w", 635) in app.mqtt.published
+    assert ("control", "discharge_w", 5000) not in app.mqtt.published
+
+
+def test_discharge_target_ignores_grid_export():
+    app = control_main.ControlApp()
+    app.latest_grid_power_w = -133
+
+    assert app.discharge_target_w() == 0
