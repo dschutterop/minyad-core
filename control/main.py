@@ -74,17 +74,20 @@ class ControlApp:
         self.bridge_last_seen: datetime | None = None
         self.bridge_last_seen_raw: str | None = None
         self.bridge_last_seen_error: str | None = "missing bridge last_seen"
+        self.bridge_health_event: asyncio.Event | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
         self.loop = asyncio.get_running_loop()
+        self.bridge_health_event = asyncio.Event()
         await self.reload_settings()
-        await self.apply_override(await load_override())
-        self.mqtt.start()
         self.mqtt.subscribe("minyad/dsmr/net_power_w", self._on_mqtt)
         self.mqtt.subscribe("minyad/battery/+", self._on_mqtt)
         self.mqtt.subscribe("minyad/bridge/+", self._on_mqtt)
         self.mqtt.subscribe("minyad/control/override", self._on_mqtt)
+        self.mqtt.start()
+        await self.wait_for_initial_bridge_health()
+        await self.apply_override(await load_override())
         await self.publish_state_loop()
 
     async def reload_settings(self) -> None:
@@ -99,6 +102,20 @@ class ControlApp:
             on_stop=self._schedule_stop_charging,
         )
         LOGGER.info("Battery control settings loaded")
+
+    async def wait_for_initial_bridge_health(self) -> None:
+        """Give retained bridge health topics a chance to arrive before applying overrides."""
+        if self.bridge_health_event is None:
+            return
+        timeout = float(os.getenv("BRIDGE_INITIAL_HEALTH_TIMEOUT_SECONDS", "5"))
+        try:
+            await asyncio.wait_for(self.bridge_health_event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            LOGGER.warning(
+                "Timed out waiting %.1fs for retained GoodWe bridge health; starting with status=%s",
+                timeout,
+                self.bridge_status,
+            )
 
     def _schedule_start_charging(self) -> None:
         if self.loop is None:
@@ -151,11 +168,22 @@ class ControlApp:
         measurement = topic.removeprefix("minyad/bridge/")
         if measurement == "status":
             await self.handle_bridge_status(payload.strip().lower())
+            self._mark_bridge_health_seen()
             return
         if measurement == "last_seen":
             await self.handle_bridge_last_seen(payload.strip())
+            self._mark_bridge_health_seen()
             return
         LOGGER.debug("Ignoring unsupported bridge topic %s", topic)
+
+    def _mark_bridge_health_seen(self) -> None:
+        if self.bridge_health_event is None:
+            return
+        # A retained status message is enough to prove the bridge status topic is flowing.
+        # last_seen may arrive later, so do not keep startup blocked just because only
+        # minyad/bridge/status has been delivered so far.
+        if self.bridge_status not in {"offline"}:
+            self.bridge_health_event.set()
 
     def parse_bridge_last_seen(self, value: str) -> datetime | None:
         try:
@@ -173,8 +201,12 @@ class ControlApp:
 
     @property
     def bridge_is_available(self) -> bool:
+        if self.bridge_status in BRIDGE_OFFLINE_STATUSES:
+            return False
         age = self.bridge_last_seen_age_seconds()
-        return self.bridge_status not in BRIDGE_OFFLINE_STATUSES and age is not None and age <= BRIDGE_LAST_SEEN_STALE_SECONDS
+        if age is None:
+            return True
+        return age <= BRIDGE_LAST_SEEN_STALE_SECONDS
 
     async def handle_bridge_status(self, status: str) -> None:
         self.bridge_status = status
@@ -243,6 +275,7 @@ class ControlApp:
         self.setpoint_w = 0
         self.mqtt.publish_measurement("control", "command", "stop")
         if self.bridge_is_available:
+            self.mqtt.publish_measurement("control", "charge_w", 0)
             self.mqtt.publish_measurement("control", "setpoint_w", 0)
             self.mqtt.publish_measurement("control", "discharge_w", 0)
 
@@ -254,6 +287,7 @@ class ControlApp:
         self.setpoint_w = max(0, watts)
         self.mqtt.publish_measurement("control", "command", "resume" if self.setpoint_w else "stop")
         self.mqtt.publish_measurement("control", "discharge_w", 0)
+        self.mqtt.publish_measurement("control", "charge_w", self.setpoint_w)
         self.mqtt.publish_measurement("control", "setpoint_w", self.setpoint_w)
 
     async def publish_discharge_setpoint(self, watts: int) -> None:
@@ -264,12 +298,13 @@ class ControlApp:
         max_discharge_w = int(self.settings.get("max_discharge_w", 5000))
         self.setpoint_w = max(0, min(watts, max_discharge_w))
         self.mqtt.publish_measurement("control", "command", "discharge" if self.setpoint_w else "stop")
+        self.mqtt.publish_measurement("control", "charge_w", 0)
         self.mqtt.publish_measurement("control", "setpoint_w", 0)
         self.mqtt.publish_measurement("control", "discharge_w", self.setpoint_w)
 
     async def publish_state_loop(self) -> None:
         while True:
-            if not self.bridge_is_available and self.bridge_status not in BRIDGE_OFFLINE_STATUSES:
+            if self.bridge_last_seen is not None and not self.bridge_is_available and self.bridge_status not in BRIDGE_OFFLINE_STATUSES:
                 self.bridge_last_seen_error = "bridge last_seen is stale"
                 await store_status(bridge_last_seen_valid=False, bridge_last_seen_error=self.bridge_last_seen_error, available=False)
                 await self.mark_bridge_unavailable()
