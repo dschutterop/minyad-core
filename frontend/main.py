@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 app = FastAPI(title="Minyad Frontend")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://minyad-api:8000")
 
-MENU = ["Dashboard", "Control", "Solar", "Battery", "DSMR", "Reporting", "Settings"]
+MENU = ["Dashboard", "Solar", "Battery", "DSMR", "Reporting", "Settings"]
 
 
 def render_page(active: str, body: str) -> str:
@@ -306,7 +306,7 @@ async def section(section: str) -> str:
         title = "Dashboard"
     if title == "Settings":
         return render_page(title, battery_settings_body())
-    if title == "Control":
+    if title == "Battery":
         return render_page(title, battery_control_body())
     if title == "DSMR":
         return render_page(title, dsmr_body())
