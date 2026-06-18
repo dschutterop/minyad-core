@@ -12,6 +12,7 @@ class ControlState(Enum):
 
     IDLE = "IDLE"
     CHARGING = "CHARGING"
+    DISCHARGING = "DISCHARGING"
     COOLDOWN = "COOLDOWN"
 
 

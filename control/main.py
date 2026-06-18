@@ -40,7 +40,18 @@ async def load_settings() -> dict[str, Any]:
     async with AsyncSessionLocal() as session:
         result = await session.execute(text("select key, value from settings where key like 'battery.%'"))
         rows = {row.key.removeprefix("battery."): row.value for row in result}
-    int_keys = {"start_w", "stop_w", "start_duration", "stop_duration", "cooldown", "max_charge_w", "max_charge_a", "max_discharge_w"}
+    int_keys = {
+        "start_w",
+        "stop_w",
+        "discharge_start_w",
+        "discharge_stop_w",
+        "start_duration",
+        "stop_duration",
+        "cooldown",
+        "max_charge_w",
+        "max_charge_a",
+        "max_discharge_w",
+    }
     return {key: int(value) if key in int_keys else value for key, value in rows.items() if not key.startswith("status.")}
 
 
@@ -97,11 +108,15 @@ class ControlApp:
         self.controller = HysteresisController(
             start_w=int(self.settings["start_w"]),
             stop_w=int(self.settings["stop_w"]),
+            discharge_start_w=int(self.settings["discharge_start_w"]),
+            discharge_stop_w=int(self.settings["discharge_stop_w"]),
             start_duration=int(self.settings["start_duration"]),
             stop_duration=int(self.settings["stop_duration"]),
             cooldown=int(self.settings["cooldown"]),
             on_start=self._schedule_start_charging,
             on_stop=self._schedule_stop_charging,
+            on_discharge_start=self._schedule_start_discharging,
+            on_discharge_stop=self._schedule_stop_discharging,
         )
         LOGGER.info("Battery control settings loaded")
 
@@ -128,6 +143,16 @@ class ControlApp:
         if self.loop is None:
             raise RuntimeError("control app event loop is not initialized")
         asyncio.run_coroutine_threadsafe(self.stop_charging(), self.loop)
+
+    def _schedule_start_discharging(self) -> None:
+        if self.loop is None:
+            raise RuntimeError("control app event loop is not initialized")
+        asyncio.run_coroutine_threadsafe(self.start_discharging(), self.loop)
+
+    def _schedule_stop_discharging(self) -> None:
+        if self.loop is None:
+            raise RuntimeError("control app event loop is not initialized")
+        asyncio.run_coroutine_threadsafe(self.stop_discharging(), self.loop)
 
     def _on_mqtt(self, topic: str, payload: bytes) -> None:
         if self.loop is None:
@@ -277,6 +302,12 @@ class ControlApp:
 
     async def start_charging(self) -> None:
         await self.publish_setpoint(int(self.settings["max_charge_w"]))
+
+    async def start_discharging(self) -> None:
+        await self.publish_discharge_setpoint(int(self.settings["max_discharge_w"]))
+
+    async def stop_discharging(self) -> None:
+        await self.stop_charging()
 
     async def stop_charging(self) -> None:
         self.setpoint_w = 0
