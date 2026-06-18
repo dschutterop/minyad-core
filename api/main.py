@@ -503,12 +503,12 @@ async def asset_steering_status(session: AsyncSession = Depends(get_session)) ->
         from strategy_decisions order by timestamp desc limit 1
     """))).mappings().first()
     latest_setpoint = (await session.execute(text("""
-        select id, timestamp, source, soc_floor, soc_ceiling, charge_rate_w, discharge_allowed,
+        select id, timestamp, source, soc_floor, soc_ceiling, setpoint_w, discharge_allowed,
                battery_soc_at_time, grid_power_at_time, trigger_reason, ack_received, ack_latency_ms
         from setpoint_log order by timestamp desc limit 1
     """))).mappings().first()
     recent_setpoints = (await session.execute(text("""
-        select id, timestamp, source, charge_rate_w, discharge_allowed, trigger_reason, ack_received
+        select id, timestamp, source, setpoint_w, discharge_allowed, trigger_reason, ack_received
         from setpoint_log order by timestamp desc limit 10
     """))).mappings().all()
     return {
