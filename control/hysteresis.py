@@ -26,10 +26,12 @@ class OverrideMode(Enum):
 
 class HysteresisController:
     """
-    Decides when to start/stop charging based on sustained surplus.
+    Decides when to start/stop charging or discharging based on sustained grid flow.
 
-    State machine: IDLE → CHARGING → COOLDOWN → IDLE.
-    All thresholds are supplied by the settings database through the constructor.
+    State machines: IDLE → CHARGING → COOLDOWN → IDLE and
+    IDLE → DISCHARGING → COOLDOWN → IDLE. Charging and discharging are
+    mutually exclusive because both can only start from IDLE. All thresholds
+    are supplied by the settings database through the constructor.
     """
 
     def __init__(
@@ -37,20 +39,28 @@ class HysteresisController:
         *,
         start_w: int,
         stop_w: int,
+        discharge_start_w: int,
+        discharge_stop_w: int,
         start_duration: int,
         stop_duration: int,
         cooldown: int,
         on_start: Callable[[], None] | None = None,
         on_stop: Callable[[], None] | None = None,
+        on_discharge_start: Callable[[], None] | None = None,
+        on_discharge_stop: Callable[[], None] | None = None,
         clock: Callable[[], float] = monotonic,
     ) -> None:
         self.start_w = start_w
         self.stop_w = stop_w
+        self.discharge_start_w = discharge_start_w
+        self.discharge_stop_w = discharge_stop_w
         self.start_duration = start_duration
         self.stop_duration = stop_duration
         self.cooldown = cooldown
         self._on_start = on_start or (lambda: None)
         self._on_stop = on_stop or (lambda: None)
+        self._on_discharge_start = on_discharge_start or (lambda: None)
+        self._on_discharge_stop = on_discharge_stop or (lambda: None)
         self._clock = clock
         self._lock = threading.RLock()
         self._state = ControlState.IDLE
@@ -74,8 +84,8 @@ class HysteresisController:
         with self._lock:
             self._override_mode = mode
             self._pause_until = self._clock() + duration_seconds if mode is OverrideMode.PAUSE and duration_seconds else None
-            if mode in {OverrideMode.FORCE_OFF, OverrideMode.FORCE_DISCHARGE} and self._state is ControlState.CHARGING:
-                self._transition(ControlState.IDLE, f"override {mode.value} stopped charging")
+            if mode in {OverrideMode.FORCE_OFF, OverrideMode.FORCE_DISCHARGE} and self._state in {ControlState.CHARGING, ControlState.DISCHARGING}:
+                self._transition(ControlState.IDLE, f"override {mode.value} stopped active control")
             LOGGER.info("%s override set: %s", self._timestamp(), mode.value)
 
     def clear_override(self) -> None:
@@ -101,19 +111,37 @@ class HysteresisController:
 
             if self._state is ControlState.IDLE:
                 if surplus_w >= self.start_w:
-                    self._start_since = self._start_since or now
+                    if self._start_since is None:
+                        self._start_since = now
                     if now - self._start_since >= self.start_duration:
                         return self._transition(ControlState.CHARGING, f"surplus {surplus_w}W sustained above {self.start_w}W")
+                elif surplus_w <= self.discharge_start_w:
+                    if self._start_since is None:
+                        self._start_since = now
+                    if now - self._start_since >= self.start_duration:
+                        return self._transition(ControlState.DISCHARGING, f"import {surplus_w}W sustained below {self.discharge_start_w}W")
                 else:
                     self._start_since = None
                 return None
 
             if self._state is ControlState.CHARGING:
                 if surplus_w < self.stop_w:
-                    self._stop_since = self._stop_since or now
+                    if self._stop_since is None:
+                        self._stop_since = now
                     if now - self._stop_since >= self.stop_duration:
                         self._cooldown_until = now + self.cooldown
                         return self._transition(ControlState.COOLDOWN, f"surplus {surplus_w}W sustained below {self.stop_w}W")
+                else:
+                    self._stop_since = None
+                return None
+
+            if self._state is ControlState.DISCHARGING:
+                if surplus_w > self.discharge_stop_w:
+                    if self._stop_since is None:
+                        self._stop_since = now
+                    if now - self._stop_since >= self.stop_duration:
+                        self._cooldown_until = now + self.cooldown
+                        return self._transition(ControlState.COOLDOWN, f"import {surplus_w}W sustained above {self.discharge_stop_w}W")
                 else:
                     self._stop_since = None
             return None
@@ -128,6 +156,10 @@ class HysteresisController:
             self._on_start()
         if old_state is ControlState.CHARGING and new_state is not ControlState.CHARGING:
             self._on_stop()
+        if old_state is not ControlState.DISCHARGING and new_state is ControlState.DISCHARGING:
+            self._on_discharge_start()
+        if old_state is ControlState.DISCHARGING and new_state is not ControlState.DISCHARGING:
+            self._on_discharge_stop()
         return new_state
 
     @staticmethod
