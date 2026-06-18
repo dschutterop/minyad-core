@@ -38,14 +38,16 @@ services:
     image: eclipse-mosquitto:2
     container_name: minyad-mqtt
     restart: unless-stopped
-    network_mode: host
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "0.0.0.0:1884:1883"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
+    networks: [minyad-internal, minyad-public]
     healthcheck:
-      test: ["CMD", "mosquitto_pub", "-h", "192.168.110.5", "-p", "1883", "-t", "healthcheck", "-n"]
+      test: ["CMD", "mosquitto_pub", "-h", "127.0.0.1", "-p", "1883", "-t", "healthcheck", "-n"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -59,7 +61,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: 192.168.110.5
+      MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -76,7 +78,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: 192.168.110.5
+      MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -93,7 +95,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: 192.168.110.5
+      MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -110,7 +112,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: 192.168.110.5
+      MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -131,7 +133,7 @@ services:
     env_file: .env
     environment:
       API_BASE_URL: http://minyad-api:8000
-      MQTT_HOST: 192.168.110.5
+      MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -153,7 +155,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: 192.168.110.5
+      MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
@@ -170,7 +172,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MQTT_HOST: 192.168.110.5
+      MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
     depends_on:
       minyad-migrate:
