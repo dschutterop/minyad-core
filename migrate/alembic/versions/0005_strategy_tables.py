@@ -40,6 +40,9 @@ def upgrade() -> None:
         sa.Column("discharge_allowed", sa.Boolean(), nullable=False),
         sa.Column("battery_soc_at_time", sa.Float(), nullable=True),
         sa.Column("grid_power_at_time", sa.Integer(), nullable=True),
+        sa.Column("battery_power_at_time", sa.Integer(), nullable=True),
+        sa.Column("home_load_at_time", sa.Integer(), nullable=True),
+        sa.Column("setpoint_delta", sa.Integer(), nullable=True),
         sa.Column("trigger_reason", sa.Text(), nullable=False),
         sa.Column("ack_received", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("ack_latency_ms", sa.Integer(), nullable=True),
@@ -61,7 +64,10 @@ def upgrade() -> None:
               ('strategy.ghi_solar_rich_threshold', '4.5', false),
               ('strategy.ghi_solar_poor_threshold', '1.5', false),
               ('strategy.dynamic_tariff_ceiling_eur_kwh', '0.10', false),
-              ('strategy.daily_recalculate_local_time', '22:00', false)
+              ('strategy.daily_recalculate_local_time', '22:00', false),
+              ('strategy.grid_target_w', '0', false),
+              ('battery.max_charge_w', '1440', false),
+              ('battery.max_discharge_w', '5000', false)
             on conflict (key) do nothing
             """
         )
