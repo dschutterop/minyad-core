@@ -22,6 +22,8 @@ LOGGER = logging.getLogger(__name__)
 STATUS_PREFIX = "battery.status."
 DEFAULT_SETPOINT_W = 0
 BRIDGE_OFFLINE_STATUSES = {"offline", "error"}
+SOC_FLOOR_DEFAULT = 20
+SOC_CEILING_DEFAULT = 90
 BRIDGE_LAST_SEEN_STALE_SECONDS = int(os.getenv("BRIDGE_LAST_SEEN_STALE_SECONDS", "60"))
 BATTERY_TOPIC_TYPES = {
     "soc": int,
@@ -51,6 +53,8 @@ async def load_settings() -> dict[str, Any]:
         "max_charge_w",
         "max_charge_a",
         "max_discharge_w",
+        "soc_floor",
+        "soc_ceiling",
     }
     return {key: int(value) if key in int_keys else value for key, value in rows.items() if not key.startswith("status.")}
 
@@ -84,6 +88,7 @@ class ControlApp:
         self.settings: dict[str, Any] = {}
         self.setpoint_w = DEFAULT_SETPOINT_W
         self.latest_grid_power_w = 0
+        self.latest_battery_soc: int | None = None
         self.bridge_status = "offline"
         self.bridge_last_seen: datetime | None = None
         self.bridge_last_seen_raw: str | None = None
@@ -186,6 +191,12 @@ class ControlApp:
                 )
                 return
             previous_state = self.controller.state
+            surplus_w = self._apply_soc_guard(surplus_w)
+            # _apply_soc_guard may force the controller idle; publish the stop now.
+            if previous_state is not ControlState.IDLE and self.controller.state is ControlState.IDLE:
+                await self.stop_charging()
+                await self.publish_state(ControlState.IDLE)
+                return
             state = self.controller.tick(surplus_w)
             LOGGER.info(
                 "Grid control sample topic=%s grid_power=%sW surplus=%sW state=%s%s",
@@ -225,6 +236,8 @@ class ControlApp:
         except (TypeError, ValueError):
             LOGGER.warning("Ignoring invalid battery topic payload topic=%s payload=%r", topic, payload)
             return
+        if measurement == "soc":
+            self.latest_battery_soc = int(value)
         await store_status(**{measurement: value})
 
     async def handle_bridge_topic(self, topic: str, payload: str) -> None:
@@ -306,11 +319,13 @@ class ControlApp:
     def _force_controller_idle(self) -> None:
         if self.controller is None:
             return
-        with self.controller._lock:  # HysteresisController intentionally remains unchanged.
+        with self.controller._lock:
             self.controller._state = ControlState.IDLE
-            self.controller._start_since = None
+            self.controller._charge_since = None
+            self.controller._discharge_since = None
             self.controller._stop_since = None
             self.controller._cooldown_until = None
+            self.controller._cooldown_direction = None
 
     async def apply_override(self, command: dict[str, Any]) -> None:
         if not self.controller:
@@ -333,6 +348,35 @@ class ControlApp:
 
     async def start_charging(self) -> None:
         await self.publish_setpoint(int(self.settings["max_charge_w"]))
+
+    def _apply_soc_guard(self, surplus_w: int) -> int:
+        """Block discharge below soc_floor and charge above soc_ceiling.
+
+        Clamps surplus_w so the hysteresis trigger is invisible when the battery
+        is at a SoC boundary, and forces idle if we're already in the wrong state.
+        Returns the (possibly clamped) surplus_w.
+        """
+        soc = self.latest_battery_soc
+        if soc is None or self.controller is None:
+            return surplus_w
+        soc_floor = int(self.settings.get("soc_floor", SOC_FLOOR_DEFAULT))
+        soc_ceiling = int(self.settings.get("soc_ceiling", SOC_CEILING_DEFAULT))
+        if soc <= soc_floor:
+            if self.controller.state is ControlState.DISCHARGING:
+                LOGGER.warning("SoC %s%% at or below floor %s%%; forcing idle", soc, soc_floor)
+                self._force_controller_idle()
+                # stop_charging() is async; caller handles publish after tick
+            # Mask the discharge trigger so IDLE never starts a new discharge
+            if surplus_w <= self.controller.discharge_start_w:
+                return self.controller.discharge_start_w + 1
+        if soc >= soc_ceiling:
+            if self.controller.state is ControlState.CHARGING:
+                LOGGER.warning("SoC %s%% at or above ceiling %s%%; forcing idle", soc, soc_ceiling)
+                self._force_controller_idle()
+            # Mask the charge trigger so IDLE never starts a new charge
+            if surplus_w >= self.controller.start_w:
+                return self.controller.start_w - 1
+        return surplus_w
 
     def discharge_target_w(self) -> int:
         """Return the discharge setpoint needed to offset current grid import.

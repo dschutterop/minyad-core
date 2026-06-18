@@ -40,7 +40,7 @@ ABSOLUTE_DAILY_CEILING = 95
 ABSOLUTE_OVERRIDE_CEILING = 100
 DEFAULT_MAX_CHARGE_W = 1440
 DEFAULT_MAX_DISCHARGE_W = 5000
-DEFAULT_DEBOUNCE_SECONDS = 300
+DEFAULT_DEBOUNCE_SECONDS = 30
 DEFAULT_JITTER_W = 50
 ACK_TIMEOUT_SECONDS = 30
 
@@ -71,18 +71,23 @@ class ModeConfig:
 
 @dataclass(frozen=True)
 class StrategyDecision:
-    """A concrete real-time power-balancing setpoint decision."""
+    """A concrete real-time power-balancing setpoint decision.
+
+    apparent_load_at_eval is grid_power + battery_power; solar production is not
+    included because it is not tracked here — treat it as a lower bound on actual
+    home consumption during daylight hours.
+    """
 
     mode: str
     soc_floor: int
     soc_ceiling: int
-    charge_rate_w: int | None
+    setpoint_w: int | None  # negative = charge, positive = discharge
     discharge_allowed: bool
     reason: str
     valid_until: datetime
     grid_power_at_eval: int
     battery_power_at_eval: int
-    home_load_at_eval: int
+    apparent_load_at_eval: int
     setpoint_delta: int
 
 
@@ -181,20 +186,21 @@ class ChargeController:
 
         return StrategyDecision(
             mode.mode, mode.soc_floor, mode.soc_ceiling, int(new_sp), discharge_allowed, reason, mode.valid_until,
-            grid_power, int(battery_power), int(grid_power + battery_power), int(setpoint_delta)
+            grid_power, int(battery_power), int(grid_power + battery_power), int(setpoint_delta),
         )
 
     def apply(self, decision: StrategyDecision) -> None:
         """Publish a setpoint through MQTT and log whether bridge telemetry ACKed it."""
         now_mono = time.monotonic()
-        if self._last_apply_monotonic is not None and now_mono - self._last_apply_monotonic < self.debounce_seconds:
+        debounce = self._float_setting_sync("strategy.debounce_seconds", self.debounce_seconds)
+        if self._last_apply_monotonic is not None and now_mono - self._last_apply_monotonic < debounce:
             LOGGER.info("Suppressing setpoint change inside %ss debounce window", self.debounce_seconds)
             return
-        setpoint_w = int(decision.charge_rate_w or 0)
+        setpoint_w = int(decision.setpoint_w or 0)
         payload = {
             "target_soc": decision.soc_ceiling,
             "soc_floor": decision.soc_floor,
-            "charge_rate_w": decision.charge_rate_w,
+            "setpoint_w": decision.setpoint_w,
             "discharge_allowed": decision.discharge_allowed,
         }
         with self._lock:
@@ -395,9 +401,9 @@ class ChargeController:
     def _insert_setpoint_log_sync(self, decision: StrategyDecision, battery_soc: Any, ack_received: bool, ack_latency_ms: int | None) -> None:
         row = {
             "timestamp": self._now().isoformat(), "source": "strategy", "soc_floor": decision.soc_floor, "soc_ceiling": decision.soc_ceiling,
-            "charge_rate_w": decision.charge_rate_w, "discharge_allowed": decision.discharge_allowed, "battery_soc_at_time": battery_soc,
+            "setpoint_w": decision.setpoint_w, "discharge_allowed": decision.discharge_allowed, "battery_soc_at_time": battery_soc,
             "grid_power_at_time": decision.grid_power_at_eval, "battery_power_at_time": decision.battery_power_at_eval,
-            "home_load_at_time": decision.home_load_at_eval, "setpoint_delta": decision.setpoint_delta,
+            "apparent_load_at_time": decision.apparent_load_at_eval, "setpoint_delta": decision.setpoint_delta,
             "trigger_reason": decision.reason, "ack_received": ack_received, "ack_latency_ms": ack_latency_ms,
         }
         if isinstance(self.db_session_factory, dict):
@@ -410,8 +416,8 @@ class ChargeController:
             async def insert_row() -> None:
                 async with self.db_session_factory() as session:
                     await session.execute(text("""
-                        insert into setpoint_log (timestamp, source, soc_floor, soc_ceiling, charge_rate_w, discharge_allowed, battery_soc_at_time, grid_power_at_time, battery_power_at_time, home_load_at_time, setpoint_delta, trigger_reason, ack_received, ack_latency_ms)
-                        values (:timestamp, :source, :soc_floor, :soc_ceiling, :charge_rate_w, :discharge_allowed, :battery_soc_at_time, :grid_power_at_time, :battery_power_at_time, :home_load_at_time, :setpoint_delta, :trigger_reason, :ack_received, :ack_latency_ms)
+                        insert into setpoint_log (timestamp, source, soc_floor, soc_ceiling, setpoint_w, discharge_allowed, battery_soc_at_time, grid_power_at_time, battery_power_at_time, apparent_load_at_time, setpoint_delta, trigger_reason, ack_received, ack_latency_ms)
+                        values (:timestamp, :source, :soc_floor, :soc_ceiling, :setpoint_w, :discharge_allowed, :battery_soc_at_time, :grid_power_at_time, :battery_power_at_time, :apparent_load_at_time, :setpoint_delta, :trigger_reason, :ack_received, :ack_latency_ms)
                     """), row)
                     await session.commit()
             asyncio.run(insert_row())
