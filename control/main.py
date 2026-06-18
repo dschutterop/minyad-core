@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -14,12 +16,13 @@ from shared.db import AsyncSessionLocal
 from shared.mqtt_client import MinyadMqttClient
 from state import ControlState
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
 LOGGER = logging.getLogger(__name__)
 
 STATUS_PREFIX = "battery.status."
 DEFAULT_SETPOINT_W = 0
 BRIDGE_OFFLINE_STATUSES = {"offline", "error"}
+BRIDGE_LAST_SEEN_STALE_SECONDS = int(os.getenv("BRIDGE_LAST_SEEN_STALE_SECONDS", "60"))
 BATTERY_TOPIC_TYPES = {
     "soc": int,
     "soh": int,
@@ -68,6 +71,9 @@ class ControlApp:
         self.settings: dict[str, Any] = {}
         self.setpoint_w = DEFAULT_SETPOINT_W
         self.bridge_status = "offline"
+        self.bridge_last_seen: datetime | None = None
+        self.bridge_last_seen_raw: str | None = None
+        self.bridge_last_seen_error: str | None = "missing bridge last_seen"
         self.loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
@@ -111,6 +117,7 @@ class ControlApp:
 
     async def handle_message(self, topic: str, payload: bytes) -> None:
         decoded = payload.decode()
+        LOGGER.debug("MQTT message topic=%s payload=%r", topic, decoded)
         if topic == "minyad/dsmr/net_power_w":
             surplus = int(decoded)
             if self.controller and self.bridge_is_available:
@@ -146,23 +153,60 @@ class ControlApp:
             await self.handle_bridge_status(payload.strip().lower())
             return
         if measurement == "last_seen":
-            await store_status(bridge_last_seen=payload.strip())
+            await self.handle_bridge_last_seen(payload.strip())
             return
         LOGGER.debug("Ignoring unsupported bridge topic %s", topic)
 
+    def parse_bridge_last_seen(self, value: str) -> datetime | None:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def bridge_last_seen_age_seconds(self) -> float | None:
+        if self.bridge_last_seen is None:
+            return None
+        return (datetime.now(timezone.utc) - self.bridge_last_seen).total_seconds()
+
     @property
     def bridge_is_available(self) -> bool:
-        return self.bridge_status not in BRIDGE_OFFLINE_STATUSES
+        age = self.bridge_last_seen_age_seconds()
+        return self.bridge_status not in BRIDGE_OFFLINE_STATUSES and age is not None and age <= BRIDGE_LAST_SEEN_STALE_SECONDS
 
     async def handle_bridge_status(self, status: str) -> None:
         self.bridge_status = status
+        LOGGER.info("GoodWe bridge status update: %s", status)
         await store_status(bridge_status=status, available=self.bridge_is_available)
         if status in BRIDGE_OFFLINE_STATUSES:
             LOGGER.warning("GoodWe bridge is %s; stopping control and suppressing setpoints", status)
-            self.setpoint_w = 0
-            self._force_controller_idle()
-            self.mqtt.publish_measurement("control", "command", "stop")
-            await self.publish_state(ControlState.IDLE, publish_setpoint=False)
+            await self.mark_bridge_unavailable()
+
+    async def handle_bridge_last_seen(self, value: str) -> None:
+        self.bridge_last_seen_raw = value
+        parsed = self.parse_bridge_last_seen(value)
+        if parsed is None:
+            self.bridge_last_seen = None
+            self.bridge_last_seen_error = f"invalid bridge last_seen timestamp: {value!r}"
+            LOGGER.warning(self.bridge_last_seen_error)
+        else:
+            self.bridge_last_seen = parsed
+            age = self.bridge_last_seen_age_seconds()
+            self.bridge_last_seen_error = None if age is not None and age <= BRIDGE_LAST_SEEN_STALE_SECONDS else "bridge last_seen is stale"
+            LOGGER.info("GoodWe bridge heartbeat timestamp=%s age=%.1fs valid=%s", value, age or 0, self.bridge_last_seen_error is None)
+        await store_status(bridge_last_seen=value, bridge_last_seen_valid=self.bridge_last_seen_error is None, bridge_last_seen_error=self.bridge_last_seen_error or "", available=self.bridge_is_available)
+        if not self.bridge_is_available:
+            await self.mark_bridge_unavailable()
+
+    async def mark_bridge_unavailable(self) -> None:
+        if self.setpoint_w != 0 or (self.controller and self.controller.state is not ControlState.IDLE):
+            LOGGER.warning("GoodWe bridge unavailable (status=%s, last_seen=%s, error=%s); stopping control", self.bridge_status, self.bridge_last_seen_raw, self.bridge_last_seen_error)
+        self.setpoint_w = 0
+        self._force_controller_idle()
+        self.mqtt.publish_measurement("control", "command", "stop")
+        await self.publish_state(ControlState.IDLE, publish_setpoint=False)
 
     def _force_controller_idle(self) -> None:
         if self.controller is None:
@@ -225,6 +269,10 @@ class ControlApp:
 
     async def publish_state_loop(self) -> None:
         while True:
+            if not self.bridge_is_available and self.bridge_status not in BRIDGE_OFFLINE_STATUSES:
+                self.bridge_last_seen_error = "bridge last_seen is stale"
+                await store_status(bridge_last_seen_valid=False, bridge_last_seen_error=self.bridge_last_seen_error, available=False)
+                await self.mark_bridge_unavailable()
             if self.controller:
                 await self.publish_state(self.controller.state)
             await asyncio.sleep(10)
