@@ -64,7 +64,14 @@ GRID_STATUS_KEYS = {
     "minyad/grid/timestamp": "grid_timestamp",
     "minyad/grid/status": "grid_status",
 }
+SOLAR_STATUS_KEYS = {
+    "minyad/solar/production_w": "solar_power_w",
+    "minyad/solar/production_updated_at": "solar_updated_at",
+    "minyad/solar/bridge/status": "solar_bridge_status",
+    "minyad/solar/bridge/last_seen": "solar_bridge_last_seen",
+}
 MQTT_STATUS_KEYS.update(GRID_STATUS_KEYS)
+MQTT_STATUS_KEYS.update(SOLAR_STATUS_KEYS)
 MQTT_STATUS_LOCK = Lock()
 MQTT_STATUS: dict[str, str] = {}
 RETAINED_STATUS_TIMEOUT_SECONDS = 1.0
@@ -196,7 +203,13 @@ def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOU
         LOGGER.debug("collect_retained_mqtt_status: connected, subscribing")
         client.loop_start()
         try:
-            for topic in ("minyad/battery/+", "minyad/bridge/+", "minyad/control/+", "minyad/grid/+"):
+            for topic in (
+                "minyad/battery/+",
+                "minyad/bridge/+",
+                "minyad/control/+",
+                "minyad/grid/+",
+                "minyad/solar/+",
+            ):
                 client.subscribe(topic)
                 LOGGER.debug("collect_retained_mqtt_status: subscribed %s", topic)
             completed = received.wait(timeout_seconds)
@@ -250,7 +263,11 @@ def coerce_float_status_value(key: str, value: Any) -> float | Any:
 
 
 def grid_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in payload.items() if key.startswith("grid_")}
+    return {
+        key: value
+        for key, value in payload.items()
+        if key.startswith("grid_") or key.startswith("solar_")
+    }
 
 
 def battery_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -260,6 +277,7 @@ def battery_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def coerce_grid_status(payload: dict[str, Any]) -> dict[str, Any]:
     coerced = dict(payload)
     int_keys = {
+        "solar_power_w",
         "grid_delivered_w",
         "grid_returned_w",
         "grid_net_power_w",
@@ -383,6 +401,7 @@ async def startup() -> None:
     mqtt.subscribe("minyad/bridge/+", handle_status_mqtt)
     mqtt.subscribe("minyad/control/+", handle_status_mqtt)
     mqtt.subscribe("minyad/grid/+", handle_status_mqtt)
+    mqtt.subscribe("minyad/solar/+", handle_status_mqtt)
     asyncio.create_task(_refresh_debug_setting())
 
 

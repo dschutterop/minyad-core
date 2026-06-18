@@ -166,6 +166,30 @@ class EnvoyClient:
         return [item for item in data if isinstance(item, dict)]
 
 
+
+def production_w_from_payload(data: dict[str, Any], fallback: int | None = None) -> int | None:
+    if "productionW" not in data or data.get("productionW") in (None, ""):
+        return fallback
+    return int(data.get("productionW") or 0)
+
+
+def summarize_inverter_production(inverters: list[dict[str, Any]]) -> tuple[dict[str, int], int, object | None]:
+    array_totals: dict[str, int] = {}
+    latest_report_at = None
+    for inverter in inverters:
+        serial = str(inverter.get("serialNumber", "")).strip()
+        if not serial:
+            continue
+        watts = int(inverter.get("lastReportWatts", 0) or 0)
+        report_at = inverter.get("lastReportDate")
+        if report_at is not None and (latest_report_at is None or report_at > latest_report_at):
+            latest_report_at = report_at
+        array_name = slugify_array_name(
+            inverter.get("array") or inverter.get("arrayName") or inverter.get("name") or "unknown"
+        )
+        array_totals[array_name] = array_totals.get(array_name, 0) + watts
+    return array_totals, sum(array_totals.values()), latest_report_at
+
 def set_production_limit(watts: int) -> None:
     """Future hook for Enphase production curtailment."""
     # TODO: D8.x systems may expose curtailment through endpoints such as
@@ -181,6 +205,7 @@ class EnphaseBridge:
         self.config = config
         self.envoy = envoy
         self.shutdown_event = asyncio.Event()
+        self.last_production_w: int | None = None
         self.mqtt_client = mqtt.Client(client_id=CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
         self.mqtt_client.will_set(MQTT_TOPIC_BRIDGE_STATUS, BRIDGE_STATUS_ERROR, retain=True)
         if config.mqtt_user:
@@ -222,10 +247,12 @@ class EnphaseBridge:
             interval = self.config.production_poll_interval
             try:
                 data = await self.envoy.read_production()
-                production_w = int(data.get("productionW", 0) or 0)
+                production_w = production_w_from_payload(data, self.last_production_w)
                 updated_at = unix_to_iso(data.get("lastReportDate"))
-                self.publish(MQTT_TOPIC_PRODUCTION_W, production_w)
-                self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, updated_at)
+                if production_w is not None:
+                    self.last_production_w = production_w
+                    self.publish(MQTT_TOPIC_PRODUCTION_W, production_w)
+                    self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, updated_at)
                 self.publish_bridge_alive()
                 logger.info("Production poll production_w=%s updated_at=%s", production_w, updated_at)
                 backoff = 1
@@ -251,7 +278,9 @@ class EnphaseBridge:
             interval = self.config.inverter_poll_interval
             try:
                 inverters = await self.envoy.read_inverters()
-                array_totals: dict[str, int] = {}
+                array_totals, total_production_w, latest_report_at = summarize_inverter_production(
+                    inverters
+                )
                 for inverter in inverters:
                     serial = str(inverter.get("serialNumber", "")).strip()
                     if not serial:
@@ -260,14 +289,18 @@ class EnphaseBridge:
                     last_report_at = unix_to_iso(inverter.get("lastReportDate"))
                     self.publish(f"minyad/solar/inverter/{serial}/power_w", watts)
                     self.publish(f"minyad/solar/inverter/{serial}/last_report_at", last_report_at)
-                    array_name = slugify_array_name(
-                        inverter.get("array") or inverter.get("arrayName") or inverter.get("name") or "unknown"
-                    )
-                    array_totals[array_name] = array_totals.get(array_name, 0) + watts
                 for array_name, watts in array_totals.items():
                     self.publish(f"minyad/solar/array/{array_name}/power_w", watts)
+                self.last_production_w = total_production_w
+                self.publish(MQTT_TOPIC_PRODUCTION_W, total_production_w)
+                self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, unix_to_iso(latest_report_at))
                 self.publish_bridge_alive()
-                logger.info("Inverter poll inverter_count=%s arrays=%s", len(inverters), sorted(array_totals))
+                logger.info(
+                    "Inverter poll inverter_count=%s arrays=%s total_production_w=%s",
+                    len(inverters),
+                    sorted(array_totals),
+                    total_production_w,
+                )
                 backoff = 1
             except EnvoyAuthError as exc:
                 await self.handle_auth_error(exc)
