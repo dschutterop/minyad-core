@@ -28,7 +28,9 @@ BATTERY_TOPIC_TYPES = {
     "soh": int,
     "power_w": int,
     "voltage": float,
-    "mode": int,
+    "voltage_v": float,
+    "temperature_c": float,
+    "mode": str,
     "mode_label": str,
     "charge_i": int,
 }
@@ -162,7 +164,12 @@ class ControlApp:
         if value_type is None:
             LOGGER.debug("Ignoring unsupported battery topic %s", topic)
             return
-        await store_status(**{measurement: value_type(payload)})
+        try:
+            value = value_type(payload)
+        except (TypeError, ValueError):
+            LOGGER.warning("Ignoring invalid battery topic payload topic=%s payload=%r", topic, payload)
+            return
+        await store_status(**{measurement: value})
 
     async def handle_bridge_topic(self, topic: str, payload: str) -> None:
         measurement = topic.removeprefix("minyad/bridge/")
