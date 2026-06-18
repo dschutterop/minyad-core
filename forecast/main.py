@@ -20,6 +20,12 @@ LONGITUDE = 4.3158
 PEAK_W = 5000
 EFFICIENCY = 0.80
 REFRESH_SECONDS = 15 * 60
+FETCH_RETRY_ATTEMPTS = 3
+FETCH_RETRY_BASE_DELAY_SECONDS = 2
+
+
+def _retry_delay_seconds(attempt: int) -> int:
+    return FETCH_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
 
 
 def scale_to_system(direct_w_m2: float | None, diffuse_w_m2: float | None) -> int:
@@ -36,9 +42,26 @@ async def fetch_solar_forecast() -> list[dict]:
         "timezone": "Europe/Amsterdam",
     }
     async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.get(OPEN_METEO_URL, params=params)
-        response.raise_for_status()
-        data = response.json()
+        for attempt in range(1, FETCH_RETRY_ATTEMPTS + 1):
+            try:
+                response = await client.get(OPEN_METEO_URL, params=params)
+                response.raise_for_status()
+                data = response.json()
+                break
+            except httpx.RequestError as exc:
+                if attempt == FETCH_RETRY_ATTEMPTS:
+                    raise
+                delay = _retry_delay_seconds(attempt)
+                LOGGER.warning(
+                    "Open-Meteo request failed on attempt %d/%d; retrying in %ss: %s",
+                    attempt,
+                    FETCH_RETRY_ATTEMPTS,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+            except httpx.HTTPStatusError:
+                raise
 
     hourly = data["hourly"]
     points = []
