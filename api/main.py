@@ -37,6 +37,7 @@ MQTT_STATUS_KEYS = {
     "minyad/battery/soh": "soh",
     "minyad/battery/power_w": "power_w",
     "minyad/battery/voltage": "voltage",
+    "minyad/battery/voltage_v": "voltage",
     "minyad/battery/mode": "mode",
     "minyad/battery/mode_label": "mode_label",
     "minyad/battery/charge_i": "charge_i",
@@ -160,8 +161,6 @@ def cached_status_is_incomplete(payload: dict[str, Any]) -> bool:
         "power_w",
         "voltage",
         "mode",
-        "mode_label",
-        "charge_i",
         "bridge_status",
         "bridge_last_seen",
     )
@@ -418,7 +417,7 @@ async def debug_status(session: AsyncSession = Depends(get_session)) -> dict[str
         cache = dict(MQTT_STATUS)
     with mqtt._subscriptions_lock:
         subscriptions = list(mqtt._subscriptions.keys())
-    missing_keys = [k for k in ("soc", "soh", "power_w", "voltage", "mode", "mode_label", "charge_i", "bridge_status", "bridge_last_seen") if not cache.get(k)]
+    missing_keys = [k for k in ("soc", "soh", "power_w", "voltage", "mode", "bridge_status", "bridge_last_seen") if not cache.get(k)]
     return {
         "startup_at": STARTUP_AT.isoformat(),
         "debug_logging": debug_val == "true",
@@ -614,7 +613,7 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     LOGGER.debug("battery_status: mqtt cache keys=%s", sorted(mqtt_cache.keys()))
     payload.update(mqtt_cache)
     if cached_status_is_incomplete(payload):
-        missing = [k for k in ("soc", "soh", "power_w", "voltage", "mode", "mode_label", "charge_i", "bridge_status", "bridge_last_seen") if not payload.get(k)]
+        missing = [k for k in ("soc", "soh", "power_w", "voltage", "mode", "bridge_status", "bridge_last_seen") if not payload.get(k)]
         LOGGER.debug("battery_status: incomplete, missing=%s — attempting retained fetch", missing)
         try:
             retained = collect_retained_mqtt_status()
@@ -632,8 +631,6 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
             payload[key] = coerce_int_status_value(key, payload[key])
     if "voltage" in payload:
         payload["voltage"] = coerce_float_status_value("voltage", payload["voltage"])
-    if "mode" in payload:
-        payload["mode"] = coerce_int_status_value("mode", payload["mode"])
     if "available" in payload and payload["available"] is not None:
         payload["available"] = str(payload["available"]).lower() == "true"
     enrich_bridge_health(payload)
