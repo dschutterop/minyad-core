@@ -106,3 +106,31 @@ def test_online_bridge_status_without_last_seen_allows_setpoint(monkeypatch):
     asyncio.run(app.publish_setpoint(250))
 
     assert ("control", "charge_w", 250) in app.mqtt.published
+
+
+def test_battery_mode_accepts_goodwe_text_payload(monkeypatch):
+    stored = {}
+
+    async def capture_store_status(**values):
+        stored.update(values)
+
+    monkeypatch.setattr(control_main, "store_status", capture_store_status)
+    app = control_main.ControlApp()
+
+    asyncio.run(app.handle_battery_topic("minyad/battery/mode", "charge"))
+
+    assert stored == {"mode": "charge"}
+
+
+def test_invalid_numeric_battery_payload_is_ignored(monkeypatch):
+    stored = {}
+
+    async def capture_store_status(**values):
+        stored.update(values)
+
+    monkeypatch.setattr(control_main, "store_status", capture_store_status)
+    app = control_main.ControlApp()
+
+    asyncio.run(app.handle_battery_topic("minyad/battery/soc", "charge"))
+
+    assert stored == {}
