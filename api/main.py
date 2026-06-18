@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import logging
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from threading import Event, Lock
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException
+import httpx
 import paho.mqtt.client as paho_mqtt
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import text
@@ -91,6 +94,12 @@ STRATEGY_NUMERIC_LIMITS = {
     "ghi_solar_poor_threshold": (0.0, 20.0),
     "dynamic_tariff_ceiling_eur_kwh": (-1.0, 5.0),
 }
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+FORECAST_LATITUDE = 51.9788
+FORECAST_LONGITUDE = 4.3158
+SOLAR_PEAK_W = 5000
+SOLAR_FORECAST_EFFICIENCY = 0.80
+
 
 
 def _apply_log_level(debug: bool) -> None:
@@ -515,19 +524,67 @@ async def battery_settings(session: AsyncSession) -> dict[str, Any]:
     return settings
 
 
-async def store_power_curve_point(session: AsyncSession, source: str, power_w: int, timestamp: datetime | None = None, delivered_w: int | None = None, returned_w: int | None = None, metadata: dict[str, Any] | None = None) -> None:
+async def store_power_curve_point(
+    session: AsyncSession,
+    source: str,
+    power_w: int,
+    timestamp: datetime | None = None,
+    delivered_w: int | None = None,
+    returned_w: int | None = None,
+    net_w: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
     timestamp = timestamp or datetime.now(timezone.utc)
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=timezone.utc)
     timestamp = timestamp.astimezone(timezone.utc)
+    net_w = power_w if net_w is None else net_w
     await session.execute(
         text("""
             insert into power_curve_points
-              (timestamp, bucket_start, granularity_seconds, source, power_w, delivered_w, returned_w, metadata)
-            values (:timestamp, date_trunc('minute', :timestamp), 60, :source, :power_w, :delivered_w, :returned_w, cast(:metadata as json))
+              (timestamp, bucket_start, granularity_seconds, source, power_w, delivered_w, returned_w, net_w, metadata)
+            values (:timestamp, date_trunc('minute', :timestamp), 60, :source, :power_w, :delivered_w, :returned_w, :net_w, cast(:metadata as json))
         """),
-        {"timestamp": timestamp, "source": source, "power_w": power_w, "delivered_w": delivered_w, "returned_w": returned_w, "metadata": json.dumps(metadata or {})},
+        {
+            "timestamp": timestamp,
+            "source": source,
+            "power_w": power_w,
+            "delivered_w": delivered_w,
+            "returned_w": returned_w,
+            "net_w": net_w,
+            "metadata": json.dumps(metadata or {}),
+        },
     )
+    for granularity in (900, 3600):
+        await session.execute(
+            text("""
+                insert into power_curve_rollups
+                  (bucket_start, granularity_seconds, source, sample_count, power_w, delivered_w, returned_w, net_w, updated_at)
+                values (
+                  to_timestamp(floor(extract(epoch from :timestamp) / :granularity) * :granularity),
+                  :granularity, :source, 1, :power_w, :delivered_w, :returned_w, :net_w, now()
+                )
+                on conflict (bucket_start, granularity_seconds, source) do update set
+                  power_w = round(((power_curve_rollups.power_w * power_curve_rollups.sample_count) + excluded.power_w)::numeric / (power_curve_rollups.sample_count + 1)),
+                  delivered_w = case when excluded.delivered_w is null then power_curve_rollups.delivered_w else round(((coalesce(power_curve_rollups.delivered_w, 0) * power_curve_rollups.sample_count) + excluded.delivered_w)::numeric / (power_curve_rollups.sample_count + 1)) end,
+                  returned_w = case when excluded.returned_w is null then power_curve_rollups.returned_w else round(((coalesce(power_curve_rollups.returned_w, 0) * power_curve_rollups.sample_count) + excluded.returned_w)::numeric / (power_curve_rollups.sample_count + 1)) end,
+                  net_w = round(((coalesce(power_curve_rollups.net_w, power_curve_rollups.power_w) * power_curve_rollups.sample_count) + excluded.net_w)::numeric / (power_curve_rollups.sample_count + 1)),
+                  sample_count = power_curve_rollups.sample_count + 1,
+                  updated_at = now()
+            """),
+            {"timestamp": timestamp, "granularity": granularity, "source": source, "power_w": power_w, "delivered_w": delivered_w, "returned_w": returned_w, "net_w": net_w},
+        )
+
+
+def active_battery_setpoint_w(payload: dict[str, Any]) -> int | None:
+    discharge_w = coerce_int_status_value("discharge_w", payload["discharge_w"]) if payload.get("discharge_w") not in (None, "") else 0
+    setpoint_w = coerce_int_status_value("setpoint_w", payload["setpoint_w"]) if payload.get("setpoint_w") not in (None, "") else 0
+    if discharge_w:
+        return abs(discharge_w)
+    if setpoint_w:
+        return -abs(setpoint_w)
+    return None
+
 
 @app.get("/battery/status")
 async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
@@ -561,8 +618,10 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     if "available" in payload and payload["available"] is not None:
         payload["available"] = str(payload["available"]).lower() == "true"
     enrich_bridge_health(payload)
-    if "power_w" in payload:
-        await store_power_curve_point(session, "battery", int(payload["power_w"]), metadata={"soc": payload.get("soc"), "mode": payload.get("mode")})
+    setpoint_power_w = active_battery_setpoint_w(payload)
+    if setpoint_power_w is not None or "power_w" in payload:
+        battery_power_w = setpoint_power_w if setpoint_power_w is not None else int(payload["power_w"])
+        await store_power_curve_point(session, "battery", battery_power_w, metadata={"soc": payload.get("soc"), "mode": payload.get("mode"), "setpoint_delta_w": battery_power_w})
         await session.commit()
     LOGGER.debug("battery_status: final keys=%s", sorted(payload.keys()))
     return payload
@@ -583,6 +642,7 @@ async def grid_status(session: AsyncSession = Depends(get_session)) -> dict[str,
             session,
             "grid",
             int(coerced["grid_net_power_w"]),
+            net_w=int(coerced["grid_net_power_w"]),
             delivered_w=coerced.get("grid_delivered_w"),
             returned_w=coerced.get("grid_returned_w"),
             metadata={k: v for k, v in coerced.items() if k.startswith("grid_phase_")},
@@ -598,43 +658,159 @@ async def dsmr_status(session: AsyncSession = Depends(get_session)) -> dict[str,
 
 
 WINDOWS = {
-    "5m": (timedelta(minutes=5), 60),
-    "hour": (timedelta(hours=1), 60),
-    "day": (timedelta(days=1), 60),
-    "week": (timedelta(weeks=1), 300),
-    "month": (timedelta(days=31), 3600),
-    "year": (timedelta(days=366), 86400),
+    "5m": (timedelta(minutes=5), 60, "power_curve_points"),
+    "hour": (timedelta(hours=1), 60, "power_curve_points"),
+    "day": (timedelta(days=1), 60, "power_curve_points"),
+    "week": (timedelta(weeks=1), 900, "power_curve_rollups"),
+    "month": (timedelta(days=31), 3600, "power_curve_rollups"),
+    "year": (timedelta(days=366), 3600, "power_curve_rollups"),
 }
 
 
-def _bucket_expr(seconds: int) -> str:
-    return f"to_timestamp(floor(extract(epoch from bucket_start) / {seconds}) * {seconds})"
+def _bucket_expr(column: str, seconds: int) -> str:
+    return f"to_timestamp(floor(extract(epoch from {column}) / {seconds}) * {seconds})"
 
 
-def _synthetic_solar_forecast(start: datetime, end: datetime, step_seconds: int) -> list[dict[str, Any]]:
+def scale_to_system(direct_w_m2: float | None, diffuse_w_m2: float | None) -> int:
+    total = max(0.0, float(direct_w_m2 or 0) + float(diffuse_w_m2 or 0))
+    return round((total / 1000.0) * SOLAR_PEAK_W * SOLAR_FORECAST_EFFICIENCY)
+
+
+async def fetch_open_meteo_forecast() -> list[dict[str, Any]]:
+    params = {
+        "latitude": FORECAST_LATITUDE,
+        "longitude": FORECAST_LONGITUDE,
+        "hourly": "direct_radiation,diffuse_radiation,shortwave_radiation",
+        "forecast_days": 2,
+        "timezone": "Europe/Amsterdam",
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(OPEN_METEO_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
+    hourly = data["hourly"]
     points = []
-    total = max(1, int((end - start).total_seconds() // step_seconds))
-    for idx in range(total + 1):
-        ts = start + timedelta(seconds=idx * step_seconds)
-        hour = ts.hour + ts.minute / 60
-        bell = max(0, __import__('math').sin((hour - 6) / 12 * __import__('math').pi))
-        points.append({"timestamp": ts.isoformat(), "power_w": round(4600 * bell)})
+    for forecast_time, direct, diffuse, shortwave in zip(
+        hourly["time"],
+        hourly.get("direct_radiation", []),
+        hourly.get("diffuse_radiation", []),
+        hourly.get("shortwave_radiation", []),
+    ):
+        direct_value = float(direct or 0)
+        diffuse_value = float(diffuse if diffuse is not None else max(0, float(shortwave or 0) - direct_value))
+        points.append({
+            "forecast_time": datetime.fromisoformat(forecast_time).replace(tzinfo=ZoneInfo("Europe/Amsterdam")).astimezone(timezone.utc),
+            "direct_w_m2": direct_value,
+            "diffuse_w_m2": diffuse_value,
+            "estimated_w": scale_to_system(direct_value, diffuse_value),
+        })
+    return points
+
+
+async def persist_solar_forecast(session: AsyncSession, points: list[dict[str, Any]]) -> None:
+    fetched_at = datetime.now(timezone.utc)
+    for point in points:
+        forecast_time = point["forecast_time"]
+        if forecast_time.tzinfo is None:
+            forecast_time = forecast_time.replace(tzinfo=timezone.utc)
+        await session.execute(
+            text("""
+                insert into solar_forecast_points
+                  (timestamp, bucket_start, granularity_seconds, power_w, forecast_ghi, provider,
+                   fetched_at, forecast_time, direct_w_m2, diffuse_w_m2, estimated_w, source)
+                values
+                  (:forecast_time, date_trunc('minute', :forecast_time), 900, :estimated_w, null, 'open-meteo',
+                   :fetched_at, :forecast_time, :direct_w_m2, :diffuse_w_m2, :estimated_w, 'open-meteo')
+                on conflict (forecast_time) do update set
+                  timestamp = excluded.timestamp,
+                  bucket_start = excluded.bucket_start,
+                  granularity_seconds = 900,
+                  power_w = excluded.power_w,
+                  provider = 'open-meteo',
+                  fetched_at = excluded.fetched_at,
+                  direct_w_m2 = excluded.direct_w_m2,
+                  diffuse_w_m2 = excluded.diffuse_w_m2,
+                  estimated_w = excluded.estimated_w,
+                  source = 'open-meteo'
+            """),
+            {"forecast_time": forecast_time, "fetched_at": fetched_at, **point},
+        )
+    await session.commit()
+
+
+async def ensure_recent_solar_forecast(session: AsyncSession) -> None:
+    latest = (await session.execute(text("select max(fetched_at) from solar_forecast_points where source = 'open-meteo'"))).scalar_one_or_none()
+    if latest and latest > datetime.now(timezone.utc) - timedelta(minutes=20):
+        return
+    try:
+        await persist_solar_forecast(session, await fetch_open_meteo_forecast())
+    except Exception:
+        LOGGER.exception("Unable to refresh Open-Meteo solar forecast")
+
+
+def interpolate_points(points: list[dict[str, Any]], step_seconds: int) -> list[dict[str, Any]]:
+    if len(points) < 2 or step_seconds >= 900:
+        return points
+    parsed = [(datetime.fromisoformat(p["timestamp"].replace("Z", "+00:00")), p["power_w"]) for p in points]
+    output = []
+    for (left_ts, left_w), (right_ts, right_w) in zip(parsed, parsed[1:]):
+        span = max(1, (right_ts - left_ts).total_seconds())
+        cursor = left_ts
+        while cursor < right_ts:
+            ratio = (cursor - left_ts).total_seconds() / span
+            output.append({"timestamp": cursor.isoformat(), "power_w": round(left_w + ((right_w - left_w) * ratio))})
+            cursor += timedelta(seconds=step_seconds)
+    output.append({"timestamp": parsed[-1][0].isoformat(), "power_w": parsed[-1][1]})
+    return output
+
+
+def extrapolate_battery_curve(start: datetime, end: datetime, step_seconds: int, soc: float, forecast: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    capacity_wh = 10000
+    usable_wh = max(0, min(100, soc)) / 100 * capacity_wh
+    points = []
+    for point in forecast:
+        ts = datetime.fromisoformat(point["timestamp"].replace("Z", "+00:00"))
+        if ts < start or ts > end:
+            continue
+        solar_w = int(point["power_w"])
+        if solar_w > 1200 and usable_wh < capacity_wh:
+            power_w = -min(2500, round((solar_w - 1200) * 0.6))
+        elif solar_w < 400 and usable_wh > capacity_wh * 0.15:
+            power_w = min(1200, round(400 - solar_w))
+        else:
+            power_w = 0
+        usable_wh = max(0, min(capacity_wh, usable_wh - (power_w * step_seconds / 3600)))
+        points.append({"timestamp": point["timestamp"], "power_w": power_w})
     return points
 
 
 @app.get("/dashboard/curves")
 async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month", "year"] = "day", session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    duration, step_seconds = WINDOWS[window]
+    await ensure_recent_solar_forecast(session)
+    duration, step_seconds, table_name = WINDOWS[window]
     end = datetime.now(timezone.utc)
     start = end - duration
-    bucket = _bucket_expr(step_seconds)
+    if table_name == "power_curve_points":
+        bucket = _bucket_expr("bucket_start", step_seconds)
+        source_filter = "bucket_start >= :start and bucket_start <= :end"
+        power_expr = "avg(power_w)"
+        delivered_expr = "avg(delivered_w)"
+        returned_expr = "avg(returned_w)"
+        net_expr = "avg(net_w)"
+    else:
+        bucket = "bucket_start"
+        source_filter = "granularity_seconds = :step_seconds and bucket_start >= :start and bucket_start <= :end"
+        power_expr = "avg(power_w)"
+        delivered_expr = "avg(delivered_w)"
+        returned_expr = "avg(returned_w)"
+        net_expr = "avg(net_w)"
     rows = (await session.execute(text(f"""
-        select {bucket} as ts, source, avg(power_w) as power_w,
-               avg(delivered_w) as delivered_w, avg(returned_w) as returned_w
-        from power_curve_points
-        where bucket_start >= :start and bucket_start <= :end
+        select {bucket} as ts, source, {power_expr} as power_w,
+               {delivered_expr} as delivered_w, {returned_expr} as returned_w, {net_expr} as net_w
+        from {table_name}
+        where {source_filter}
         group by ts, source order by ts
-    """), {"start": start, "end": end})).mappings().all()
+    """), {"start": start, "end": end, "step_seconds": step_seconds})).mappings().all()
     series = {"solar": [], "battery": [], "grid": []}
     for row in rows:
         series[row["source"]].append({
@@ -642,30 +818,31 @@ async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month",
             "power_w": round(float(row["power_w"] or 0)),
             "delivered_w": round(float(row["delivered_w"])) if row["delivered_w"] is not None else None,
             "returned_w": round(float(row["returned_w"])) if row["returned_w"] is not None else None,
+            "net_w": round(float(row["net_w"])) if row["net_w"] is not None else round(float(row["power_w"] or 0)),
         })
 
     forecast_rows = (await session.execute(text(f"""
-        select {_bucket_expr(step_seconds)} as ts, avg(power_w) as power_w
+        select forecast_time as ts, estimated_w as power_w
         from solar_forecast_points
-        where bucket_start >= :start and bucket_start <= :end
-        group by ts order by ts
+        where source = 'open-meteo' and forecast_time >= :start and forecast_time <= :end + interval '1 day'
+        order by forecast_time
     """), {"start": start, "end": end})).mappings().all()
     forecast = [{"timestamp": r["ts"].replace(tzinfo=timezone.utc).isoformat(), "power_w": round(float(r["power_w"] or 0))} for r in forecast_rows]
-    if not forecast:
-        forecast = _synthetic_solar_forecast(start, end, step_seconds)
+    forecast = interpolate_points(forecast, step_seconds)
 
-    yesterday_start = start - timedelta(days=1)
-    yesterday_end = end - timedelta(days=1)
-    battery_estimate_rows = (await session.execute(text(f"""
-        select to_timestamp(floor(extract(epoch from timestamp + interval '1 day') / {step_seconds}) * {step_seconds}) as ts,
-               avg(coalesce(battery_power_at_time, charge_rate_w, 0)) as power_w
-        from setpoint_log
-        where timestamp >= :start and timestamp <= :end
-        group by ts order by ts
-    """), {"start": yesterday_start, "end": yesterday_end})).mappings().all()
-    battery_estimate = [{"timestamp": r["ts"].replace(tzinfo=timezone.utc).isoformat(), "power_w": round(float(r["power_w"] or 0))} for r in battery_estimate_rows]
+    mqtt_payload = latest_mqtt_status()
+    soc = coerce_float_status_value("soc", mqtt_payload.get("soc", 50)) if mqtt_payload.get("soc") not in (None, "") else 50.0
+    battery_forecast = extrapolate_battery_curve(end, end + duration, step_seconds, soc, forecast)
 
-    return {"window": window, "granularity_seconds": step_seconds, "start": start.isoformat(), "end": end.isoformat(), "forecast": forecast, "battery_estimate": battery_estimate, "series": series}
+    return {
+        "window": window,
+        "granularity_seconds": step_seconds,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "forecast": forecast,
+        "battery_forecast": battery_forecast,
+        "series": series,
+    }
 
 
 @app.post("/battery/override")
