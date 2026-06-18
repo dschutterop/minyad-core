@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from datetime import timezone
 
 from sensors.dsmr import P1Reader
 from shared.db import AsyncSessionLocal
@@ -29,12 +31,36 @@ async def main() -> None:
     broker = await _setting("dsmr.mqtt.broker", DEFAULT_DSMR_BROKER)
     port = int(await _setting("dsmr.mqtt.port", str(DEFAULT_DSMR_PORT)))
 
-    def publish_update(net_power_w: int, per_phase_w: dict, timestamp) -> None:
+    async def store_grid_point(net_power_w: int, per_phase_w: dict, timestamp, delivered_w: int, returned_w: int) -> None:
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        timestamp = timestamp.astimezone(timezone.utc)
+        bucket_start = timestamp.replace(second=0, microsecond=0)
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                text("""
+                    insert into power_curve_points
+                      (timestamp, bucket_start, granularity_seconds, source, power_w, delivered_w, returned_w, metadata)
+                    values (:timestamp, :bucket_start, 60, 'grid', :power_w, :delivered_w, :returned_w, cast(:metadata as json))
+                """),
+                {
+                    "timestamp": timestamp,
+                    "bucket_start": bucket_start,
+                    "power_w": net_power_w,
+                    "delivered_w": delivered_w,
+                    "returned_w": returned_w,
+                    "metadata": json.dumps(per_phase_w),
+                },
+            )
+            await session.commit()
+
+    def publish_update(net_power_w: int, per_phase_w: dict, timestamp, delivered_w: int, returned_w: int) -> None:
         mqtt.publish_measurement("dsmr", "net_power_w", net_power_w)
         mqtt.publish_measurement("dsmr", "phase_w_l1", per_phase_w["L1"])
         mqtt.publish_measurement("dsmr", "phase_w_l2", per_phase_w["L2"])
         mqtt.publish_measurement("dsmr", "phase_w_l3", per_phase_w["L3"])
         mqtt.publish_measurement("dsmr", "timestamp", timestamp.isoformat())
+        asyncio.create_task(store_grid_point(net_power_w, per_phase_w, timestamp, delivered_w, returned_w))
 
     reader = P1Reader(broker, port, publish_update)
     reader.start()
