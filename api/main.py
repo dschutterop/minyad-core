@@ -515,6 +515,20 @@ async def battery_settings(session: AsyncSession) -> dict[str, Any]:
     return settings
 
 
+async def store_power_curve_point(session: AsyncSession, source: str, power_w: int, timestamp: datetime | None = None, delivered_w: int | None = None, returned_w: int | None = None, metadata: dict[str, Any] | None = None) -> None:
+    timestamp = timestamp or datetime.now(timezone.utc)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    timestamp = timestamp.astimezone(timezone.utc)
+    await session.execute(
+        text("""
+            insert into power_curve_points
+              (timestamp, bucket_start, granularity_seconds, source, power_w, delivered_w, returned_w, metadata)
+            values (:timestamp, date_trunc('minute', :timestamp), 60, :source, :power_w, :delivered_w, :returned_w, cast(:metadata as json))
+        """),
+        {"timestamp": timestamp, "source": source, "power_w": power_w, "delivered_w": delivered_w, "returned_w": returned_w, "metadata": json.dumps(metadata or {})},
+    )
+
 @app.get("/battery/status")
 async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     status = await session.execute(text("select key, value from settings where key like 'battery.status.%'"))
@@ -547,25 +561,111 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     if "available" in payload and payload["available"] is not None:
         payload["available"] = str(payload["available"]).lower() == "true"
     enrich_bridge_health(payload)
+    if "power_w" in payload:
+        await store_power_curve_point(session, "battery", int(payload["power_w"]), metadata={"soc": payload.get("soc"), "mode": payload.get("mode")})
+        await session.commit()
     LOGGER.debug("battery_status: final keys=%s", sorted(payload.keys()))
     return payload
 
 
 
 @app.get("/grid/status")
-async def grid_status() -> dict[str, Any]:
+async def grid_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     grid_payload = grid_status_payload(latest_mqtt_status())
     if not grid_payload:
         try:
             grid_payload.update(grid_status_payload(collect_retained_mqtt_status()))
         except OSError:
             LOGGER.exception("Unable to fetch retained MQTT grid snapshot")
-    return coerce_grid_status(grid_payload)
+    coerced = coerce_grid_status(grid_payload)
+    if "grid_net_power_w" in coerced:
+        await store_power_curve_point(
+            session,
+            "grid",
+            int(coerced["grid_net_power_w"]),
+            delivered_w=coerced.get("grid_delivered_w"),
+            returned_w=coerced.get("grid_returned_w"),
+            metadata={k: v for k, v in coerced.items() if k.startswith("grid_phase_")},
+        )
+        await session.commit()
+    return coerced
 
 
 @app.get("/dsmr/status")
-async def dsmr_status() -> dict[str, Any]:
-    return await grid_status()
+async def dsmr_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    return await grid_status(session)
+
+
+
+WINDOWS = {
+    "5m": (timedelta(minutes=5), 60),
+    "hour": (timedelta(hours=1), 60),
+    "day": (timedelta(days=1), 60),
+    "week": (timedelta(weeks=1), 300),
+    "month": (timedelta(days=31), 3600),
+    "year": (timedelta(days=366), 86400),
+}
+
+
+def _bucket_expr(seconds: int) -> str:
+    return f"to_timestamp(floor(extract(epoch from bucket_start) / {seconds}) * {seconds})"
+
+
+def _synthetic_solar_forecast(start: datetime, end: datetime, step_seconds: int) -> list[dict[str, Any]]:
+    points = []
+    total = max(1, int((end - start).total_seconds() // step_seconds))
+    for idx in range(total + 1):
+        ts = start + timedelta(seconds=idx * step_seconds)
+        hour = ts.hour + ts.minute / 60
+        bell = max(0, __import__('math').sin((hour - 6) / 12 * __import__('math').pi))
+        points.append({"timestamp": ts.isoformat(), "power_w": round(4600 * bell)})
+    return points
+
+
+@app.get("/dashboard/curves")
+async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month", "year"] = "day", session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    duration, step_seconds = WINDOWS[window]
+    end = datetime.now(timezone.utc)
+    start = end - duration
+    bucket = _bucket_expr(step_seconds)
+    rows = (await session.execute(text(f"""
+        select {bucket} as ts, source, avg(power_w) as power_w,
+               avg(delivered_w) as delivered_w, avg(returned_w) as returned_w
+        from power_curve_points
+        where bucket_start >= :start and bucket_start <= :end
+        group by ts, source order by ts
+    """), {"start": start, "end": end})).mappings().all()
+    series = {"solar": [], "battery": [], "grid": []}
+    for row in rows:
+        series[row["source"]].append({
+            "timestamp": row["ts"].replace(tzinfo=timezone.utc).isoformat(),
+            "power_w": round(float(row["power_w"] or 0)),
+            "delivered_w": round(float(row["delivered_w"])) if row["delivered_w"] is not None else None,
+            "returned_w": round(float(row["returned_w"])) if row["returned_w"] is not None else None,
+        })
+
+    forecast_rows = (await session.execute(text(f"""
+        select {_bucket_expr(step_seconds)} as ts, avg(power_w) as power_w
+        from solar_forecast_points
+        where bucket_start >= :start and bucket_start <= :end
+        group by ts order by ts
+    """), {"start": start, "end": end})).mappings().all()
+    forecast = [{"timestamp": r["ts"].replace(tzinfo=timezone.utc).isoformat(), "power_w": round(float(r["power_w"] or 0))} for r in forecast_rows]
+    if not forecast:
+        forecast = _synthetic_solar_forecast(start, end, step_seconds)
+
+    yesterday_start = start - timedelta(days=1)
+    yesterday_end = end - timedelta(days=1)
+    battery_estimate_rows = (await session.execute(text(f"""
+        select to_timestamp(floor(extract(epoch from timestamp + interval '1 day') / {step_seconds}) * {step_seconds}) as ts,
+               avg(coalesce(battery_power_at_time, charge_rate_w, 0)) as power_w
+        from setpoint_log
+        where timestamp >= :start and timestamp <= :end
+        group by ts order by ts
+    """), {"start": yesterday_start, "end": yesterday_end})).mappings().all()
+    battery_estimate = [{"timestamp": r["ts"].replace(tzinfo=timezone.utc).isoformat(), "power_w": round(float(r["power_w"] or 0))} for r in battery_estimate_rows]
+
+    return {"window": window, "granularity_seconds": step_seconds, "start": start.isoformat(), "end": end.isoformat(), "forecast": forecast, "battery_estimate": battery_estimate, "series": series}
 
 
 @app.post("/battery/override")
