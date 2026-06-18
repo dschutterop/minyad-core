@@ -130,6 +130,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      API_BASE_URL: http://minyad-api:8000
       MQTT_HOST: 192.168.110.5
       MQTT_PORT: 1883
     depends_on:

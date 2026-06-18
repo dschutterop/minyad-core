@@ -6,7 +6,7 @@ import os
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 app = FastAPI(title="Minyad Frontend")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://minyad-api:8000")
@@ -453,15 +453,44 @@ def icon(name: str) -> str:
 
 
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-async def api_proxy(path: str, request: Request):
-    async with httpx.AsyncClient(base_url=API_BASE_URL) as client:
-        response = await client.request(
-            request.method,
-            f"/{path}",
-            content=await request.body(),
-            headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
+async def api_proxy(path: str, request: Request) -> Response:
+    """Forward browser API calls to the API service without hiding failures."""
+    headers = {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() not in {"host", "content-length"}
+    }
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=10.0) as client:
+            response = await client.request(
+                request.method,
+                f"/{path}",
+                params=request.query_params,
+                content=await request.body(),
+                headers=headers,
+            )
+    except httpx.RequestError as exc:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "detail": "Unable to reach Minyad API service",
+                "api_base_url": API_BASE_URL,
+                "error": str(exc),
+            },
         )
-    return response.json()
+
+    excluded_headers = {"content-encoding", "content-length", "transfer-encoding", "connection"}
+    response_headers = {
+        key: value
+        for key, value in response.headers.items()
+        if key.lower() not in excluded_headers
+    }
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        headers=response_headers,
+        media_type=response.headers.get("content-type"),
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
