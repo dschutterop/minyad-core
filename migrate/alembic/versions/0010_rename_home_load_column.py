@@ -13,6 +13,7 @@ Create Date: 2026-06-18
 from __future__ import annotations
 
 from alembic import op
+import sqlalchemy as sa
 
 revision = "0010"
 down_revision = "0009"
@@ -21,8 +22,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.alter_column("setpoint_log", "home_load_at_time", new_column_name="apparent_load_at_time")
-    op.alter_column("setpoint_log", "charge_rate_w", new_column_name="setpoint_w")
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name='setpoint_log' AND column_name='home_load_at_time') THEN
+                ALTER TABLE setpoint_log RENAME COLUMN home_load_at_time TO apparent_load_at_time;
+            END IF;
+            IF EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name='setpoint_log' AND column_name='charge_rate_w') THEN
+                ALTER TABLE setpoint_log RENAME COLUMN charge_rate_w TO setpoint_w;
+            END IF;
+        END $$;
+    """))
 
 
 def downgrade() -> None:
