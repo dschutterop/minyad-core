@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from threading import Lock
+from threading import Lock, Thread
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -40,8 +40,11 @@ class MinyadMqttClient:
         self._connected = False
         self._connect_count = 0
         self._disconnect_count = 0
+        self._connect_attempt_count = 0
         self._last_connect_at: datetime | None = None
         self._last_disconnect_at: datetime | None = None
+        self._connection_thread: Thread | None = None
+        self._connection_thread_lock = Lock()
 
     @property
     def is_connected(self) -> bool:
@@ -54,6 +57,7 @@ class MinyadMqttClient:
             "port": self.config.port,
             "keepalive": self.config.keepalive,
             "connected": self._connected,
+            "connect_attempt_count": self._connect_attempt_count,
             "connect_count": self._connect_count,
             "disconnect_count": self._disconnect_count,
             "last_connect_at": self._last_connect_at.isoformat() if self._last_connect_at else None,
@@ -95,25 +99,60 @@ class MinyadMqttClient:
     def connect_forever(self) -> None:
         while True:
             try:
-                LOGGER.info("MQTT connecting to %s:%s (client_id=%s)", self.config.host, self.config.port, self._client_id)
+                self._connect_attempt_count += 1
+                LOGGER.info(
+                    "MQTT connecting to %s:%s (client_id=%s attempt=%d keepalive=%d)",
+                    self.config.host,
+                    self.config.port,
+                    self._client_id,
+                    self._connect_attempt_count,
+                    self.config.keepalive,
+                )
                 self.client.connect(self.config.host, self.config.port, self.config.keepalive)
+                LOGGER.debug("MQTT initial TCP connection established; entering network loop (client_id=%s)", self._client_id)
                 self.client.loop_forever(retry_first_connection=True)
-            except OSError:
-                LOGGER.exception("MQTT connection failed; retrying in 5s (host=%s port=%s)", self.config.host, self.config.port)
+                LOGGER.warning("MQTT network loop exited; retrying connection in 5s (client_id=%s)", self._client_id)
+                time.sleep(5)
+            except OSError as exc:
+                LOGGER.exception(
+                    "MQTT connection attempt failed; retrying in 5s (host=%s port=%s client_id=%s attempt=%d error_type=%s error=%s)",
+                    self.config.host,
+                    self.config.port,
+                    self._client_id,
+                    self._connect_attempt_count,
+                    type(exc).__name__,
+                    exc,
+                )
                 time.sleep(5)
 
     def start(self) -> None:
-        LOGGER.info("MQTT async connect: host=%s port=%s client_id=%s", self.config.host, self.config.port, self._client_id)
-        self.client.connect_async(self.config.host, self.config.port, self.config.keepalive)
-        self.client.loop_start()
+        with self._connection_thread_lock:
+            if self._connection_thread and self._connection_thread.is_alive():
+                LOGGER.debug("MQTT connection thread already running (client_id=%s)", self._client_id)
+                return
+            LOGGER.info(
+                "MQTT starting resilient background connector: host=%s port=%s client_id=%s keepalive=%d",
+                self.config.host,
+                self.config.port,
+                self._client_id,
+                self.config.keepalive,
+            )
+            self._connection_thread = Thread(
+                target=self.connect_forever,
+                name=f"{self._client_id}-mqtt-connect",
+                daemon=True,
+            )
+            self._connection_thread.start()
 
     def publish_measurement(self, source: str, measurement: str, payload: str | int | float) -> None:
         topic = f"minyad/{source}/{measurement}"
         LOGGER.debug("MQTT tx: topic=%s payload=%r", topic, str(payload))
-        self.client.publish(topic, payload=str(payload), qos=0, retain=False)
+        result = self.client.publish(topic, payload=str(payload), qos=0, retain=False)
+        LOGGER.debug("MQTT tx queued: topic=%s mid=%s rc=%s", topic, getattr(result, "mid", None), result.rc)
 
     def subscribe(self, topic: str, handler: Callable[[str, bytes], None]) -> None:
         LOGGER.debug("MQTT register subscription: %s", topic)
         with self._subscriptions_lock:
             self._subscriptions[topic] = handler
-        self.client.subscribe(topic)
+        result, mid = self.client.subscribe(topic)
+        LOGGER.debug("MQTT subscribe requested: topic=%s mid=%s rc=%s connected=%s", topic, mid, result, self._connected)
