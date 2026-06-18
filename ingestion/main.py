@@ -40,8 +40,8 @@ async def main() -> None:
             await session.execute(
                 text("""
                     insert into power_curve_points
-                      (timestamp, bucket_start, granularity_seconds, source, power_w, delivered_w, returned_w, metadata)
-                    values (:timestamp, :bucket_start, 60, 'grid', :power_w, :delivered_w, :returned_w, cast(:metadata as json))
+                      (timestamp, bucket_start, granularity_seconds, source, power_w, delivered_w, returned_w, net_w, metadata)
+                    values (:timestamp, :bucket_start, 60, 'grid', :power_w, :delivered_w, :returned_w, :power_w, cast(:metadata as json))
                 """),
                 {
                     "timestamp": timestamp,
@@ -52,6 +52,25 @@ async def main() -> None:
                     "metadata": json.dumps(per_phase_w),
                 },
             )
+            for granularity in (900, 3600):
+                await session.execute(
+                    text("""
+                        insert into power_curve_rollups
+                          (bucket_start, granularity_seconds, source, sample_count, power_w, delivered_w, returned_w, net_w, updated_at)
+                        values (
+                          to_timestamp(floor(extract(epoch from :timestamp) / :granularity) * :granularity),
+                          :granularity, 'grid', 1, :power_w, :delivered_w, :returned_w, :power_w, now()
+                        )
+                        on conflict (bucket_start, granularity_seconds, source) do update set
+                          power_w = round(((power_curve_rollups.power_w * power_curve_rollups.sample_count) + excluded.power_w)::numeric / (power_curve_rollups.sample_count + 1)),
+                          delivered_w = round(((coalesce(power_curve_rollups.delivered_w, 0) * power_curve_rollups.sample_count) + excluded.delivered_w)::numeric / (power_curve_rollups.sample_count + 1)),
+                          returned_w = round(((coalesce(power_curve_rollups.returned_w, 0) * power_curve_rollups.sample_count) + excluded.returned_w)::numeric / (power_curve_rollups.sample_count + 1)),
+                          net_w = round(((coalesce(power_curve_rollups.net_w, power_curve_rollups.power_w) * power_curve_rollups.sample_count) + excluded.net_w)::numeric / (power_curve_rollups.sample_count + 1)),
+                          sample_count = power_curve_rollups.sample_count + 1,
+                          updated_at = now()
+                    """),
+                    {"timestamp": timestamp, "granularity": granularity, "power_w": net_power_w, "delivered_w": delivered_w, "returned_w": returned_w},
+                )
             await session.commit()
 
     def publish_update(net_power_w: int, per_phase_w: dict, timestamp, delivered_w: int, returned_w: int) -> None:
