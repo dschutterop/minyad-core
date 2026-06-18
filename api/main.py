@@ -220,6 +220,26 @@ def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOU
 
 
 
+def coerce_int_status_value(key: str, value: Any) -> int | Any:
+    if value in (None, ""):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        LOGGER.warning("Ignoring non-integer status value for %s: %r", key, value)
+        return value
+
+
+def coerce_float_status_value(key: str, value: Any) -> float | Any:
+    if value in (None, ""):
+        return value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        LOGGER.warning("Ignoring non-float status value for %s: %r", key, value)
+        return value
+
+
 def coerce_grid_status(payload: dict[str, Any]) -> dict[str, Any]:
     coerced = dict(payload)
     int_keys = {
@@ -235,11 +255,11 @@ def coerce_grid_status(payload: dict[str, Any]) -> dict[str, Any]:
     }
     float_keys = {"grid_voltage_l1_v", "grid_voltage_l2_v", "grid_voltage_l3_v"}
     for key in int_keys:
-        if coerced.get(key) not in (None, ""):
-            coerced[key] = int(coerced[key])
+        if key in coerced:
+            coerced[key] = coerce_int_status_value(key, coerced[key])
     for key in float_keys:
-        if coerced.get(key) not in (None, ""):
-            coerced[key] = float(coerced[key])
+        if key in coerced:
+            coerced[key] = coerce_float_status_value(key, coerced[key])
     return coerced
 
 def parse_bridge_last_seen(value: str | None) -> datetime | None:
@@ -510,12 +530,12 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     payload.setdefault("state", "IDLE")
     payload["override_mode"] = override.scalar_one_or_none() or "none"
     for key in ("soc", "soh", "power_w", "charge_i"):
-        if key in payload and payload[key] is not None:
-            payload[key] = int(payload[key])
-    if "voltage" in payload and payload["voltage"] is not None:
-        payload["voltage"] = float(payload["voltage"])
-    if "mode" in payload and payload["mode"] is not None:
-        payload["mode"] = int(payload["mode"])
+        if key in payload:
+            payload[key] = coerce_int_status_value(key, payload[key])
+    if "voltage" in payload:
+        payload["voltage"] = coerce_float_status_value("voltage", payload["voltage"])
+    if "mode" in payload:
+        payload["mode"] = coerce_int_status_value("mode", payload["mode"])
     if "available" in payload and payload["available"] is not None:
         payload["available"] = str(payload["available"]).lower() == "true"
     enrich_bridge_health(payload)
