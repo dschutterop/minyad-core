@@ -6,6 +6,7 @@ import asyncio
 import json
 import math
 import logging
+import os
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from threading import Event, Lock
@@ -107,7 +108,8 @@ FORECAST_LATITUDE = 51.9788
 FORECAST_LONGITUDE = 4.3158
 SOLAR_PEAK_W = 5000
 SOLAR_FORECAST_EFFICIENCY = 0.80
-
+OPEN_METEO_RETRY_ATTEMPTS = max(1, int(os.getenv("OPEN_METEO_RETRY_ATTEMPTS", "3")))
+OPEN_METEO_RETRY_BASE_DELAY_SECONDS = float(os.getenv("OPEN_METEO_RETRY_BASE_DELAY_SECONDS", "2"))
 
 
 def _apply_log_level(debug: bool) -> None:
@@ -692,6 +694,10 @@ def scale_to_system(direct_w_m2: float | None, diffuse_w_m2: float | None) -> in
     return round((total / 1000.0) * SOLAR_PEAK_W * SOLAR_FORECAST_EFFICIENCY)
 
 
+def open_meteo_retry_delay_seconds(attempt: int) -> float:
+    return OPEN_METEO_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+
+
 async def fetch_open_meteo_forecast() -> list[dict[str, Any]]:
     params = {
         "latitude": FORECAST_LATITUDE,
@@ -701,9 +707,26 @@ async def fetch_open_meteo_forecast() -> list[dict[str, Any]]:
         "timezone": "Europe/Amsterdam",
     }
     async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.get(OPEN_METEO_URL, params=params)
-        response.raise_for_status()
-        data = response.json()
+        for attempt in range(1, OPEN_METEO_RETRY_ATTEMPTS + 1):
+            try:
+                response = await client.get(OPEN_METEO_URL, params=params)
+                response.raise_for_status()
+                data = response.json()
+                break
+            except httpx.RequestError as exc:
+                if attempt == OPEN_METEO_RETRY_ATTEMPTS:
+                    raise
+                delay = open_meteo_retry_delay_seconds(attempt)
+                LOGGER.warning(
+                    "Open-Meteo request failed on attempt %d/%d; retrying in %ss: %s",
+                    attempt,
+                    OPEN_METEO_RETRY_ATTEMPTS,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+            except httpx.HTTPStatusError:
+                raise
     hourly = data["hourly"]
     points = []
     for forecast_time, direct, diffuse, shortwave in zip(
