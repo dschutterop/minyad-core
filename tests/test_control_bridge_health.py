@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import os
 import sys
@@ -48,3 +49,39 @@ def test_parse_bridge_last_seen_rejects_invalid_timestamp():
     app = control_main.ControlApp()
 
     assert app.parse_bridge_last_seen("not-a-timestamp") is None
+
+
+class FakeMqtt:
+    def __init__(self):
+        self.published = []
+
+    def publish_measurement(self, source, measurement, payload):
+        self.published.append((source, measurement, payload))
+
+
+def make_available_app():
+    app = control_main.ControlApp()
+    app.mqtt = FakeMqtt()
+    app.bridge_status = "online"
+    app.bridge_last_seen = datetime.now(timezone.utc)
+    return app
+
+
+def test_charge_setpoint_publishes_bridge_charge_topic(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+
+    asyncio.run(app.publish_setpoint(250))
+
+    assert ("control", "charge_w", 250) in app.mqtt.published
+    assert ("control", "setpoint_w", 250) in app.mqtt.published
+
+
+def test_stop_charging_publishes_zero_charge_topic(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+
+    asyncio.run(app.stop_charging())
+
+    assert ("control", "charge_w", 0) in app.mqtt.published
+    assert ("control", "discharge_w", 0) in app.mqtt.published
