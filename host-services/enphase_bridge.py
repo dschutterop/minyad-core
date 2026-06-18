@@ -167,6 +167,12 @@ class EnvoyClient:
 
 
 
+def production_w_from_payload(data: dict[str, Any], fallback: int | None = None) -> int | None:
+    if "productionW" not in data or data.get("productionW") in (None, ""):
+        return fallback
+    return int(data.get("productionW") or 0)
+
+
 def summarize_inverter_production(inverters: list[dict[str, Any]]) -> tuple[dict[str, int], int, object | None]:
     array_totals: dict[str, int] = {}
     latest_report_at = None
@@ -199,6 +205,7 @@ class EnphaseBridge:
         self.config = config
         self.envoy = envoy
         self.shutdown_event = asyncio.Event()
+        self.last_production_w: int | None = None
         self.mqtt_client = mqtt.Client(client_id=CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
         self.mqtt_client.will_set(MQTT_TOPIC_BRIDGE_STATUS, BRIDGE_STATUS_ERROR, retain=True)
         if config.mqtt_user:
@@ -240,10 +247,12 @@ class EnphaseBridge:
             interval = self.config.production_poll_interval
             try:
                 data = await self.envoy.read_production()
-                production_w = int(data.get("productionW", 0) or 0)
+                production_w = production_w_from_payload(data, self.last_production_w)
                 updated_at = unix_to_iso(data.get("lastReportDate"))
-                self.publish(MQTT_TOPIC_PRODUCTION_W, production_w)
-                self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, updated_at)
+                if production_w is not None:
+                    self.last_production_w = production_w
+                    self.publish(MQTT_TOPIC_PRODUCTION_W, production_w)
+                    self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, updated_at)
                 self.publish_bridge_alive()
                 logger.info("Production poll production_w=%s updated_at=%s", production_w, updated_at)
                 backoff = 1
@@ -282,6 +291,7 @@ class EnphaseBridge:
                     self.publish(f"minyad/solar/inverter/{serial}/last_report_at", last_report_at)
                 for array_name, watts in array_totals.items():
                     self.publish(f"minyad/solar/array/{array_name}/power_w", watts)
+                self.last_production_w = total_production_w
                 self.publish(MQTT_TOPIC_PRODUCTION_W, total_production_w)
                 self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, unix_to_iso(latest_report_at))
                 self.publish_bridge_alive()
