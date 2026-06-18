@@ -114,16 +114,20 @@ class MinyadMqttClient:
                 LOGGER.warning("MQTT network loop exited; retrying connection in 5s (client_id=%s)", self._client_id)
                 time.sleep(5)
             except OSError as exc:
-                LOGGER.exception(
-                    "MQTT connection attempt failed; retrying in 5s (host=%s port=%s client_id=%s attempt=%d error_type=%s error=%s)",
-                    self.config.host,
-                    self.config.port,
-                    self._client_id,
-                    self._connect_attempt_count,
-                    type(exc).__name__,
-                    exc,
-                )
+                self._log_connection_failure(exc)
                 time.sleep(5)
+
+    def _log_connection_failure(self, exc: OSError) -> None:
+        LOGGER.warning(
+            "MQTT connection attempt failed; retrying in 5s (host=%s port=%s client_id=%s attempt=%d error_type=%s error=%s)",
+            self.config.host,
+            self.config.port,
+            self._client_id,
+            self._connect_attempt_count,
+            type(exc).__name__,
+            exc,
+        )
+        LOGGER.debug("MQTT connection failure details", exc_info=exc)
 
     def start(self) -> None:
         with self._connection_thread_lock:
