@@ -10,6 +10,7 @@ import re
 import signal
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -65,6 +66,23 @@ def _get_required_env(name: str) -> str:
     if value is None or value.strip() == "":
         raise ValueError(f"{name} is required")
     return value.strip()
+
+
+def read_enphase_token() -> str:
+    env_token = os.getenv("ENPHASE_TOKEN")
+    if env_token and env_token.strip():
+        return env_token.strip()
+
+    token_file = Path(os.getenv("ENPHASE_TOKEN_FILE", "/opt/minyad/host-services/.token"))
+    try:
+        token = token_file.read_text().strip()
+    except FileNotFoundError as exc:
+        raise ValueError(
+            "ENPHASE_TOKEN is required when ENPHASE_TOKEN_FILE does not exist"
+        ) from exc
+    if not token:
+        raise ValueError(f"{token_file} must contain an Enphase owner token")
+    return token
 
 
 @dataclass(frozen=True)
@@ -334,7 +352,7 @@ class EnphaseBridge:
 async def main() -> None:
     config = Config.from_env()
     configure_logging(config.log_level)
-    token = _get_required_env("ENPHASE_TOKEN")
+    token = read_enphase_token()
     envoy = EnvoyClient(config.envoy_host, token, config.envoy_timeout)
     logger.info(
         "Using Envoy host %s with production interval=%ss and inverter interval=%ss",

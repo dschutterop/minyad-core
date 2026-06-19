@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Minyad Enphase Envoy owner token every 12 hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=12h
+Persistent=true
+Unit=enphase_token_refresh.service
+
+[Install]
+WantedBy=timers.target
