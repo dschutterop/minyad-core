@@ -596,6 +596,19 @@ async def store_power_curve_point(
         )
 
 
+def parse_status_timestamp(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        LOGGER.warning("Ignoring invalid status timestamp: %r", value)
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def active_battery_setpoint_w(payload: dict[str, Any]) -> int | None:
     discharge_w = coerce_int_status_value("discharge_w", payload["discharge_w"]) if payload.get("discharge_w") not in (None, "") else 0
     setpoint_w = coerce_int_status_value("setpoint_w", payload["setpoint_w"]) if payload.get("setpoint_w") not in (None, "") else 0
@@ -661,6 +674,7 @@ async def grid_status(session: AsyncSession = Depends(get_session)) -> dict[str,
             session,
             "solar",
             int(coerced["solar_power_w"]),
+            timestamp=parse_status_timestamp(coerced.get("solar_updated_at")),
             metadata={"updated_at": coerced.get("solar_updated_at")},
         )
         stored_curve_point = True
