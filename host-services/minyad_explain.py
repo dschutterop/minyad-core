@@ -18,14 +18,16 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-try:
-    import psycopg2
-    import psycopg2.extras
-except ImportError:  # pragma: no cover
-    psycopg2 = None
+import psycopg2
+import psycopg2.extras
+from dotenv import load_dotenv
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+HOST_SERVICES_DIR = Path(__file__).resolve().parent
+load_dotenv(REPO_ROOT / ".env")
+load_dotenv(HOST_SERVICES_DIR / ".env", override=True)
 
 LOCAL_TZ = ZoneInfo(os.getenv("MINYAD_TZ", "Europe/Amsterdam"))
-REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTROL_MAIN = REPO_ROOT / "control" / "main.py"
 HYSTERESIS = REPO_ROOT / "control" / "hysteresis.py"
 STRATEGY = REPO_ROOT / "minyad" / "strategy" / "charge_controller.py"
@@ -89,8 +91,6 @@ def db_url() -> str:
 
 
 def connect():
-    if psycopg2 is None:
-        raise SystemExit("psycopg2 is required (install psycopg2-binary or add it to host-services/requirements.txt)")
     conn = psycopg2.connect(db_url(), cursor_factory=psycopg2.extras.RealDictCursor)
     conn.set_session(readonly=True, autocommit=True)
     return conn

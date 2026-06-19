@@ -6,7 +6,7 @@ set -euo pipefail
 # for systemd units and manual debugging.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${MINYAD_EXPLAIN_VENV:-${SCRIPT_DIR}/.venv-minyad-explain}"
-REQUIREMENTS="${SCRIPT_DIR}/requirements.txt"
+REQUIREMENTS="${MINYAD_EXPLAIN_REQUIREMENTS:-${SCRIPT_DIR}/minyad-explain.requirements.txt}"
 STAMP="${VENV_DIR}/.requirements.stamp"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
