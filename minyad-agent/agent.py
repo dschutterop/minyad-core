@@ -17,6 +17,17 @@ from tools import TOOLS, ToolExecutor
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 LOGGER = logging.getLogger(__name__)
 MAX_TOOL_ROUNDS = 4
+SYSTEM_PROMPT_CACHE_TTL = "1h"
+
+
+def log_api_usage(response: Any) -> None:
+    usage = getattr(response, "usage", None)
+    usage_payload = {
+        "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", None),
+        "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", None),
+        "input_tokens": getattr(usage, "input_tokens", None),
+    }
+    LOGGER.info("agent_api_usage %s", json.dumps(usage_payload, sort_keys=True))
 
 
 def serialize_content_blocks(blocks: list[object]) -> list[dict[str, Any]]:
@@ -56,10 +67,15 @@ def run_cycle() -> None:
         response = anthropic.messages.create(
             model=config.MODEL,
             max_tokens=config.MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=[{
+                "type": "text",
+                "text": SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral", "ttl": SYSTEM_PROMPT_CACHE_TTL},
+            }],
             tools=TOOLS,
             messages=messages,
         )
+        log_api_usage(response)
         tool_results: list[dict[str, Any]] = []
         for block in getattr(response, "content", []):
             if getattr(block, "type", None) != "tool_use":
