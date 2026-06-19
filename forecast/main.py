@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import text
 
 from shared.db import AsyncSessionLocal
+from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
 
 LOGGER = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ async def persist_forecast(points: list[dict]) -> None:
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    configure_container_logging(logging.INFO)
     mqtt = MinyadMqttClient("minyad-forecast")
     mqtt.start()
     while True:
