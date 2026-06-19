@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Minyad Enphase Envoy owner token
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/minyad/host-services
+EnvironmentFile=/opt/minyad/host-services/.env
+ExecStart=/opt/minyad/host-services/venv/bin/python enphase_token_refresh.py
+StandardOutput=journal
+StandardError=journal
