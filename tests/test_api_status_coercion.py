@@ -2,7 +2,7 @@ import os
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from api.main import coerce_float_status_value, coerce_grid_status, coerce_int_status_value
+from api.main import coerce_float_status_value, coerce_grid_status, coerce_int_status_value, parse_status_timestamp
 
 
 def test_status_numeric_coercion_keeps_invalid_values():
@@ -74,5 +74,11 @@ def test_grid_status_stores_solar_curve_point(monkeypatch):
     payload = asyncio.run(api_main.grid_status(session))
 
     assert payload["solar_power_w"] == 412
-    assert stored == [("solar", 412, {"metadata": {"updated_at": None}})]
+    assert stored == [("solar", 412, {"timestamp": None, "metadata": {"updated_at": None}})]
     assert session.commits == 1
+
+
+def test_parse_status_timestamp_accepts_zulu_timestamps():
+    parsed = parse_status_timestamp("2026-06-19T12:34:56Z")
+
+    assert parsed.isoformat() == "2026-06-19T12:34:56+00:00"
