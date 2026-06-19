@@ -18,6 +18,20 @@ def install_import_stubs() -> None:
         urllib3.exceptions = exceptions
         urllib3.disable_warnings = lambda *_args, **_kwargs: None
         sys.modules["urllib3"] = urllib3
+    if "paho.mqtt.client" not in sys.modules:
+        paho = types.ModuleType("paho")
+        mqtt_package = types.ModuleType("paho.mqtt")
+        mqtt_client = types.ModuleType("paho.mqtt.client")
+        mqtt_client.Client = object
+        paho.mqtt = mqtt_package
+        mqtt_package.client = mqtt_client
+        sys.modules["paho"] = paho
+        sys.modules["paho.mqtt"] = mqtt_package
+        sys.modules["paho.mqtt.client"] = mqtt_client
+    if "dotenv" not in sys.modules:
+        dotenv = types.ModuleType("dotenv")
+        dotenv.load_dotenv = lambda *_args, **_kwargs: None
+        sys.modules["dotenv"] = dotenv
 
 
 install_import_stubs()
@@ -55,13 +69,13 @@ def test_production_w_from_payload_uses_fallback_only_for_missing_values():
     assert enphase_bridge.production_w_from_payload({"productionW": 275}, fallback=400) == 275
 
 
-def test_read_enphase_token_prefers_environment(monkeypatch, tmp_path):
+def test_read_enphase_token_uses_token_file_even_when_environment_token_exists(monkeypatch, tmp_path):
     token_file = tmp_path / ".token"
     token_file.write_text("file-token\n")
     monkeypatch.setenv("ENPHASE_TOKEN", " env-token ")
     monkeypatch.setenv("ENPHASE_TOKEN_FILE", str(token_file))
 
-    assert enphase_bridge.read_enphase_token() == "env-token"
+    assert enphase_bridge.read_enphase_token() == "file-token"
 
 
 def test_read_enphase_token_uses_token_file(monkeypatch, tmp_path):
