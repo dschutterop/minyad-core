@@ -9,10 +9,11 @@ from datetime import timezone
 
 from sensors.dsmr import P1Reader
 from shared.db import AsyncSessionLocal
+from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
 from sqlalchemy import text
 
-logging.basicConfig(level=logging.INFO)
+configure_container_logging(logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_DSMR_BROKER = "192.168.110.2"

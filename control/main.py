@@ -13,10 +13,11 @@ from sqlalchemy import text
 
 from hysteresis import HysteresisController, OverrideMode
 from shared.db import AsyncSessionLocal
+from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
 from state import ControlState
 
-logging.basicConfig(level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
+configure_container_logging(getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
 LOGGER = logging.getLogger(__name__)
 
 STATUS_PREFIX = "battery.status."
