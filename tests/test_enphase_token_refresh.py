@@ -21,14 +21,28 @@ sys.modules["enphase_token_refresh"] = enphase_token_refresh
 spec.loader.exec_module(enphase_token_refresh)
 
 
-def test_write_token_file_creates_or_replaces_with_restricted_permissions(tmp_path):
+def test_write_token_file_creates_or_replaces_with_restricted_permissions(monkeypatch, tmp_path):
     token_file = tmp_path / ".token"
+    monkeypatch.delenv("ENPHASE_TOKEN_GROUP", raising=False)
 
     enphase_token_refresh.write_token_file("first-token", token_file)
     enphase_token_refresh.write_token_file("second-token", token_file)
 
     assert token_file.read_text() == "second-token\n"
     assert token_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_write_token_file_allows_configured_group_read(monkeypatch, tmp_path):
+    token_file = tmp_path / ".token"
+    calls = []
+    monkeypatch.setenv("ENPHASE_TOKEN_GROUP", "minyad")
+    monkeypatch.setattr(enphase_token_refresh.shutil, "chown", lambda path, group: calls.append((path, group)))
+
+    enphase_token_refresh.write_token_file("file-token", token_file)
+
+    assert token_file.read_text() == "file-token\n"
+    assert token_file.stat().st_mode & 0o777 == 0o640
+    assert calls == [(token_file.with_name("..token.tmp"), "minyad")]
 
 
 def test_login_entrez_extracts_session_id():
