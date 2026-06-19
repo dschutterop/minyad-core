@@ -69,17 +69,11 @@ def _get_required_env(name: str) -> str:
 
 
 def read_enphase_token() -> str:
-    env_token = os.getenv("ENPHASE_TOKEN")
-    if env_token and env_token.strip():
-        return env_token.strip()
-
     token_file = Path(os.getenv("ENPHASE_TOKEN_FILE", "/opt/minyad/host-services/.token"))
     try:
         token = token_file.read_text().strip()
     except FileNotFoundError as exc:
-        raise ValueError(
-            "ENPHASE_TOKEN is required when ENPHASE_TOKEN_FILE does not exist"
-        ) from exc
+        raise ValueError(f"{token_file} must exist and contain an Enphase owner token") from exc
     if not token:
         raise ValueError(f"{token_file} must contain an Enphase owner token")
     return token
@@ -256,7 +250,7 @@ class EnphaseBridge:
         self.publish(MQTT_TOPIC_BRIDGE_LAST_SEEN, utc_now_iso())
 
     async def handle_auth_error(self, exc: EnvoyAuthError) -> None:
-        logger.critical("%s; update ENPHASE_TOKEN in the host-services .env file and restart", exc)
+        logger.critical("%s; refresh the host-services .token file and restart", exc)
         self.publish_bridge_error()
 
     async def production_loop(self) -> None:

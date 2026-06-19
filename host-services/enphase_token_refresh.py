@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -181,11 +182,16 @@ def fetch_token(
 
 
 def write_token_file(token: str, token_file: Path) -> None:
-    """Atomically create or replace the token file with owner-readable contents."""
+    """Atomically create or replace the token file for the bridge service."""
+    token_group = os.getenv("ENPHASE_TOKEN_GROUP")
     token_file.parent.mkdir(parents=True, exist_ok=True)
     temp_file = token_file.with_name(f".{token_file.name}.tmp")
     temp_file.write_text(f"{token}\n")
-    temp_file.chmod(0o600)
+    if token_group:
+        shutil.chown(temp_file, group=token_group)
+        temp_file.chmod(0o640)
+    else:
+        temp_file.chmod(0o600)
     temp_file.replace(token_file)
 
 
