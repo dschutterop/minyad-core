@@ -53,3 +53,21 @@ def test_production_w_from_payload_uses_fallback_only_for_missing_values():
     assert enphase_bridge.production_w_from_payload({"productionW": 0}, fallback=400) == 0
     assert enphase_bridge.production_w_from_payload({"productionW": "0"}, fallback=400) == 0
     assert enphase_bridge.production_w_from_payload({"productionW": 275}, fallback=400) == 275
+
+
+def test_read_enphase_token_prefers_environment(monkeypatch, tmp_path):
+    token_file = tmp_path / ".token"
+    token_file.write_text("file-token\n")
+    monkeypatch.setenv("ENPHASE_TOKEN", " env-token ")
+    monkeypatch.setenv("ENPHASE_TOKEN_FILE", str(token_file))
+
+    assert enphase_bridge.read_enphase_token() == "env-token"
+
+
+def test_read_enphase_token_uses_token_file(monkeypatch, tmp_path):
+    token_file = tmp_path / ".token"
+    token_file.write_text("file-token\n")
+    monkeypatch.delenv("ENPHASE_TOKEN", raising=False)
+    monkeypatch.setenv("ENPHASE_TOKEN_FILE", str(token_file))
+
+    assert enphase_bridge.read_enphase_token() == "file-token"
