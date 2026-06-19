@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Host-side launcher for minyad_explain.py. It keeps Python dependencies out of
+# the system interpreter while still exposing a simple ./minyad-explain command
+# for systemd units and manual debugging.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="${MINYAD_EXPLAIN_VENV:-${SCRIPT_DIR}/.venv-minyad-explain}"
+REQUIREMENTS="${MINYAD_EXPLAIN_REQUIREMENTS:-${SCRIPT_DIR}/minyad-explain.requirements.txt}"
+STAMP="${VENV_DIR}/.requirements.stamp"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+  "${PYTHON_BIN}" -m venv "${VENV_DIR}"
+fi
+
+if [[ ! -f "${STAMP}" || "${REQUIREMENTS}" -nt "${STAMP}" ]]; then
+  "${VENV_DIR}/bin/python" -m pip install --upgrade pip >/dev/null
+  "${VENV_DIR}/bin/python" -m pip install -r "${REQUIREMENTS}"
+  touch "${STAMP}"
+fi
+
+exec "${VENV_DIR}/bin/python" "${SCRIPT_DIR}/minyad_explain.py" "$@"
