@@ -33,12 +33,20 @@ def test_write_token_file_creates_or_replaces_with_restricted_permissions(tmp_pa
 
 def test_login_entrez_extracts_session_id():
     class Response:
+        url = "https://entrez.enphaseenergy.com/login"
+        headers = {"content-type": "text/html"}
         text = '<input type="hidden" name="session_id" value="abc123">'
+        status_code = 200
 
         def raise_for_status(self):
             pass
 
     class Session:
+        def get(self, url, timeout):
+            assert url == "https://entrez.enphaseenergy.com/login"
+            assert timeout == 15
+            return Response()
+
         def post(self, url, data, timeout):
             assert url == "https://entrez.enphaseenergy.com/login"
             assert data == {"username": "user", "password": "pass"}
@@ -50,7 +58,10 @@ def test_login_entrez_extracts_session_id():
 
 def test_fetch_token_rejects_short_response():
     class Response:
+        url = "https://entrez.enphaseenergy.com/entrez_tokens"
+        headers = {"content-type": "text/plain"}
         text = "too-short"
+        status_code = 200
 
         def raise_for_status(self):
             pass
@@ -68,3 +79,27 @@ def test_fetch_token_rejects_short_response():
         assert "Unexpected token response" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError")
+
+
+def test_extract_session_id_handles_json_response():
+    assert enphase_token_refresh._extract_session_id('{"session_id": "json-session"}') == (
+        "json-session"
+    )
+
+
+def test_debug_recorder_writes_sanitized_response_body(tmp_path):
+    class Response:
+        url = "https://example.invalid"
+        headers = {"content-type": "text/html"}
+        text = 'password=secret session_id="abc123" access_token=tokenvalue'
+        status_code = 200
+
+    debug = enphase_token_refresh.DebugRecorder(tmp_path)
+    debug.response("changed-flow", Response())
+
+    artifact = tmp_path / "01-changed-flow.txt"
+    body = artifact.read_text()
+    assert "secret" not in body
+    assert "tokenvalue" not in body
+    assert "abc123" not in body
+    assert artifact.stat().st_mode & 0o777 == 0o600
