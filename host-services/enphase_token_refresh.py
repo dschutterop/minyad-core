@@ -17,8 +17,8 @@ from dotenv import load_dotenv
 DEFAULT_ENV_FILE = Path("/opt/minyad/host-services/.env")
 DEFAULT_TOKEN_FILE = Path("/opt/minyad/host-services/.token")
 DEFAULT_SERVICE_NAME = "enphase_bridge.service"
-LOGIN_URL = "https://entrez.enphaseenergy.com/login"
-TOKEN_URL = "https://entrez.enphaseenergy.com/entrez_tokens"
+LOGIN_URL = "https://enlighten.enphaseenergy.com/login/login.json"
+TOKEN_URL = "https://entrez.enphaseenergy.com/tokens"
 
 LOGGER_NAME = "enphase_token_refresh"
 logger = logging.getLogger(LOGGER_NAME)
@@ -124,17 +124,17 @@ def login_entrez(
     password: str,
     debug: DebugRecorder | None = None,
 ) -> str:
-    """Log in to entrez.enphaseenergy.com and return the session_id."""
+    """Log in to Enphase Enlighten and return the session_id."""
     debug = debug or DebugRecorder()
-    debug.step("Opening Enphase login page", url=LOGIN_URL)
-    login_page = session.get(LOGIN_URL, timeout=15)
-    debug.response("login-get", login_page)
-    login_page.raise_for_status()
-
-    debug.step("Submitting Enphase credentials", username=username, password="<redacted>")
+    debug.step(
+        "Submitting Enphase credentials",
+        url=LOGIN_URL,
+        username=username,
+        password="<redacted>",
+    )
     response = session.post(
         LOGIN_URL,
-        data={"username": username, "password": password},
+        data={"user[email]": username, "user[password]": password},
         timeout=15,
     )
     debug.response("login-post", response)
@@ -155,6 +155,7 @@ def fetch_token(
     session: requests.Session,
     session_id: str,
     envoy_serial: str,
+    username: str,
     debug: DebugRecorder | None = None,
 ) -> str:
     """Fetch a JWT owner token for the configured Envoy serial number."""
@@ -164,7 +165,7 @@ def fetch_token(
     )
     response = session.post(
         TOKEN_URL,
-        data={"session_id": session_id, "serial_num": envoy_serial},
+        json={"session_id": session_id, "serial_num": envoy_serial, "username": username},
         timeout=15,
     )
     debug.response("token-post", response)
@@ -210,7 +211,7 @@ def main() -> None:
     )
     session = requests.Session()
     session_id = login_entrez(session, username, password, debug)
-    token = fetch_token(session, session_id, envoy_serial, debug)
+    token = fetch_token(session, session_id, envoy_serial, username, debug)
     debug.step("Writing token file", token_file=token_file)
     write_token_file(token, token_file)
     debug.step("Restarting bridge service", service_name=service_name)

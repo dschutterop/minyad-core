@@ -33,7 +33,7 @@ def test_write_token_file_creates_or_replaces_with_restricted_permissions(tmp_pa
 
 def test_login_entrez_extracts_session_id():
     class Response:
-        url = "https://entrez.enphaseenergy.com/login"
+        url = "https://enlighten.enphaseenergy.com/login/login.json"
         headers = {"content-type": "text/html"}
         text = '<input type="hidden" name="session_id" value="abc123">'
         status_code = 200
@@ -42,14 +42,9 @@ def test_login_entrez_extracts_session_id():
             pass
 
     class Session:
-        def get(self, url, timeout):
-            assert url == "https://entrez.enphaseenergy.com/login"
-            assert timeout == 15
-            return Response()
-
         def post(self, url, data, timeout):
-            assert url == "https://entrez.enphaseenergy.com/login"
-            assert data == {"username": "user", "password": "pass"}
+            assert url == "https://enlighten.enphaseenergy.com/login/login.json"
+            assert data == {"user[email]": "user", "user[password]": "pass"}
             assert timeout == 15
             return Response()
 
@@ -58,7 +53,7 @@ def test_login_entrez_extracts_session_id():
 
 def test_fetch_token_rejects_short_response():
     class Response:
-        url = "https://entrez.enphaseenergy.com/entrez_tokens"
+        url = "https://entrez.enphaseenergy.com/tokens"
         headers = {"content-type": "text/plain"}
         text = "too-short"
         status_code = 200
@@ -67,14 +62,14 @@ def test_fetch_token_rejects_short_response():
             pass
 
     class Session:
-        def post(self, url, data, timeout):
-            assert url == "https://entrez.enphaseenergy.com/entrez_tokens"
-            assert data == {"session_id": "sid", "serial_num": "serial"}
+        def post(self, url, json, timeout):
+            assert url == "https://entrez.enphaseenergy.com/tokens"
+            assert json == {"session_id": "sid", "serial_num": "serial", "username": "user"}
             assert timeout == 15
             return Response()
 
     try:
-        enphase_token_refresh.fetch_token(Session(), "sid", "serial")
+        enphase_token_refresh.fetch_token(Session(), "sid", "serial", "user")
     except RuntimeError as exc:
         assert "Unexpected token response" in str(exc)
     else:
