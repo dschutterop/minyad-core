@@ -181,6 +181,23 @@ services:
         condition: service_healthy
     networks: [minyad-internal]
 
+  minyad-agent:
+    build:
+      context: .
+      dockerfile: minyad-agent/Dockerfile
+    container_name: minyad-agent
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MINYAD_API_URL: http://minyad-api:8000
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      DRY_RUN: "true"
+      CYCLE_MINUTES: 15
+    depends_on:
+      minyad-api:
+        condition: service_started
+    networks: [minyad-internal, minyad-public]
+
   minyad-reporting:
     build:
       context: .

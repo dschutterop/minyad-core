@@ -14,7 +14,7 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 import httpx
 import paho.mqtt.client as paho_mqtt
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -352,6 +352,31 @@ class AssetSteeringSettingsUpdate(BaseModel):
         except ValueError as exc:
             raise ValueError("daily_recalculate_local_time must use HH:MM format") from exc
         return value
+
+
+class AgentDecisionRequest(BaseModel):
+    action_taken: Literal["charge", "discharge", "hold"]
+    setpoint_w: int | None = None
+    reasoning: str = Field(min_length=1)
+    confidence: Literal["low", "medium", "high"]
+    input_snapshot: dict[str, Any]
+    dry_run: bool = True
+    model: str = "claude-sonnet-4-6"
+
+
+class AgentBatteryControlRequest(BaseModel):
+    setpoint_w: int = Field(ge=-5000, le=5000)
+    duration_minutes: int = Field(default=15, ge=1, le=240)
+
+
+class AgentMessageCreate(BaseModel):
+    sender: Literal["agent", "operator"]
+    category: Literal["anomaly", "suggestion", "info", "reply"]
+    subject: str = Field(min_length=1, max_length=160)
+    body: str = Field(min_length=1)
+    related_decision_id: int | None = None
+    thread_id: int | None = None
+    severity: Literal["low", "normal", "high"] = "normal"
 
 
 class BatteryOverrideRequest(BaseModel):
@@ -988,6 +1013,176 @@ async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month",
         "battery_forecast": battery_forecast,
         "series": series,
     }
+
+
+@app.get("/api/state")
+async def api_state(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    battery = await battery_status(session)
+    grid = await grid_status(session)
+    household = await household_status_payload(session, store=False)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "battery": battery,
+        "grid": grid,
+        "household": household,
+    }
+
+
+@app.get("/api/forecast")
+async def api_forecast(hours_ahead: int = 12, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    hours = max(1, min(48, hours_ahead))
+    await ensure_recent_solar_forecast(session)
+    start = datetime.now(timezone.utc)
+    end = start + timedelta(hours=hours)
+    rows = (await session.execute(text("""
+        select forecast_time as ts, estimated_w as power_w, direct_w_m2, diffuse_w_m2, fetched_at
+        from solar_forecast_points
+        where source = 'open-meteo' and forecast_time >= :start and forecast_time <= :end
+        order by forecast_time
+    """), {"start": start, "end": end})).mappings().all()
+    points = [
+        {
+            "timestamp": row["ts"].replace(tzinfo=timezone.utc).isoformat(),
+            "power_w": round(float(row["power_w"] or 0)),
+            "direct_w_m2": float(row["direct_w_m2"] or 0),
+            "diffuse_w_m2": float(row["diffuse_w_m2"] or 0),
+            "fetched_at": row["fetched_at"].replace(tzinfo=timezone.utc).isoformat() if row["fetched_at"] else None,
+        }
+        for row in rows
+    ]
+    return {"hours_ahead": hours, "points": interpolate_points(points, 60)}
+
+
+@app.post("/api/control/battery")
+async def api_control_battery(request: AgentBatteryControlRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    if request.setpoint_w > 0:
+        override = BatteryOverrideRequest(mode="force_on", watts=request.setpoint_w, duration_seconds=request.duration_minutes * 60)
+        action = "charge"
+    elif request.setpoint_w < 0:
+        override = BatteryOverrideRequest(mode="force_discharge", watts=abs(request.setpoint_w), duration_seconds=request.duration_minutes * 60)
+        action = "discharge"
+    else:
+        override = BatteryOverrideRequest(mode="none", watts=None, duration_seconds=None)
+        action = "hold"
+    result = await set_battery_override(override, session)
+    return {"status": "ok", "action": action, "setpoint_w": request.setpoint_w, "duration_minutes": request.duration_minutes, "override": result}
+
+
+@app.post("/api/agent/decisions", status_code=201)
+async def create_agent_decision(request: AgentDecisionRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    row = (await session.execute(text("""
+        insert into agent_decisions (action_taken, setpoint_w, reasoning, confidence, input_snapshot, dry_run, model)
+        values (:action_taken, :setpoint_w, :reasoning, :confidence, cast(:input_snapshot as jsonb), :dry_run, :model)
+        returning id, created_at
+    """), {
+        "action_taken": request.action_taken,
+        "setpoint_w": request.setpoint_w,
+        "reasoning": request.reasoning,
+        "confidence": request.confidence,
+        "input_snapshot": json.dumps(request.input_snapshot),
+        "dry_run": request.dry_run,
+        "model": request.model,
+    })).mappings().one()
+    await session.commit()
+    return {"status": "ok", "id": row["id"], "created_at": row["created_at"].replace(tzinfo=timezone.utc).isoformat()}
+
+
+def serialize_agent_message(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    for key in ("created_at", "read_at"):
+        value = data.get(key)
+        if value is not None:
+            data[key] = value.replace(tzinfo=timezone.utc).isoformat()
+    return data
+
+
+@app.get("/api/messages")
+async def list_agent_messages(
+    unread: bool | None = None,
+    category: Literal["anomaly", "suggestion", "info", "reply"] | None = None,
+    sender: Literal["agent", "operator"] | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    clauses = []
+    params: dict[str, Any] = {"limit": limit}
+    if unread is True:
+        clauses.append("read_at is null")
+    elif unread is False:
+        clauses.append("read_at is not null")
+    if category is not None:
+        clauses.append("category = :category")
+        params["category"] = category
+    if sender is not None:
+        clauses.append("sender = :sender")
+        params["sender"] = sender
+    where = " where " + " and ".join(clauses) if clauses else ""
+    rows = (await session.execute(text(f"""
+        select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity
+        from agent_messages
+        {where}
+        order by created_at desc
+        limit :limit
+    """), params)).mappings().all()
+    return [serialize_agent_message(row) for row in rows]
+
+
+@app.get("/api/messages/unread-count")
+async def agent_messages_unread_count(
+    sender: Literal["agent", "operator"] | None = "agent",
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, int]:
+    clause = "read_at is null"
+    params: dict[str, Any] = {}
+    if sender is not None:
+        clause += " and sender = :sender"
+        params["sender"] = sender
+    count = (await session.execute(text(f"select count(*) from agent_messages where {clause}"), params)).scalar_one()
+    return {"unread_count": int(count)}
+
+
+@app.get("/api/messages/{message_id}")
+async def get_agent_message(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    row = (await session.execute(text("""
+        select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity
+        from agent_messages
+        where id = :id
+    """), {"id": message_id})).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="message not found")
+    root_id = row["thread_id"] or row["id"]
+    thread_rows = (await session.execute(text("""
+        select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity
+        from agent_messages
+        where id = :root_id or thread_id = :root_id
+        order by created_at asc
+    """), {"root_id": root_id})).mappings().all()
+    return {"message": serialize_agent_message(row), "thread": [serialize_agent_message(thread_row) for thread_row in thread_rows]}
+
+
+@app.post("/api/messages", status_code=201)
+async def create_agent_message(request: AgentMessageCreate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    row = (await session.execute(text("""
+        insert into agent_messages (sender, category, subject, body, related_decision_id, thread_id, severity)
+        values (:sender, :category, :subject, :body, :related_decision_id, :thread_id, :severity)
+        returning id, created_at
+    """), request.model_dump())).mappings().one()
+    await session.commit()
+    return {"status": "ok", "id": row["id"], "created_at": row["created_at"].replace(tzinfo=timezone.utc).isoformat()}
+
+
+@app.patch("/api/messages/{message_id}/read")
+async def mark_agent_message_read(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    row = (await session.execute(text("""
+        update agent_messages
+        set read_at = coalesce(read_at, now())
+        where id = :id
+        returning id, read_at
+    """), {"id": message_id})).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="message not found")
+    await session.commit()
+    return {"status": "ok", "id": row["id"], "read_at": row["read_at"].replace(tzinfo=timezone.utc).isoformat()}
 
 
 @app.post("/battery/override")
