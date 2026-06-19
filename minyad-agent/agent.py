@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any
 
+import httpx
 from anthropic import Anthropic
 from apscheduler.schedulers.blocking import BlockingScheduler
 
@@ -47,10 +48,18 @@ def serialize_content_blocks(blocks: list[object]) -> list[dict[str, Any]]:
 
 
 def run_cycle() -> None:
-    client = MinyadClient(config.MINYAD_API_URL)
-    state = client.get_state()
-    forecast = client.get_forecast(hours_ahead=12)
-    operator_messages = client.get_unread_operator_messages()
+    client = MinyadClient(
+        config.MINYAD_API_URL,
+        retries=config.MINYAD_API_RETRIES,
+        backoff_seconds=config.MINYAD_API_RETRY_BACKOFF_SECONDS,
+    )
+    try:
+        state = client.get_state()
+        forecast = client.get_forecast(hours_ahead=12)
+        operator_messages = client.get_unread_operator_messages()
+    except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+        LOGGER.warning("skipping agent cycle because Minyad API is unavailable: %s", exc)
+        return
     anthropic = Anthropic(api_key=config.ANTHROPIC_API_KEY)
     messages: list[dict[str, Any]] = [{
         "role": "user",
