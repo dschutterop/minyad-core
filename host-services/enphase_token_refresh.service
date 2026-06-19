@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/minyad/host-services
 EnvironmentFile=/opt/minyad/host-services/.env
+Environment=ENPHASE_TOKEN_GROUP=minyad
 ExecStart=/opt/minyad/host-services/venv/bin/python enphase_token_refresh.py
 StandardOutput=journal
 StandardError=journal
