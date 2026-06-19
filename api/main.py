@@ -619,6 +619,82 @@ def active_battery_setpoint_w(payload: dict[str, Any]) -> int | None:
     return None
 
 
+
+def _numeric_w(payload: dict[str, Any], key: str) -> int | None:
+    value = payload.get(key)
+    if value in (None, ""):
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        LOGGER.warning("Ignoring non-numeric watt value for %s: %r", key, value)
+        return None
+
+
+def compute_household_load(payload: dict[str, Any]) -> dict[str, Any]:
+    solar_w = max(0, _numeric_w(payload, "solar_power_w") or 0)
+    battery_power_w = _numeric_w(payload, "power_w")
+    if battery_power_w is None:
+        battery_power_w = active_battery_setpoint_w(payload) or 0
+    battery_discharge_w = max(0, battery_power_w)
+    battery_charge_w = max(0, -battery_power_w)
+    grid_import_w = _numeric_w(payload, "grid_delivered_w")
+    grid_export_w = _numeric_w(payload, "grid_returned_w")
+    grid_net_w = _numeric_w(payload, "grid_net_power_w")
+    has_dsmr = grid_import_w is not None or grid_export_w is not None or grid_net_w is not None
+    if grid_import_w is None:
+        grid_import_w = max(0, grid_net_w or 0)
+    if grid_export_w is None:
+        grid_export_w = max(0, -(grid_net_w or 0))
+
+    method_a_raw = solar_w - grid_export_w - battery_charge_w
+    method_b_raw = solar_w + battery_discharge_w - battery_charge_w + grid_import_w - grid_export_w
+    using_method = "B" if has_dsmr else "A"
+    raw = method_b_raw if has_dsmr else method_a_raw
+    load_w = round(raw)
+    if load_w < 0:
+        LOGGER.warning("Clamping negative household load to zero: raw=%s method=%s payload_keys=%s", raw, using_method, sorted(payload.keys()))
+        load_w = 0
+    method_a_w = max(0, round(method_a_raw))
+    method_b_w = max(0, round(method_b_raw))
+    reference = max(abs(method_b_w), 1)
+    deviation_pct = abs(method_a_w - method_b_w) / reference * 100
+    mismatch = has_dsmr and deviation_pct > 15
+    if mismatch:
+        LOGGER.debug(
+            "Household load sanity-check mismatch: method_a=%sW method_b=%sW deviation=%.1f%% solar=%sW battery_charge=%sW battery_discharge=%sW grid_import=%sW grid_export=%sW",
+            method_a_w, method_b_w, deviation_pct, solar_w, battery_charge_w, battery_discharge_w, grid_import_w, grid_export_w,
+        )
+    return {
+        "power_w": load_w,
+        "method": using_method,
+        "approx": not has_dsmr,
+        "mismatch": mismatch,
+        "deviation_pct": round(deviation_pct, 1),
+        "method_a_w": method_a_w,
+        "method_b_w": method_b_w,
+        "solar_power_w": solar_w,
+        "battery_charge_w": battery_charge_w,
+        "battery_discharge_w": battery_discharge_w,
+        "grid_import_w": grid_import_w,
+        "grid_export_w": grid_export_w,
+    }
+
+
+async def household_status_payload(session: AsyncSession, store: bool = True) -> dict[str, Any]:
+    payload = latest_mqtt_status()
+    if not payload or not any(k.startswith("grid_") for k in payload):
+        try:
+            payload.update(collect_retained_mqtt_status())
+        except OSError:
+            LOGGER.exception("Unable to fetch retained MQTT household snapshot")
+    result = compute_household_load(payload)
+    if store:
+        await store_power_curve_point(session, "household", int(result["power_w"]), metadata=result)
+        await session.commit()
+    return result
+
+
 @app.get("/battery/status")
 async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     status = await session.execute(text("select key, value from settings where key like 'battery.status.%'"))
@@ -697,6 +773,11 @@ async def grid_status(session: AsyncSession = Depends(get_session)) -> dict[str,
 @app.get("/dsmr/status")
 async def dsmr_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     return await grid_status(session)
+
+
+@app.get("/household/status")
+async def household_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    return await household_status_payload(session)
 
 
 
@@ -875,7 +956,7 @@ async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month",
         where {source_filter}
         group by ts, source order by ts
     """), {"start": start, "end": end, "step_seconds": step_seconds})).mappings().all()
-    series = {"solar": [], "battery": [], "grid": []}
+    series = {"solar": [], "battery": [], "grid": [], "household": []}
     for row in rows:
         series[row["source"]].append({
             "timestamp": row["ts"].replace(tzinfo=timezone.utc).isoformat(),
