@@ -655,7 +655,16 @@ async def grid_status(session: AsyncSession = Depends(get_session)) -> dict[str,
         except OSError:
             LOGGER.exception("Unable to fetch retained MQTT grid snapshot")
     coerced = coerce_grid_status(grid_payload)
-    if "grid_net_power_w" in coerced:
+    stored_curve_point = False
+    if isinstance(coerced.get("solar_power_w"), int):
+        await store_power_curve_point(
+            session,
+            "solar",
+            int(coerced["solar_power_w"]),
+            metadata={"updated_at": coerced.get("solar_updated_at")},
+        )
+        stored_curve_point = True
+    if isinstance(coerced.get("grid_net_power_w"), int):
         await store_power_curve_point(
             session,
             "grid",
@@ -665,6 +674,8 @@ async def grid_status(session: AsyncSession = Depends(get_session)) -> dict[str,
             returned_w=coerced.get("grid_returned_w"),
             metadata={k: v for k, v in coerced.items() if k.startswith("grid_phase_")},
         )
+        stored_curve_point = True
+    if stored_curve_point:
         await session.commit()
     return coerced
 
