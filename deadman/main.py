@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import time
 
+from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
 
-logging.basicConfig(level=logging.INFO)
+configure_container_logging(logging.INFO)
 
 
 def main() -> None:
