@@ -265,3 +265,31 @@ def test_battery_soc_topic_updates_latest_soc(monkeypatch):
     asyncio.run(app.handle_battery_topic("minyad/battery/soc", "67"))
 
     assert app.latest_battery_soc == 67
+
+
+def test_battery_power_topic_updates_latest_power(monkeypatch):
+    stored = {}
+
+    async def capture_store_status(**values):
+        stored.update(values)
+
+    monkeypatch.setattr(control_main, "store_status", capture_store_status)
+    app = control_main.ControlApp()
+
+    asyncio.run(app.handle_battery_topic("minyad/battery/power_w", "1012"))
+
+    assert app.latest_battery_power_w == 1012
+    assert stored["power_w"] == 1012
+
+
+def test_idle_export_while_battery_discharging_trims_discharge_setpoint(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_discharge_w": 5000}
+    app.controller = FakeHysteresisController(control_main.ControlState.IDLE)
+    app.latest_battery_power_w = 1012
+
+    asyncio.run(app.handle_message("minyad/grid/net_power_w", b"-345"))
+
+    assert ("control", "discharge_w", 667) in app.mqtt.published
+    assert app.controller.ticked == [345]
