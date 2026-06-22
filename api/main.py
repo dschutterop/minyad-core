@@ -77,6 +77,10 @@ MQTT_STATUS_KEYS.update(SOLAR_STATUS_KEYS)
 MQTT_STATUS_LOCK = Lock()
 MQTT_STATUS: dict[str, str] = {}
 RETAINED_STATUS_TIMEOUT_SECONDS = 1.0
+MQTT_BATTERY_SETTINGS_PREFIX = "minyad/settings/battery"
+MQTT_BATTERY_SETTING_TOPICS = {
+    "inverter_poll_interval_s": f"{MQTT_BATTERY_SETTINGS_PREFIX}/inverter_poll_interval_s",
+}
 
 BATTERY_KEYS = {
     "start_w": (100, 5000),
@@ -89,6 +93,7 @@ BATTERY_KEYS = {
     "nominal_v": (40, 60),
     "inverter_retries": (1, 10),
     "inverter_delay": (1, 30),
+    "inverter_poll_interval_s": (1, 3600),
 }
 TEXT_KEYS = {"inverter_ip"}
 
@@ -417,6 +422,14 @@ class BatterySettingsUpdate(BaseModel):
         return value
 
 
+async def publish_battery_mqtt_settings(settings: dict[str, Any] | None = None) -> None:
+    if settings is None:
+        async with AsyncSessionLocal() as session:
+            settings = await battery_settings(session)
+    for key, topic in MQTT_BATTERY_SETTING_TOPICS.items():
+        if key in settings:
+            mqtt.client.publish(topic, str(settings[key]), qos=0, retain=True)
+
 @app.on_event("startup")
 async def startup() -> None:
     async with AsyncSessionLocal() as session:
@@ -429,6 +442,7 @@ async def startup() -> None:
     mqtt.subscribe("minyad/control/+", handle_status_mqtt)
     mqtt.subscribe("minyad/grid/+", handle_status_mqtt)
     mqtt.subscribe("minyad/solar/+", handle_status_mqtt)
+    await publish_battery_mqtt_settings()
     asyncio.create_task(_refresh_debug_setting())
 
 
@@ -1247,5 +1261,7 @@ async def update_battery_settings(update: BatterySettingsUpdate, session: AsyncS
             {"key": f"battery.{key}", "value": str(value)},
         )
     await session.commit()
+    settings = await battery_settings(session)
+    await publish_battery_mqtt_settings(settings)
     mqtt.client.publish("minyad/control/override", json.dumps({"mode": "reload_settings"}), qos=0, retain=False)
-    return await battery_settings(session)
+    return settings
