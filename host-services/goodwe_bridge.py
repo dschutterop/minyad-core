@@ -27,6 +27,7 @@ logger = logging.getLogger(LOGGER_NAME)
 MQTT_TOPIC_CHARGE_W = "minyad/control/charge_w"
 MQTT_TOPIC_DISCHARGE_W = "minyad/control/discharge_w"
 MQTT_TOPIC_CONTROL_STATE = "minyad/control/state"
+MQTT_TOPIC_BATTERY_POLL_INTERVAL = "minyad/settings/battery/inverter_poll_interval_s"
 BATTERY_POLL_INTERVAL_SETTING = "battery.inverter_poll_interval_s"
 DEFAULT_POLL_INTERVAL_SECONDS = 120
 
@@ -171,15 +172,18 @@ class GoodWeBridge:
         self._last_charge_setpoint_w: int | None = None
         self._last_discharge_setpoint_w: int | None = None
         self._immediate_poll_task: Future[None] | None = None
+        self._mqtt_poll_interval: int | None = None
 
     def load_poll_interval(self) -> int:
         """Return the current inverter polling interval in seconds.
 
-        The setting is loaded from PostgreSQL on every polling cycle so operators
-        can slow down GoodWe telemetry without restarting the host-side bridge.
-        MQTT command handling remains event-driven and is not delayed by this
-        telemetry interval.
+        A retained MQTT setting is preferred so the interval is restored after
+        bridge restarts. PostgreSQL remains a fallback when no MQTT setting has
+        been received yet. Command handling remains event-driven and is not
+        delayed by this telemetry interval.
         """
+        if self._mqtt_poll_interval is not None:
+            return self._mqtt_poll_interval
         configured = self.config.poll_interval
         if not self.config.database_url:
             return configured
@@ -212,7 +216,7 @@ class GoodWeBridge:
     def on_connect(self, client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
         if rc == 0:
             logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
-            client.subscribe([(MQTT_TOPIC_CHARGE_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1), (MQTT_TOPIC_CONTROL_STATE, 1)])
+            client.subscribe([(MQTT_TOPIC_CHARGE_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1), (MQTT_TOPIC_CONTROL_STATE, 1), (MQTT_TOPIC_BATTERY_POLL_INTERVAL, 1)])
             self.publish_bridge_alive()
         else:
             logger.error("MQTT connection failed with rc=%s", rc)
@@ -235,6 +239,9 @@ class GoodWeBridge:
         if message.topic == MQTT_TOPIC_CONTROL_STATE:
             self.handle_control_state(payload)
             return
+        if message.topic == MQTT_TOPIC_BATTERY_POLL_INTERVAL:
+            self.handle_poll_interval(payload)
+            return
 
         try:
             watts = int(payload)
@@ -246,6 +253,18 @@ class GoodWeBridge:
             asyncio.run_coroutine_threadsafe(self.handle_charge_setpoint(watts), self.loop)
         elif message.topic == MQTT_TOPIC_DISCHARGE_W:
             asyncio.run_coroutine_threadsafe(self.handle_discharge_setpoint(watts), self.loop)
+
+    def handle_poll_interval(self, payload: str) -> None:
+        try:
+            interval = int(payload)
+        except ValueError:
+            logger.warning("Ignoring invalid MQTT %s payload: %r", MQTT_TOPIC_BATTERY_POLL_INTERVAL, payload)
+            return
+        if interval < 1:
+            logger.warning("Ignoring non-positive MQTT %s payload: %s", MQTT_TOPIC_BATTERY_POLL_INTERVAL, interval)
+            return
+        self._mqtt_poll_interval = interval
+        logger.info("Battery inverter poll interval updated from MQTT: %ss", interval)
 
     def handle_control_state(self, state: str) -> None:
         previous_state = self.control_state
