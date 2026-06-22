@@ -291,5 +291,29 @@ def test_idle_export_while_battery_discharging_trims_discharge_setpoint(monkeypa
 
     asyncio.run(app.handle_message("minyad/grid/net_power_w", b"-345"))
 
+    assert app.controller.state is control_main.ControlState.DISCHARGING
+    assert ("control", "state", "HYSTERESE") in app.mqtt.published
     assert ("control", "discharge_w", 667) in app.mqtt.published
     assert app.controller.ticked == [345]
+
+
+def test_idle_import_while_battery_discharging_adopts_and_increases_setpoint(monkeypatch):
+    stored = {}
+
+    async def capture_store_status(**values):
+        stored.update(values)
+
+    monkeypatch.setattr(control_main, "store_status", capture_store_status)
+    app = make_available_app()
+    app.settings = {"max_discharge_w": 5000}
+    app.controller = FakeHysteresisController(control_main.ControlState.IDLE)
+    app.latest_battery_power_w = 561
+
+    asyncio.run(app.handle_message("minyad/grid/net_power_w", b"472"))
+
+    assert app.controller.state is control_main.ControlState.DISCHARGING
+    assert ("control", "state", "HYSTERESE") in app.mqtt.published
+    assert stored["state"] == "HYSTERESE"
+    assert ("control", "discharge_w", 1033) in app.mqtt.published
+    assert ("control", "discharge_w", 472) not in app.mqtt.published
+    assert app.controller.ticked == [-472]
