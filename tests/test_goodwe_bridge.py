@@ -88,6 +88,10 @@ class FakeClient:
 
 
 class Backend:
+    def __init__(self):
+        self.charge_setpoints = []
+        self.discharge_setpoints = []
+
     async def read_state(self):
         return InverterState(
             battery_soc=81,
@@ -101,10 +105,10 @@ class Backend:
         )
 
     async def set_charge(self, watts):
-        pass
+        self.charge_setpoints.append(watts)
 
     async def set_discharge(self, watts):
-        pass
+        self.discharge_setpoints.append(watts)
 
 
 def make_config():
@@ -166,3 +170,35 @@ def test_active_to_active_state_does_not_trigger_immediate_poll(monkeypatch):
         assert bridge._immediate_poll_task is None
     finally:
         bridge.loop.close()
+
+
+def test_unchanged_charge_setpoint_is_not_written_twice(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = Backend()
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+
+        await bridge.handle_charge_setpoint(750)
+        await bridge.handle_charge_setpoint(750)
+        await bridge.handle_charge_setpoint(0)
+
+        assert backend.charge_setpoints == [750, 0]
+
+    asyncio.run(run())
+
+
+def test_unchanged_discharge_setpoint_is_not_written_twice(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = Backend()
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+
+        await bridge.handle_discharge_setpoint(425)
+        await bridge.handle_discharge_setpoint(425)
+        await bridge.handle_discharge_setpoint(0)
+
+        assert backend.discharge_setpoints == [425, 0]
+
+    asyncio.run(run())

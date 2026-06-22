@@ -168,6 +168,8 @@ class GoodWeBridge:
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=60)
         self.control_state = "IDLE"
+        self._last_charge_setpoint_w: int | None = None
+        self._last_discharge_setpoint_w: int | None = None
         self._immediate_poll_task: Future[None] | None = None
 
     def load_poll_interval(self) -> int:
@@ -274,18 +276,28 @@ class GoodWeBridge:
             logger.warning("Immediate polling failed: %s", exc, exc_info=True)
 
     async def handle_charge_setpoint(self, watts: int) -> None:
+        if watts == self._last_charge_setpoint_w:
+            logger.debug("Skipping unchanged charge_w=%s", watts)
+            return
         try:
             await self.backend.set_charge(watts)
         except Exception:
             logger.exception("Failed to handle charge_w=%s", watts)
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
+            return
+        self._last_charge_setpoint_w = watts
 
     async def handle_discharge_setpoint(self, watts: int) -> None:
+        if watts == self._last_discharge_setpoint_w:
+            logger.debug("Skipping unchanged discharge_w=%s", watts)
+            return
         try:
             await self.backend.set_discharge(watts)
         except Exception:
             logger.exception("Failed to handle discharge_w=%s", watts)
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
+            return
+        self._last_discharge_setpoint_w = watts
 
     async def poll_once(self) -> None:
         state = await self.backend.read_state()
