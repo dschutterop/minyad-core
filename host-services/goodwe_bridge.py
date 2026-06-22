@@ -7,11 +7,13 @@ import asyncio
 import logging
 import os
 import signal
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 import paho.mqtt.client as mqtt
+import psycopg2
 from dotenv import load_dotenv
 
 from backends import GoodWeBackend, InverterBackend, ModbusBackend
@@ -23,6 +25,8 @@ logger = logging.getLogger(LOGGER_NAME)
 
 MQTT_TOPIC_CHARGE_W = "minyad/control/charge_w"
 MQTT_TOPIC_DISCHARGE_W = "minyad/control/discharge_w"
+BATTERY_POLL_INTERVAL_SETTING = "battery.inverter_poll_interval_s"
+DEFAULT_POLL_INTERVAL_SECONDS = 120
 
 MQTT_TOPIC_INVERTER_STATUS = "minyad/inverter/status"
 MQTT_TOPIC_BRIDGE_STATUS = "minyad/bridge/status"
@@ -76,6 +80,7 @@ class Config:
     mqtt_user: str | None
     mqtt_pass: str | None
     poll_interval: int
+    database_url: str | None
     max_charge_a: int
     log_level: str
 
@@ -102,7 +107,8 @@ class Config:
             mqtt_port=_get_env_int("MQTT_PORT", 1883),
             mqtt_user=os.getenv("MQTT_USER"),
             mqtt_pass=os.getenv("MQTT_PASS"),
-            poll_interval=_get_env_int("POLL_INTERVAL", 30),
+            poll_interval=_get_env_int("POLL_INTERVAL", DEFAULT_POLL_INTERVAL_SECONDS),
+            database_url=os.getenv("DB_URL") or os.getenv("DATABASE_URL"),
             max_charge_a=min(max_charge_a, 30),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
@@ -147,6 +153,40 @@ class GoodWeBridge:
         self.mqtt_client.on_disconnect = self.on_disconnect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=60)
+
+    def load_poll_interval(self) -> int:
+        """Return the current inverter polling interval in seconds.
+
+        The setting is loaded from PostgreSQL on every polling cycle so operators
+        can slow down GoodWe telemetry without restarting the host-side bridge.
+        MQTT command handling remains event-driven and is not delayed by this
+        telemetry interval.
+        """
+        configured = self.config.poll_interval
+        if not self.config.database_url:
+            return configured
+        try:
+            with closing(psycopg2.connect(self.config.database_url)) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "select value from settings where key = %s and encrypted = false",
+                        (BATTERY_POLL_INTERVAL_SETTING,),
+                    )
+                    row = cur.fetchone()
+        except Exception as exc:
+            logger.warning("Could not load %s; using %ss: %s", BATTERY_POLL_INTERVAL_SETTING, configured, exc)
+            return configured
+        if row is None:
+            return configured
+        try:
+            interval = int(row[0])
+        except (TypeError, ValueError):
+            logger.warning("Ignoring invalid %s=%r; using %ss", BATTERY_POLL_INTERVAL_SETTING, row[0], configured)
+            return configured
+        if interval < 1:
+            logger.warning("Ignoring non-positive %s=%s; using %ss", BATTERY_POLL_INTERVAL_SETTING, interval, configured)
+            return configured
+        return interval
 
     def publish(self, topic: str, payload: object, retain: bool = True) -> None:
         self.mqtt_client.publish(topic, str(payload), retain=retain)
@@ -237,7 +277,7 @@ class GoodWeBridge:
                 logger.warning("Polling failed: %s", exc, exc_info=True)
 
             try:
-                await asyncio.wait_for(self.shutdown_event.wait(), timeout=self.config.poll_interval)
+                await asyncio.wait_for(self.shutdown_event.wait(), timeout=self.load_poll_interval())
             except asyncio.TimeoutError:
                 pass
 

@@ -171,6 +171,7 @@ def battery_settings_body() -> str:
         <label>Inverter IP <input name='inverter_ip' type='text' pattern='^([0-9]{1,3}\\.){3}[0-9]{1,3}$'></label>
         <label>Retries <input name='inverter_retries' type='number' min='1' max='10'></label>
         <label>Retry delay s <input name='inverter_delay' type='number' min='1' max='30'></label>
+        <label>GoodWe poll interval s <input name='inverter_poll_interval_s' type='number' min='1' max='3600'></label>
         <button type='submit'>Save battery settings</button>
       </form><pre id='settings-result'></pre></div>
 
