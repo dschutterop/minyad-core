@@ -73,6 +73,9 @@ class Config:
     inverter_backend: str
     goodwe_api_host: str
     inverter_max_w: int
+    inverter_retries: int
+    inverter_delay: int
+    goodwe_min_request_interval_s: float
     modbus_gw_ip: str
     modbus_gw_port: int
     modbus_slave_id: int
@@ -101,6 +104,9 @@ class Config:
             inverter_backend=inverter_backend,
             goodwe_api_host=_get_required_env("GOODWE_API_HOST"),
             inverter_max_w=_get_env_int("INVERTER_MAX_W", _get_env_int("MAX_DISCHARGE_W", 5000)),
+            inverter_retries=_get_env_int("INVERTER_RETRIES", 5),
+            inverter_delay=_get_env_int("INVERTER_DELAY", 3),
+            goodwe_min_request_interval_s=_get_env_float("GOODWE_MIN_REQUEST_INTERVAL_S", 2.0),
             modbus_gw_ip=_get_required_env("MODBUS_GW_IP"),
             modbus_gw_port=_get_env_int("MODBUS_GW_PORT", 502),
             modbus_slave_id=_get_env_int("MODBUS_SLAVE_ID", 247),
@@ -137,7 +143,13 @@ def build_backend(config: Config) -> InverterBackend:
             max_w=config.inverter_max_w,
         )
     if config.inverter_backend == "goodwe":
-        return GoodWeBackend(config.goodwe_api_host, config.inverter_max_w)
+        return GoodWeBackend(
+            config.goodwe_api_host,
+            config.inverter_max_w,
+            retries=config.inverter_retries,
+            delay=config.inverter_delay,
+            min_request_interval_s=config.goodwe_min_request_interval_s,
+        )
     raise ValueError("INVERTER_BACKEND must be 'modbus' or 'goodwe'")
 
 
