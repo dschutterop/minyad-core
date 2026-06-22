@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import signal
+from concurrent.futures import Future
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,6 +26,7 @@ logger = logging.getLogger(LOGGER_NAME)
 
 MQTT_TOPIC_CHARGE_W = "minyad/control/charge_w"
 MQTT_TOPIC_DISCHARGE_W = "minyad/control/discharge_w"
+MQTT_TOPIC_CONTROL_STATE = "minyad/control/state"
 BATTERY_POLL_INTERVAL_SETTING = "battery.inverter_poll_interval_s"
 DEFAULT_POLL_INTERVAL_SECONDS = 120
 
@@ -153,6 +155,8 @@ class GoodWeBridge:
         self.mqtt_client.on_disconnect = self.on_disconnect
         self.mqtt_client.on_message = self.on_message
         self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=60)
+        self.control_state = "IDLE"
+        self._immediate_poll_task: Future[None] | None = None
 
     def load_poll_interval(self) -> int:
         """Return the current inverter polling interval in seconds.
@@ -194,7 +198,7 @@ class GoodWeBridge:
     def on_connect(self, client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
         if rc == 0:
             logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
-            client.subscribe([(MQTT_TOPIC_CHARGE_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1)])
+            client.subscribe([(MQTT_TOPIC_CHARGE_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1), (MQTT_TOPIC_CONTROL_STATE, 1)])
             self.publish_bridge_alive()
         else:
             logger.error("MQTT connection failed with rc=%s", rc)
@@ -214,6 +218,10 @@ class GoodWeBridge:
             return
 
         payload = message.payload.decode("utf-8", errors="replace").strip()
+        if message.topic == MQTT_TOPIC_CONTROL_STATE:
+            self.handle_control_state(payload)
+            return
+
         try:
             watts = int(payload)
         except ValueError:
@@ -224,6 +232,34 @@ class GoodWeBridge:
             asyncio.run_coroutine_threadsafe(self.handle_charge_setpoint(watts), self.loop)
         elif message.topic == MQTT_TOPIC_DISCHARGE_W:
             asyncio.run_coroutine_threadsafe(self.handle_discharge_setpoint(watts), self.loop)
+
+    def handle_control_state(self, state: str) -> None:
+        previous_state = self.control_state
+        self.control_state = state
+        if previous_state == "IDLE" and state in {"CHARGING", "DISCHARGING"}:
+            logger.info("Control state changed %s -> %s; polling inverter status immediately", previous_state, state)
+            self.schedule_immediate_poll()
+
+    def schedule_immediate_poll(self) -> None:
+        if self.loop is None:
+            logger.warning("Ignoring immediate poll request before event loop is ready")
+            return
+        if self._immediate_poll_task is not None and not self._immediate_poll_task.done():
+            logger.debug("Immediate inverter status poll already queued")
+            return
+        self._immediate_poll_task = asyncio.run_coroutine_threadsafe(self.poll_once_safely(), self.loop)
+
+    async def poll_once_safely(self) -> None:
+        try:
+            await self.poll_once()
+        except (ConnectionError, TimeoutError) as exc:
+            self.publish_bridge_alive()
+            self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
+            logger.warning("Immediate polling failed: %s", exc, exc_info=True)
+        except Exception as exc:
+            self.publish_bridge_alive()
+            self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
+            logger.warning("Immediate polling failed: %s", exc, exc_info=True)
 
     async def handle_charge_setpoint(self, watts: int) -> None:
         try:
