@@ -202,3 +202,40 @@ def test_unchanged_discharge_setpoint_is_not_written_twice(monkeypatch):
         assert backend.discharge_setpoints == [425, 0]
 
     asyncio.run(run())
+
+
+def test_subscribes_to_battery_poll_interval_setting_topic(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+    bridge = goodwe_bridge.GoodWeBridge(make_config(), Backend())
+
+    bridge.on_connect(bridge.mqtt_client, None, {}, 0)
+
+    assert (goodwe_bridge.MQTT_TOPIC_BATTERY_POLL_INTERVAL, 1) in bridge.mqtt_client.subscriptions
+
+
+def test_poll_interval_can_be_driven_by_retained_mqtt(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+    config = make_config()
+    bridge = goodwe_bridge.GoodWeBridge(config, Backend())
+    bridge.loop = asyncio.new_event_loop()
+
+    class Message:
+        topic = goodwe_bridge.MQTT_TOPIC_BATTERY_POLL_INTERVAL
+        payload = b"45"
+
+    try:
+        bridge.on_message(bridge.mqtt_client, None, Message())
+        assert bridge.load_poll_interval() == 45
+    finally:
+        bridge.loop.close()
+
+
+def test_invalid_mqtt_poll_interval_keeps_previous_value(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+    bridge = goodwe_bridge.GoodWeBridge(make_config(), Backend())
+
+    bridge.handle_poll_interval("30")
+    bridge.handle_poll_interval("0")
+    bridge.handle_poll_interval("invalid")
+
+    assert bridge.load_poll_interval() == 30
