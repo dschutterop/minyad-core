@@ -404,6 +404,7 @@ class BatterySettingsUpdate(BaseModel):
     inverter_ip: str | None = None
     inverter_retries: int | None = None
     inverter_delay: int | None = None
+    inverter_poll_interval_s: int | None = Field(default=None, ge=1)
 
     @field_validator("inverter_ip")
     @classmethod
