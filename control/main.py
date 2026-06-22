@@ -90,6 +90,7 @@ class ControlApp:
         self.setpoint_w = DEFAULT_SETPOINT_W
         self.latest_grid_power_w = 0
         self.latest_battery_soc: int | None = None
+        self.latest_battery_power_w = 0
         self.bridge_status = "offline"
         self.bridge_last_seen: datetime | None = None
         self.bridge_last_seen_raw: str | None = None
@@ -198,6 +199,7 @@ class ControlApp:
                 await self.stop_charging()
                 await self.publish_state(ControlState.IDLE)
                 return
+            await self._rebalance_untracked_idle_discharge(grid_power_w)
             state = self.controller.tick(surplus_w)
             LOGGER.info(
                 "Grid control sample topic=%s grid_power=%sW surplus=%sW state=%s%s",
@@ -239,6 +241,8 @@ class ControlApp:
             return
         if measurement == "soc":
             self.latest_battery_soc = int(value)
+        elif measurement == "power_w":
+            self.latest_battery_power_w = int(value)
         await store_status(**{measurement: value})
 
     async def handle_bridge_topic(self, topic: str, payload: str) -> None:
@@ -346,6 +350,34 @@ class ControlApp:
         elif mode in {OverrideMode.FORCE_OFF, OverrideMode.PAUSE}:
             await self.stop_charging()
         await self.publish_state(self.controller.state)
+
+
+    async def _rebalance_untracked_idle_discharge(self, grid_power_w: int) -> None:
+        """Trim unexpected battery discharge while hysteresis still thinks it is idle.
+
+        GoodWe may continue discharging from a previous retained/active discharge
+        setpoint even when the control state is IDLE.  When the DSMR meter shows
+        export at the same time, the normal IDLE hysteresis path would not emit
+        any corrective command because export is a charge-side signal.  Use the
+        battery telemetry to reduce the discharge setpoint to the apparent house
+        load (battery discharge plus grid import/export) so we do not discharge
+        the battery into the grid.
+        """
+        if self.controller is None or self.controller.state is not ControlState.IDLE:
+            return
+        battery_power_w = int(self.latest_battery_power_w)
+        if battery_power_w <= 0 or grid_power_w >= 0:
+            return
+        corrected_discharge_w = max(0, battery_power_w + grid_power_w)
+        if corrected_discharge_w == battery_power_w:
+            return
+        LOGGER.warning(
+            "Battery is discharging while control is IDLE and grid is exporting; trimming discharge setpoint from %sW to %sW (grid_power=%sW)",
+            battery_power_w,
+            corrected_discharge_w,
+            grid_power_w,
+        )
+        await self.publish_discharge_setpoint(corrected_discharge_w)
 
     async def start_charging(self) -> None:
         await self.publish_setpoint(int(self.settings["max_charge_w"]))
