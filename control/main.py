@@ -25,6 +25,7 @@ DEFAULT_SETPOINT_W = 0
 BRIDGE_OFFLINE_STATUSES = {"offline", "error"}
 SOC_FLOOR_DEFAULT = 20
 SOC_CEILING_DEFAULT = 90
+STATUS_HYSTERESE = "HYSTERESE"
 BRIDGE_LAST_SEEN_STALE_SECONDS = int(os.getenv("BRIDGE_LAST_SEEN_STALE_SECONDS", "60"))
 BATTERY_TOPIC_TYPES = {
     "soc": int,
@@ -90,6 +91,8 @@ class ControlApp:
         self.setpoint_w = DEFAULT_SETPOINT_W
         self.latest_grid_power_w = 0
         self.latest_battery_soc: int | None = None
+        self.latest_battery_power_w = 0
+        self.reported_state_override: str | None = None
         self.bridge_status = "offline"
         self.bridge_last_seen: datetime | None = None
         self.bridge_last_seen_raw: str | None = None
@@ -198,6 +201,7 @@ class ControlApp:
                 await self.stop_charging()
                 await self.publish_state(ControlState.IDLE)
                 return
+            rebalanced_idle_discharge = await self._rebalance_untracked_idle_discharge(grid_power_w)
             state = self.controller.tick(surplus_w)
             LOGGER.info(
                 "Grid control sample topic=%s grid_power=%sW surplus=%sW state=%s%s",
@@ -207,7 +211,7 @@ class ControlApp:
                 self.controller.state.value,
                 " transitioned_from=" + previous_state.value if state else "",
             )
-            if self.controller.state is ControlState.DISCHARGING:
+            if self.controller.state is ControlState.DISCHARGING and not rebalanced_idle_discharge:
                 await self.publish_discharge_setpoint(self.discharge_target_w())
             if state:
                 await self.publish_state(state)
@@ -239,6 +243,8 @@ class ControlApp:
             return
         if measurement == "soc":
             self.latest_battery_soc = int(value)
+        elif measurement == "power_w":
+            self.latest_battery_power_w = int(value)
         await store_status(**{measurement: value})
 
     async def handle_bridge_topic(self, topic: str, payload: str) -> None:
@@ -327,6 +333,7 @@ class ControlApp:
             self.controller._stop_since = None
             self.controller._cooldown_until = None
             self.controller._cooldown_direction = None
+        self.reported_state_override = None
 
     async def apply_override(self, command: dict[str, Any]) -> None:
         if not self.controller:
@@ -346,6 +353,46 @@ class ControlApp:
         elif mode in {OverrideMode.FORCE_OFF, OverrideMode.PAUSE}:
             await self.stop_charging()
         await self.publish_state(self.controller.state)
+
+    async def _rebalance_untracked_idle_discharge(self, grid_power_w: int) -> bool:
+        """Adopt and rebalance real battery discharge while control says IDLE.
+
+        GoodWe may continue discharging from a previous retained/active discharge
+        setpoint even when the hysteresis controller is IDLE.  Use the battery
+        telemetry plus DSMR/grid net power to estimate the discharge setpoint
+        needed to hold the grid near zero: current battery discharge plus current
+        grid import/export.  This trims discharge during export and increases it
+        during import, while also making the published control state match the
+        observed non-idle battery.
+        """
+        if self.controller is None or self.controller.state is not ControlState.IDLE:
+            return False
+        battery_power_w = int(self.latest_battery_power_w)
+        if battery_power_w <= 0:
+            return False
+        corrected_discharge_w = max(0, battery_power_w + grid_power_w)
+        LOGGER.warning(
+            "Battery is discharging while control is IDLE; adopting observed discharge and rebalancing setpoint from %sW to %sW (grid_power=%sW)",
+            battery_power_w,
+            corrected_discharge_w,
+            grid_power_w,
+        )
+        self._force_controller_discharging()
+        await self.publish_state(ControlState.DISCHARGING)
+        await self.publish_discharge_setpoint(corrected_discharge_w)
+        return True
+
+    def _force_controller_discharging(self) -> None:
+        if self.controller is None:
+            return
+        with self.controller._lock:
+            self.controller._state = ControlState.DISCHARGING
+            self.controller._charge_since = None
+            self.controller._discharge_since = None
+            self.controller._stop_since = None
+            self.controller._cooldown_until = None
+            self.controller._cooldown_direction = None
+        self.reported_state_override = STATUS_HYSTERESE
 
     async def start_charging(self) -> None:
         await self.publish_setpoint(int(self.settings["max_charge_w"]))
@@ -438,11 +485,19 @@ class ControlApp:
 
     async def publish_state(self, state: ControlState, *, publish_setpoint: bool = True) -> None:
         mode = self.controller.override_mode.value if self.controller else "none"
-        self.mqtt.publish_measurement("control", "state", state.value)
+        state_value = self._reported_state_value(state)
+        self.mqtt.publish_measurement("control", "state", state_value)
         if publish_setpoint and self.bridge_is_available:
             self.mqtt.publish_measurement("control", "setpoint_w", self.setpoint_w)
         self.mqtt.publish_measurement("control", "override_mode", mode)
-        await store_status(state=state.value, override_mode=mode, setpoint_w=self.setpoint_w)
+        await store_status(state=state_value, override_mode=mode, setpoint_w=self.setpoint_w)
+
+    def _reported_state_value(self, state: ControlState) -> str:
+        if state is ControlState.DISCHARGING and self.reported_state_override:
+            return self.reported_state_override
+        if state is not ControlState.DISCHARGING:
+            self.reported_state_override = None
+        return state.value
 
 
 async def run_control_app() -> None:
