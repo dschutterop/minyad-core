@@ -140,8 +140,21 @@ async def _refresh_debug_setting() -> None:
             LOGGER.debug("Could not refresh debug setting from DB")
 
 
+def solar_dynamic_status_key(topic: str) -> str | None:
+    parts = topic.split("/")
+    if len(parts) == 5 and parts[:3] == ["minyad", "solar", "inverter"] and parts[4] in {"power_w", "last_report_at"}:
+        return f"solar_inverter_{parts[3]}_{parts[4]}"
+    if len(parts) == 5 and parts[:3] == ["minyad", "solar", "array"] and parts[4] == "power_w":
+        return f"solar_array_{parts[3]}_power_w"
+    return None
+
+
+def mqtt_status_key(topic: str) -> str | None:
+    return MQTT_STATUS_KEYS.get(topic) or solar_dynamic_status_key(topic)
+
+
 def handle_status_mqtt(topic: str, payload: bytes) -> None:
-    key = MQTT_STATUS_KEYS.get(topic)
+    key = mqtt_status_key(topic)
     decoded = payload.decode()
     if key is None:
         LOGGER.debug("Ignoring unsupported status MQTT topic %s", topic)
@@ -187,7 +200,7 @@ def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOU
     expected_keys = set(MQTT_STATUS_KEYS.values())
 
     def on_message(_client: paho_mqtt.Client, _userdata: object, message: paho_mqtt.MQTTMessage) -> None:
-        key = MQTT_STATUS_KEYS.get(message.topic)
+        key = mqtt_status_key(message.topic)
         if key is None:
             return
         decoded = message.payload.decode()
@@ -214,7 +227,7 @@ def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOU
                 "minyad/bridge/+",
                 "minyad/control/+",
                 "minyad/grid/+",
-                "minyad/solar/+",
+                "minyad/solar/#",
             ):
                 client.subscribe(topic)
                 LOGGER.debug("collect_retained_mqtt_status: subscribed %s", topic)
@@ -278,6 +291,36 @@ def grid_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def battery_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if not key.startswith("grid_")}
+
+
+def solar_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    inverters: dict[str, dict[str, Any]] = {}
+    arrays: dict[str, int | str] = {}
+    for key, value in payload.items():
+        if key.startswith("solar_inverter_") and key.endswith("_power_w"):
+            serial = key.removeprefix("solar_inverter_").removesuffix("_power_w")
+            inverters.setdefault(serial, {"serial": serial})["power_w"] = coerce_int_status_value(key, value)
+        elif key.startswith("solar_inverter_") and key.endswith("_last_report_at"):
+            serial = key.removeprefix("solar_inverter_").removesuffix("_last_report_at")
+            inverters.setdefault(serial, {"serial": serial})["last_report_at"] = value
+        elif key.startswith("solar_array_") and key.endswith("_power_w"):
+            array = key.removeprefix("solar_array_").removesuffix("_power_w")
+            arrays[array] = coerce_int_status_value(key, value)
+    inverter_list = sorted(inverters.values(), key=lambda item: str(item.get("serial", "")))
+    total = payload.get("solar_power_w")
+    if total is None:
+        numeric = [item.get("power_w") for item in inverter_list]
+        total = sum(value for value in numeric if isinstance(value, int))
+    else:
+        total = coerce_int_status_value("solar_power_w", total)
+    return {
+        "power_w": total,
+        "updated_at": payload.get("solar_updated_at"),
+        "bridge_status": payload.get("solar_bridge_status"),
+        "bridge_last_seen": payload.get("solar_bridge_last_seen"),
+        "inverters": inverter_list,
+        "arrays": arrays,
+    }
 
 
 def coerce_grid_status(payload: dict[str, Any]) -> dict[str, Any]:
@@ -441,7 +484,7 @@ async def startup() -> None:
     mqtt.subscribe("minyad/bridge/+", handle_status_mqtt)
     mqtt.subscribe("minyad/control/+", handle_status_mqtt)
     mqtt.subscribe("minyad/grid/+", handle_status_mqtt)
-    mqtt.subscribe("minyad/solar/+", handle_status_mqtt)
+    mqtt.subscribe("minyad/solar/#", handle_status_mqtt)
     await publish_battery_mqtt_settings()
     asyncio.create_task(_refresh_debug_setting())
 
@@ -813,6 +856,17 @@ async def grid_status(session: AsyncSession = Depends(get_session)) -> dict[str,
 @app.get("/dsmr/status")
 async def dsmr_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     return await grid_status(session)
+
+
+@app.get("/solar/status")
+async def solar_status() -> dict[str, Any]:
+    payload = latest_mqtt_status()
+    if not any(key.startswith("solar_") for key in payload):
+        try:
+            payload.update(collect_retained_mqtt_status())
+        except OSError:
+            LOGGER.exception("Unable to fetch retained MQTT solar snapshot")
+    return solar_status_payload(payload)
 
 
 @app.get("/household/status")
