@@ -211,6 +211,8 @@ class ControlApp:
                 self.controller.state.value,
                 " transitioned_from=" + previous_state.value if state else "",
             )
+            if self.controller.state is ControlState.CHARGING:
+                await self.publish_setpoint(self.charge_target_w())
             if self.controller.state is ControlState.DISCHARGING and not rebalanced_idle_discharge:
                 await self.publish_discharge_setpoint(self.discharge_target_w())
             if state:
@@ -424,7 +426,7 @@ class ControlApp:
         self.reported_state_override = STATUS_HYSTERESE
 
     async def start_charging(self) -> None:
-        await self.publish_setpoint(int(self.settings["max_charge_w"]))
+        await self.publish_setpoint(self.charge_target_w())
 
     def _apply_soc_guard(self, surplus_w: int) -> int:
         """Block discharge below soc_floor and charge above soc_ceiling.
@@ -454,6 +456,23 @@ class ControlApp:
             if surplus_w >= self.controller.start_w:
                 return self.controller.start_w - 1
         return surplus_w
+
+    def charge_target_w(self) -> int:
+        """Return the charge setpoint needed to absorb current grid export.
+
+        Grid net power is negative while exporting to the grid. When the battery
+        is already charging, the next GoodWe setpoint must include the observed
+        battery charge plus the remaining grid export/import. Commanding the
+        fixed maximum charge rate would overshoot a steady surplus (for example,
+        500W of export would incorrectly request max charge instead of 500W).
+        If no charge telemetry is available yet, fall back to the measured grid
+        export so startup behavior remains responsive.
+        """
+        grid_power_w = int(self.latest_grid_power_w)
+        battery_charge_w = max(0, -int(self.latest_battery_power_w))
+        if battery_charge_w > 0:
+            return max(0, battery_charge_w - grid_power_w)
+        return max(0, -grid_power_w)
 
     def discharge_target_w(self) -> int:
         """Return the discharge setpoint needed to offset current grid import.
