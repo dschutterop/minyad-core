@@ -394,3 +394,37 @@ def test_idle_import_while_battery_discharging_adopts_and_increases_setpoint(mon
     assert ("control", "discharge_w", 1033) in app.mqtt.published
     assert ("control", "discharge_w", 472) not in app.mqtt.published
     assert app.controller.ticked == [-472]
+
+
+def test_active_charging_sample_does_not_republish_setpoint(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
+    app.latest_grid_power_w = -600
+    app.latest_battery_power_w = -400
+    app.setpoint_w = 500
+
+    asyncio.run(app.handle_message("minyad/grid/net_power_w", b"-200"))
+
+    assert ("control", "charge_w", 600) not in app.mqtt.published
+    assert not any(measurement == "charge_w" for _, measurement, _ in app.mqtt.published)
+    assert app.controller.ticked == [200]
+
+
+def test_charge_transition_publishes_initial_setpoint(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.IDLE)
+    app.latest_grid_power_w = -700
+
+    def tick(surplus_w):
+        app.controller.ticked.append(surplus_w)
+        app.controller._state = control_main.ControlState.CHARGING
+        return control_main.ControlState.CHARGING
+
+    app.controller.tick = tick
+
+    asyncio.run(app.handle_message("minyad/grid/net_power_w", b"-700"))
+
+    assert ("control", "charge_w", 700) in app.mqtt.published
+    assert app.controller.ticked == [700]
