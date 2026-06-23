@@ -831,6 +831,20 @@ WINDOWS = {
 }
 
 
+def dashboard_window_bounds(window: str, duration: timedelta, now: datetime | None = None) -> tuple[datetime, datetime]:
+    end = now or datetime.now(timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    end = end.astimezone(timezone.utc)
+    if window != "day":
+        return end - duration, end
+
+    dashboard_tz = ZoneInfo(os.getenv("MINYAD_TIMEZONE", "Europe/Amsterdam"))
+    local_end = end.astimezone(dashboard_tz)
+    local_start = local_end.replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_start.astimezone(timezone.utc), end
+
+
 def _bucket_expr(column: str, seconds: int) -> str:
     return f"to_timestamp(floor(extract(epoch from {column}) / {seconds}) * {seconds})"
 
@@ -973,8 +987,7 @@ def extrapolate_battery_curve(start: datetime, end: datetime, step_seconds: int,
 async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month", "year"] = "day", session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     await ensure_recent_solar_forecast(session)
     duration, step_seconds, table_name = WINDOWS[window]
-    end = datetime.now(timezone.utc)
-    start = end - duration
+    start, end = dashboard_window_bounds(window, duration)
     if table_name == "power_curve_points":
         bucket = _bucket_expr("bucket_start", step_seconds)
         source_filter = "bucket_start >= :start and bucket_start <= :end"
