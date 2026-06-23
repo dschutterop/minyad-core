@@ -172,6 +172,11 @@ class ChargeController:
         discharge_allowed = True
         reason = f"balancing grid to {grid_target}W target; {ramp_reason}"
 
+        if grid_power <= grid_target and new_sp > 0:
+            new_sp = 0
+            discharge_allowed = False
+            reason = f"grid at or below {grid_target}W target ({grid_power}W); discharge blocked during export/surplus"
+
         if isinstance(soc, (int, float)) and soc <= mode.soc_floor:
             if new_sp > 0:
                 new_sp = 0
