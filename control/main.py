@@ -429,12 +429,18 @@ class ControlApp:
     def discharge_target_w(self) -> int:
         """Return the discharge setpoint needed to offset current grid import.
 
-        Grid net power is positive while importing from the grid. Discharge should
-        follow that measured import instead of jumping to the configured maximum,
-        otherwise a small household load can request full inverter discharge and
-        push excess power back to the grid.
+        Grid net power is positive while importing from the grid. When the
+        battery is already discharging, the next GoodWe setpoint must include
+        the observed battery contribution plus the remaining grid import/export;
+        using grid import alone would under-command the inverter and leave a
+        persistent import gap. If no discharge telemetry is available yet, fall
+        back to the measured grid import so startup behavior remains responsive.
         """
-        return max(0, int(self.latest_grid_power_w))
+        grid_power_w = int(self.latest_grid_power_w)
+        battery_discharge_w = max(0, int(self.latest_battery_power_w))
+        if battery_discharge_w > 0:
+            return max(0, battery_discharge_w + grid_power_w)
+        return max(0, grid_power_w)
 
     async def start_discharging(self) -> None:
         await self.publish_discharge_setpoint(self.discharge_target_w())
