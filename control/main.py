@@ -228,6 +228,13 @@ class ControlApp:
             return
         if topic.startswith("minyad/battery/"):
             await self.handle_battery_topic(topic, decoded)
+            if self.refresh_bridge_last_seen_from_battery_telemetry():
+                await store_status(
+                    bridge_last_seen=self.bridge_last_seen_raw or "",
+                    bridge_last_seen_valid=True,
+                    bridge_last_seen_error="",
+                    available=True,
+                )
             return
 
     async def handle_battery_topic(self, topic: str, payload: str) -> None:
@@ -281,6 +288,28 @@ class ControlApp:
         if self.bridge_last_seen is None:
             return None
         return (datetime.now(timezone.utc) - self.bridge_last_seen).total_seconds()
+
+    def refresh_bridge_last_seen_from_battery_telemetry(self) -> bool:
+        """Treat live GoodWe battery telemetry as bridge liveness.
+
+        The bridge publishes battery measurements and then its retained
+        ``minyad/bridge/last_seen`` heartbeat during each poll.  MQTT can deliver
+        a fresh measurement before the heartbeat topic reaches this service, so a
+        stale retained heartbeat should not suppress control when we are actively
+        receiving battery telemetry from the same bridge.
+        """
+        if self.bridge_status in BRIDGE_OFFLINE_STATUSES:
+            return False
+        if self.bridge_last_seen_error is None and self.bridge_is_available:
+            return False
+        self.bridge_last_seen = datetime.now(timezone.utc)
+        self.bridge_last_seen_raw = self.bridge_last_seen.isoformat()
+        self.bridge_last_seen_error = None
+        LOGGER.info(
+            "GoodWe bridge heartbeat refreshed from live battery telemetry timestamp=%s",
+            self.bridge_last_seen_raw,
+        )
+        return True
 
     @property
     def bridge_is_available(self) -> bool:
