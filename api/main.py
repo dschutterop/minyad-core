@@ -382,6 +382,7 @@ class ApiKeyCreate(BaseModel):
 
 class SystemSettingsUpdate(BaseModel):
     debug_logging: bool | None = None
+    theme: Literal["system", "light", "dark"] | None = None
 
 
 class AssetSteeringSettingsUpdate(BaseModel):
@@ -519,9 +520,12 @@ async def debug_status(session: AsyncSession = Depends(get_session)) -> dict[str
 
 @app.get("/system-settings")
 async def get_system_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    result = await session.execute(text("select value from settings where key = 'system.debug_logging'"))
-    val = result.scalar_one_or_none() or "false"
-    return {"debug_logging": val == "true"}
+    result = await session.execute(text("select key, value from settings where key in ('system.debug_logging', 'system.theme')"))
+    settings = {row.key: row.value for row in result}
+    return {
+        "debug_logging": settings.get("system.debug_logging", "false") == "true",
+        "theme": settings.get("system.theme", "system"),
+    }
 
 
 @app.put("/system-settings")
@@ -535,8 +539,17 @@ async def update_system_settings(update: SystemSettingsUpdate, session: AsyncSes
             """),
             {"val": val},
         )
-        await session.commit()
         _apply_log_level(update.debug_logging)
+    if update.theme is not None:
+        await session.execute(
+            text("""
+                insert into settings (key, value, encrypted, updated_at) values ('system.theme', :val, false, now())
+                on conflict (key) do update set value=:val, updated_at=now()
+            """),
+            {"val": update.theme},
+        )
+    if update.debug_logging is not None or update.theme is not None:
+        await session.commit()
     return await get_system_settings(session)
 
 
