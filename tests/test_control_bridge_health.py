@@ -186,6 +186,22 @@ def test_discharge_target_ignores_grid_export():
     assert app.discharge_target_w() == 0
 
 
+def test_active_discharge_target_rebalances_observed_import():
+    app = control_main.ControlApp()
+    app.latest_battery_power_w = 1117
+    app.latest_grid_power_w = 1334
+
+    assert app.discharge_target_w() == 2451
+
+
+def test_active_discharge_target_trims_observed_export():
+    app = control_main.ControlApp()
+    app.latest_battery_power_w = 1012
+    app.latest_grid_power_w = -345
+
+    assert app.discharge_target_w() == 667
+
+
 class FakeHysteresisController:
     def __init__(self, state=None):
         self.start_w = 500
