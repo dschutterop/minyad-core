@@ -202,6 +202,32 @@ def test_grid_net_power_import_is_converted_to_negative_surplus(monkeypatch):
     assert stored["state"] == "DISCHARGING"
 
 
+def test_start_charging_tracks_current_grid_export(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.latest_grid_power_w = -500
+
+    asyncio.run(app.start_charging())
+
+    assert ("control", "charge_w", 500) in app.mqtt.published
+
+
+def test_active_charge_target_rebalances_observed_export():
+    app = control_main.ControlApp()
+    app.latest_battery_power_w = -300
+    app.latest_grid_power_w = -200
+
+    assert app.charge_target_w() == 500
+
+
+def test_active_charge_target_trims_observed_import():
+    app = control_main.ControlApp()
+    app.latest_battery_power_w = -500
+    app.latest_grid_power_w = 125
+
+    assert app.charge_target_w() == 375
+
+
 def test_start_discharging_tracks_current_grid_import(monkeypatch):
     monkeypatch.setattr(control_main, "store_status", noop_store_status)
     app = make_available_app()
