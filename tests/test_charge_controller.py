@@ -121,6 +121,16 @@ def test_balancing_grid_export_while_battery_idle():
     assert decision.setpoint_delta == -150
 
 
+def test_grid_export_blocks_existing_battery_discharge():
+    c, _, _ = controller()
+    c.handle_mqtt_message("minyad/battery/power_w", b"1118")
+    c.handle_mqtt_message("minyad/grid/net_power_w", b"-150")
+    decision = c.evaluate()
+    assert decision.setpoint_w == 0
+    assert decision.discharge_allowed is False
+    assert "discharge blocked during export/surplus" in decision.reason
+
+
 def test_prompt_json_topics_are_accepted_for_telemetry():
     c, _, _ = controller()
     c.handle_mqtt_message("goodwe/battery", b'{"soc": 50, "battery_power": 400}')
