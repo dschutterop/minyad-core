@@ -211,9 +211,9 @@ class ControlApp:
                 self.controller.state.value,
                 " transitioned_from=" + previous_state.value if state else "",
             )
-            if self.controller.state is ControlState.CHARGING:
+            if state is ControlState.CHARGING:
                 await self.publish_setpoint(self.charge_target_w())
-            if self.controller.state is ControlState.DISCHARGING and not rebalanced_idle_discharge:
+            if state is ControlState.DISCHARGING and not rebalanced_idle_discharge:
                 await self.publish_discharge_setpoint(self.discharge_target_w())
             if state:
                 await self.publish_state(state)
