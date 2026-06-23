@@ -31,7 +31,9 @@ def test_bridge_requires_fresh_last_seen(monkeypatch):
 
     assert app.bridge_is_available is True
 
-    app.bridge_last_seen = datetime.now(timezone.utc) - timedelta(seconds=control_main.BRIDGE_LAST_SEEN_STALE_SECONDS + 5)
+    app.bridge_last_seen = datetime.now(timezone.utc) - timedelta(
+        seconds=control_main.BRIDGE_LAST_SEEN_STALE_SECONDS + 5
+    )
     assert app.bridge_is_available is False
 
     app.bridge_last_seen = datetime.now(timezone.utc)
@@ -107,6 +109,39 @@ def test_online_bridge_status_without_last_seen_allows_setpoint(monkeypatch):
 
     assert ("control", "charge_w", 250) in app.mqtt.published
 
+
+def test_live_battery_telemetry_refreshes_stale_bridge_heartbeat(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = control_main.ControlApp()
+    app.bridge_status = "online"
+    app.bridge_last_seen = datetime.now(timezone.utc) - timedelta(
+        seconds=control_main.BRIDGE_LAST_SEEN_STALE_SECONDS + 5
+    )
+    app.bridge_last_seen_raw = app.bridge_last_seen.isoformat()
+    app.bridge_last_seen_error = "bridge last_seen is stale"
+
+    app.refresh_bridge_last_seen_from_battery_telemetry()
+
+    assert app.bridge_is_available is True
+    assert app.bridge_last_seen_error is None
+
+
+def test_offline_bridge_does_not_refresh_from_battery_telemetry(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = control_main.ControlApp()
+    app.bridge_status = "offline"
+    stale_last_seen = datetime.now(timezone.utc) - timedelta(
+        seconds=control_main.BRIDGE_LAST_SEEN_STALE_SECONDS + 5
+    )
+    app.bridge_last_seen = stale_last_seen
+    app.bridge_last_seen_raw = stale_last_seen.isoformat()
+    app.bridge_last_seen_error = "bridge last_seen is stale"
+
+    app.refresh_bridge_last_seen_from_battery_telemetry()
+
+    assert app.bridge_is_available is False
+    assert app.bridge_last_seen == stale_last_seen
+    assert app.bridge_last_seen_error == "bridge last_seen is stale"
 
 def test_battery_mode_accepts_goodwe_text_payload(monkeypatch):
     stored = {}
