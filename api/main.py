@@ -102,11 +102,17 @@ STRATEGY_DEFAULTS = {
     "ghi_solar_poor_threshold": "1.5",
     "dynamic_tariff_ceiling_eur_kwh": "0.10",
     "daily_recalculate_local_time": "22:00",
+    "ramp_floor_w": "200",
+    "ramp_ceiling_w": "1000",
+    "ramp_hold_seconds": "120",
 }
 STRATEGY_NUMERIC_LIMITS = {
     "ghi_solar_rich_threshold": (0.0, 20.0),
     "ghi_solar_poor_threshold": (0.0, 20.0),
     "dynamic_tariff_ceiling_eur_kwh": (-1.0, 5.0),
+    "ramp_floor_w": (0, 5000),
+    "ramp_ceiling_w": (1, 5000),
+    "ramp_hold_seconds": (0, 3600),
 }
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 FORECAST_LATITUDE = 51.9788
@@ -390,6 +396,9 @@ class AssetSteeringSettingsUpdate(BaseModel):
     ghi_solar_poor_threshold: float | None = None
     dynamic_tariff_ceiling_eur_kwh: float | None = None
     daily_recalculate_local_time: str | None = None
+    ramp_floor_w: int | None = None
+    ramp_ceiling_w: int | None = None
+    ramp_hold_seconds: int | None = None
 
     @field_validator("daily_recalculate_local_time")
     @classmethod
@@ -562,6 +571,9 @@ async def asset_steering_settings(session: AsyncSession) -> dict[str, Any]:
         "ghi_solar_poor_threshold": float(merged["ghi_solar_poor_threshold"]),
         "dynamic_tariff_ceiling_eur_kwh": float(merged["dynamic_tariff_ceiling_eur_kwh"]),
         "daily_recalculate_local_time": merged["daily_recalculate_local_time"],
+        "ramp_floor_w": int(float(merged["ramp_floor_w"])),
+        "ramp_ceiling_w": int(float(merged["ramp_ceiling_w"])),
+        "ramp_hold_seconds": int(float(merged["ramp_hold_seconds"])),
     }
 
 
