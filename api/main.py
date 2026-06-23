@@ -44,6 +44,7 @@ MQTT_STATUS_KEYS = {
     "minyad/battery/charge_i": "charge_i",
     "minyad/bridge/status": "bridge_status",
     "minyad/bridge/last_seen": "bridge_last_seen",
+    "minyad/inverter/grid_power_w": "grid_power_w",
     "minyad/control/state": "state",
     "minyad/control/override_mode": "override_mode",
     "minyad/control/setpoint_w": "setpoint_w",
@@ -233,6 +234,7 @@ def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOU
                 "minyad/bridge/+",
                 "minyad/control/+",
                 "minyad/grid/+",
+                "minyad/inverter/+",
                 "minyad/solar/#",
             ):
                 client.subscribe(topic)
@@ -296,7 +298,40 @@ def grid_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def battery_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in payload.items() if not key.startswith("grid_")}
+    return {
+        key: value
+        for key, value in payload.items()
+        if not key.startswith("grid_") or key == "grid_power_w"
+    }
+
+
+def derive_battery_state(payload: dict[str, Any], fallback: str = "IDLE") -> str:
+    """Derive actual battery activity from bridge telemetry.
+
+    The control state describes what Minyad asked the inverter to do, but the
+    bridge telemetry is the source of truth for what the battery is doing.  A
+    small deadband avoids reporting activity from inverter measurement noise.
+    """
+    deadband_w = 25
+    power_w = _numeric_w(payload, "power_w")
+    mode_text = " ".join(
+        str(payload.get(key, "")).strip().lower()
+        for key in ("mode", "mode_label")
+        if payload.get(key) not in (None, "")
+    )
+
+    if power_w is not None and abs(power_w) > deadband_w:
+        if "discharge" in mode_text:
+            return "DISCHARGING"
+        if "charge" in mode_text:
+            return "CHARGING"
+        return "DISCHARGING" if power_w > 0 else "CHARGING"
+
+    if "discharge" in mode_text:
+        return "DISCHARGING"
+    if "charge" in mode_text:
+        return "CHARGING"
+    return fallback or "IDLE"
 
 
 def solar_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -494,6 +529,7 @@ async def startup() -> None:
     mqtt.subscribe("minyad/bridge/+", handle_status_mqtt)
     mqtt.subscribe("minyad/control/+", handle_status_mqtt)
     mqtt.subscribe("minyad/grid/+", handle_status_mqtt)
+    mqtt.subscribe("minyad/inverter/+", handle_status_mqtt)
     mqtt.subscribe("minyad/solar/#", handle_status_mqtt)
     await publish_battery_mqtt_settings()
     asyncio.create_task(_refresh_debug_setting())
@@ -823,13 +859,18 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     else:
         LOGGER.debug("battery_status: cache complete, skipping retained fetch")
     override = await session.execute(text("select mode from battery_override where id = 1"))
-    payload.setdefault("state", "IDLE")
+    control_state = str(payload.get("state") or "IDLE")
+    payload["control_state"] = control_state
+    payload["state"] = control_state
     payload["override_mode"] = override.scalar_one_or_none() or "none"
     for key in ("soc", "soh", "power_w", "charge_i"):
         if key in payload:
             payload[key] = coerce_int_status_value(key, payload[key])
     if "voltage" in payload:
         payload["voltage"] = coerce_float_status_value("voltage", payload["voltage"])
+    if "grid_power_w" in payload:
+        payload["grid_power_w"] = coerce_int_status_value("grid_power_w", payload["grid_power_w"])
+    payload["state"] = derive_battery_state(payload, fallback=control_state)
     if "available" in payload and payload["available"] is not None:
         payload["available"] = str(payload["available"]).lower() == "true"
     enrich_bridge_health(payload)
