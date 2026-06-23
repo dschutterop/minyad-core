@@ -23,6 +23,57 @@ BRAND_CSS = """
 .solar-hero{display:grid;grid-template-columns:1fr minmax(260px,360px);gap:18px;align-items:stretch}.solar-total{background:var(--panel);color:var(--p-ink);border-color:rgba(150,182,208,.18);display:flex;flex-direction:column;justify-content:space-between}.solar-total .phrase{font-size:clamp(44px,6vw,68px)}.solar-overview{margin-top:18px;background:var(--panel);color:var(--p-ink);border:1px solid rgba(150,182,208,.18);border-radius:14px;padding:20px}.solar-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:14px}.inverter-card{background:var(--panel-2);border:1px solid var(--p-line);border-left:3px solid var(--produce-d);border-radius:11px;padding:14px}.inverter-card b{display:block;font-family:var(--mono);font-size:18px;margin:8px 0}.inverter-card .bar{margin:12px 0 8px}.solar-empty{border:1px dashed var(--p-line);border-radius:12px;padding:22px;color:var(--p-mut);font-family:var(--mono);text-align:center}.solar-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}.array-list{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.array-pill{border:1px solid var(--p-line);border-radius:999px;padding:7px 10px;color:var(--p-mut);font-family:var(--mono);font-size:11px}@media(max-width:860px){.solar-hero{grid-template-columns:1fr}}
 """
 
+
+THEME_BOOT_SCRIPT = """
+<script>
+(() => {
+  const KEY = 'minyad.theme';
+  const apply = (theme) => {
+    const resolved = theme === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : theme;
+    document.documentElement.dataset.theme = resolved;
+    document.documentElement.dataset.themePreference = theme;
+  };
+  const saved = localStorage.getItem(KEY) || 'system';
+  apply(saved);
+  window.minyadTheme = {
+    key: KEY,
+    apply,
+    async load() {
+      try {
+        const res = await fetch('/api/system-settings');
+        if (!res.ok) throw new Error('theme settings unavailable');
+        const data = await res.json();
+        const theme = data.theme || 'system';
+        localStorage.setItem(KEY, theme);
+        apply(theme);
+        return theme;
+      } catch (_) {
+        apply(localStorage.getItem(KEY) || 'system');
+        return localStorage.getItem(KEY) || 'system';
+      }
+    },
+    async save(theme) {
+      localStorage.setItem(KEY, theme);
+      apply(theme);
+      const res = await fetch('/api/system-settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({theme})
+      });
+      if (!res.ok) throw new Error('Unable to save theme');
+      return res.json();
+    }
+  };
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if ((localStorage.getItem(KEY) || 'system') === 'system') apply('system');
+  });
+  window.minyadTheme.load();
+})();
+</script>
+"""
+
 BRAND_CSS += """
 .mailbox-button{position:relative;border:1px solid var(--p-line);background:#0A1016;color:var(--p-ink);border-radius:9px;padding:9px 12px;cursor:pointer;font:600 16px/1 var(--mono)}
 .mailbox-button .badge{position:absolute;right:-7px;top:-7px;min-width:18px;height:18px;border-radius:999px;background:var(--import-d);color:#fff;border:1px solid rgba(255,255,255,.25);font:700 10px/17px var(--mono);text-align:center;padding:0 4px}
@@ -41,6 +92,27 @@ BRAND_CSS += """
 .reply-box button,.mailbox-head button{border:1px solid var(--p-line);background:#0A1016;color:var(--p-ink);border-radius:8px;padding:8px 10px;cursor:pointer}
 """
 
+
+
+BRAND_CSS += """
+html[data-theme=dark]{--paper:#071017;--paper-2:#101b24;--ink:#E6EDF2;--steel:#9DB1C1;--hair:rgba(184,210,228,.14)}
+html[data-theme=dark] body:not(.dashboard-page){background:radial-gradient(circle at top,#142636 0,#071017 38rem);color:var(--ink)}
+html[data-theme=dark] .card,html[data-theme=dark] .status-card,html[data-theme=dark] .overview-card,html[data-theme=dark] .panel,html[data-theme=dark] .flow-panel{background:rgba(16,27,36,.92);border-color:rgba(184,210,228,.14);color:var(--ink)}
+html[data-theme=dark] .page-copy,html[data-theme=dark] .history-hint{color:rgba(230,237,242,.68)}
+html[data-theme=dark] input,html[data-theme=dark] select{background:#0A1016;border-color:rgba(184,210,228,.18);color:var(--ink)}
+html[data-theme=dark] .grid:not(.flow-node)>*{background:var(--paper)}
+html[data-theme=dark] .history-tab,html[data-theme=dark] .history-chart-card,html[data-theme=dark] .history-tooltip{background:#101b24;color:var(--ink);border-color:rgba(184,210,228,.14)}
+html[data-theme=dark] .history-stat{background:#0A1016;border-color:rgba(184,210,228,.14)}
+html[data-theme=light] .dashboard-page,html[data-theme=light] .dashboard-full,html[data-theme=light] .dashboard-nav{background:#EDF1F4;color:#15202A}
+html[data-theme=light] .dashboard-full,html[data-theme=light] .dashboard-nav,html[data-theme=light] .window-bar{border-color:rgba(74,98,118,.22)}
+html[data-theme=light] .dashboard-nav .wordmark strong,html[data-theme=light] .dashboard-nav .brand-nav a.active,html[data-theme=light] .dash-title strong,html[data-theme=light] .phrase{color:#15202A}
+html[data-theme=light] .dashboard-nav .brand-nav a,html[data-theme=light] .dashboard-nav .wordmark span,html[data-theme=light] .dash-meta,html[data-theme=light] .tile-name,html[data-theme=light] .scale-label,html[data-theme=light] .chart-legend{color:#4A6276}
+html[data-theme=light] .dashboard-nav .mark circle,html[data-theme=light] .dash-title .mark circle{fill:#EDF1F4}
+html[data-theme=light] .tile,html[data-theme=light] .chart-card,html[data-theme=light] .flow-node{background:#fff;border-color:rgba(74,98,118,.18)}
+html[data-theme=light] .window-tab,html[data-theme=light] .layout-toggle,html[data-theme=light] .layout-toggle button.active,html[data-theme=light] .bar,html[data-theme=light] .thin,html[data-theme=light] .cells i,html[data-theme=light] .chart-tooltip,html[data-theme=light] .mailbox-button,html[data-theme=light] .mailbox-item,html[data-theme=light] .reply-box textarea,html[data-theme=light] .reply-box button,html[data-theme=light] .mailbox-head button{background:#fff;color:#15202A;border-color:rgba(74,98,118,.18)}
+html[data-theme=light] .mailbox-panel{background:#fff;border-color:rgba(74,98,118,.18)}
+.theme-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}.theme-option{border:1px solid rgba(74,98,118,.22);border-radius:12px;padding:14px;background:rgba(255,255,255,.5)}.theme-option input{width:auto;margin:0 8px 0 0}.theme-option b{display:block}.theme-option span{display:block;color:var(--steel);font-size:13px;margin-top:4px}@media(max-width:700px){.theme-options{grid-template-columns:1fr}}
+"""
 
 def brand_mark() -> str:
     return """
@@ -75,6 +147,7 @@ def render_page(active: str, body: str) -> str:
         <title>Minyad — {active}</title>
         <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230E151C'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Arial,sans-serif' font-size='20' font-weight='700' fill='%23E6EDF2'%3EM%3C/text%3E%3C/svg%3E">
         <style>{BRAND_CSS}</style>
+        {THEME_BOOT_SCRIPT}
       </head>
       <body>
         <div class="brand-shell">
@@ -102,6 +175,7 @@ def render_dashboard_page() -> str:
         <title>Minyad — Dashboard</title>
         <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230E151C'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Arial,sans-serif' font-size='20' font-weight='700' fill='%23E6EDF2'%3EM%3C/text%3E%3C/svg%3E">
         <style>{BRAND_CSS}</style>
+        {THEME_BOOT_SCRIPT}
       </head>
       <body class="dashboard-page">
         {energy_dashboard_body()}
@@ -229,6 +303,17 @@ def battery_settings_body() -> str:
       </form><pre id='settings-result'></pre></div>
 
     <div class='card'>
+      <h2>Appearance</h2>
+      <p style='color:var(--steel);font-size:14px;margin:0 0 12px'>Choose how Minyad should render every web interface. The preference is saved server-side and cached locally for instant page loads.</p>
+      <div class='theme-options' role='radiogroup' aria-label='Theme preference'>
+        <label class='theme-option'><input type='radio' name='theme' value='system'><b>System</b><span>Follow this device</span></label>
+        <label class='theme-option'><input type='radio' name='theme' value='light'><b>Light</b><span>Bright interface</span></label>
+        <label class='theme-option'><input type='radio' name='theme' value='dark'><b>Dark</b><span>Low-light interface</span></label>
+      </div>
+      <pre id='theme-result'></pre>
+    </div>
+
+    <div class='card'>
       <h2>System</h2>
       <div class='toggle-row'>
         <span class='status-dot' id='debug-dot'></span>
@@ -289,6 +374,18 @@ def battery_settings_body() -> str:
         }
       }
 
+      document.querySelectorAll('input[name="theme"]').forEach((input) => {
+        input.addEventListener('change', async (e) => {
+          if (!e.target.checked) return;
+          try {
+            const settings = await window.minyadTheme.save(e.target.value);
+            document.getElementById('theme-result').textContent = JSON.stringify({theme: settings.theme}, null, 2);
+          } catch (err) {
+            document.getElementById('theme-result').textContent = 'Error: ' + err.message;
+          }
+        });
+      });
+
       document.getElementById('debug-toggle').addEventListener('change', async (e) => {
         const enabled = e.target.checked;
         await fetch('/api/system-settings', {
@@ -303,6 +400,12 @@ def battery_settings_body() -> str:
         const res = await fetch('/api/system-settings');
         const data = await res.json();
         document.getElementById('debug-toggle').checked = data.debug_logging;
+        const theme = data.theme || 'system';
+        localStorage.setItem(window.minyadTheme.key, theme);
+        window.minyadTheme.apply(theme);
+        const themeInput = document.querySelector(`input[name="theme"][value="${theme}"]`);
+        if (themeInput) themeInput.checked = true;
+        document.getElementById('theme-result').textContent = JSON.stringify({theme}, null, 2);
         applyDebugState(data.debug_logging);
       }
 
