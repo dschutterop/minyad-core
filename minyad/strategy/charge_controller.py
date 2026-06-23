@@ -42,6 +42,9 @@ DEFAULT_MAX_CHARGE_W = 1440
 DEFAULT_MAX_DISCHARGE_W = 5000
 DEFAULT_DEBOUNCE_SECONDS = 30
 DEFAULT_JITTER_W = 50
+DEFAULT_RAMP_FLOOR_W = 200
+DEFAULT_RAMP_CEILING_W = 1000
+DEFAULT_RAMP_HOLD_SECONDS = 120
 ACK_TIMEOUT_SECONDS = 30
 
 TOPIC_SETPOINT_JSON = "minyad/battery/setpoint"
@@ -127,6 +130,7 @@ class ChargeController:
         self._ack_event = Event()
         self._last_ack_latency_ms: int | None = None
         self._last_mode: ModeConfig | None = None
+        self._ramp_candidate: dict[str, Any] | None = None
         if hasattr(self.mqtt, "subscribe"):
             for topic in (f"{TOPIC_BATTERY_PREFIX}+", f"{TOPIC_GRID_PREFIX}+", TOPIC_DSMR_NET_POWER, TOPIC_PROMPT_GOODWE_BATTERY, TOPIC_PROMPT_DSMR_READING):
                 self.mqtt.subscribe(topic, self.handle_mqtt_message)
@@ -159,13 +163,14 @@ class ChargeController:
             grid_power = int(self._grid_power_w or 0)
 
         grid_target = int(self._float_setting_sync("strategy.grid_target_w", 0))
-        setpoint_delta = grid_power - grid_target
+        raw_delta = grid_power - grid_target
+        setpoint_delta, ramp_reason = self._held_ramp_delta(raw_delta)
         requested_sp = battery_power + setpoint_delta
         max_charge = self._max_charge_w_sync()
         max_discharge = self._max_discharge_w_sync()
         new_sp = max(-max_charge, min(max_discharge, requested_sp))
         discharge_allowed = True
-        reason = f"balancing grid to {grid_target}W target"
+        reason = f"balancing grid to {grid_target}W target; {ramp_reason}"
 
         if isinstance(soc, (int, float)) and soc <= mode.soc_floor:
             if new_sp > 0:
@@ -268,6 +273,37 @@ class ChargeController:
         response.raise_for_status()
         watts_per_m2 = response.json().get("hourly", {}).get("shortwave_radiation", [])
         return round(sum(float(v) for v in watts_per_m2) / 1000, 3)
+
+
+    def _held_ramp_delta(self, raw_delta: int) -> tuple[int, str]:
+        """Apply import/export hysteresis before changing inverter setpoint.
+
+        Positive grid power means import from grid and asks for more discharge.
+        Negative grid power means export to grid and asks for more charge.  A
+        direction must remain outside the configured floor for the hold time
+        before we ramp, and every ramp is capped by the configured ceiling.
+        """
+        floor = int(self._float_setting_sync("strategy.ramp_floor_w", DEFAULT_RAMP_FLOOR_W))
+        ceiling = int(self._float_setting_sync("strategy.ramp_ceiling_w", DEFAULT_RAMP_CEILING_W))
+        hold_seconds = self._float_setting_sync("strategy.ramp_hold_seconds", DEFAULT_RAMP_HOLD_SECONDS)
+        now = self._now()
+        if abs(raw_delta) < floor:
+            self._ramp_candidate = None
+            return 0, f"within ramp floor {floor}W; no setpoint change"
+        ceiling = max(1, ceiling)
+        if hold_seconds <= 0:
+            capped_delta = max(-ceiling, min(ceiling, raw_delta))
+            return capped_delta, f"ramp hold disabled; applying {capped_delta}W delta capped by {ceiling}W"
+        direction = 1 if raw_delta > 0 else -1
+        if not self._ramp_candidate or self._ramp_candidate.get("direction") != direction:
+            self._ramp_candidate = {"direction": direction, "started_at": now}
+            return 0, f"ramp hold started for {'import' if direction > 0 else 'export'}; waiting {int(hold_seconds)}s"
+        elapsed = (now - self._ramp_candidate["started_at"]).total_seconds()
+        if elapsed < hold_seconds:
+            return 0, f"ramp hold active for {int(elapsed)}s/{int(hold_seconds)}s"
+        capped_delta = max(-ceiling, min(ceiling, raw_delta))
+        self._ramp_candidate = {"direction": direction, "started_at": now}
+        return capped_delta, f"ramp hold satisfied; applying {capped_delta}W delta capped by {ceiling}W"
 
     def _publish(self, topic: str, payload: str) -> None:
         if hasattr(self.mqtt, "client"):

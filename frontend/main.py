@@ -194,6 +194,9 @@ def asset_steering_body() -> str:
         <label>Solar-poor GHI threshold <input name='ghi_solar_poor_threshold' type='number' min='0' max='20' step='0.1'></label>
         <label>Dynamic tariff ceiling EUR/kWh <input name='dynamic_tariff_ceiling_eur_kwh' type='number' min='-1' max='5' step='0.001'></label>
         <label>Daily recalculation time <input name='daily_recalculate_local_time' type='time'></label>
+        <label>Battery ramp floor W <input name='ramp_floor_w' type='number' min='0' max='5000' step='1'></label>
+        <label>Battery ramp ceiling W <input name='ramp_ceiling_w' type='number' min='1' max='5000' step='1'></label>
+        <label>Battery ramp hold seconds <input name='ramp_hold_seconds' type='number' min='0' max='3600' step='1'></label>
         <button type='submit'>Save asset steering</button>
       </form>
       <pre id='asset-steering-result'></pre>

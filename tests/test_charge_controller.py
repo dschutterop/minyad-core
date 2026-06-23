@@ -19,9 +19,12 @@ def fixed_now():
     return datetime(2026, 6, 18, 20, 0, tzinfo=timezone.utc)
 
 
-def controller(settings=None):
+def controller(settings=None, now=fixed_now):
     mqtt = FakeMqtt()
-    c = ChargeController(mqtt, db_session_factory=settings or {"battery.max_charge_w": "1440"}, now=fixed_now, ack_timeout_seconds=0, debounce_seconds=0)
+    defaults = {"battery.max_charge_w": "1440", "strategy.ramp_hold_seconds": "0", "strategy.ramp_floor_w": "0"}
+    if settings:
+        defaults.update(settings)
+    c = ChargeController(mqtt, db_session_factory=defaults, now=now, ack_timeout_seconds=0, debounce_seconds=0)
     return c, mqtt, c.db_session_factory
 
 
@@ -134,3 +137,43 @@ def test_jitter_suppression_reuses_last_setpoint():
     decision = c.evaluate()
     assert decision.setpoint_w == 300
     assert "jitter suppressed" in decision.reason
+
+
+def test_ramp_hysteresis_waits_for_configured_hold_time():
+    current = {"value": fixed_now()}
+    c, _, _ = controller({"strategy.ramp_hold_seconds": "120", "strategy.ramp_floor_w": "200", "strategy.ramp_ceiling_w": "1000"}, now=lambda: current["value"])
+    c.handle_mqtt_message("minyad/battery/power_w", b"0")
+    c.handle_mqtt_message("minyad/grid/net_power_w", b"-201")
+    decision = c.evaluate()
+    assert decision.setpoint_w == 0
+    assert "ramp hold started" in decision.reason
+
+    current["value"] = fixed_now() + timedelta(seconds=119)
+    c.handle_mqtt_message("minyad/grid/net_power_w", b"-1201")
+    decision = c.evaluate()
+    assert decision.setpoint_w == 0
+    assert "ramp hold active" in decision.reason
+
+    current["value"] = fixed_now() + timedelta(seconds=120)
+    decision = c.evaluate()
+    assert decision.setpoint_w == -1000
+    assert decision.setpoint_delta == -1000
+    assert "ramp hold satisfied" in decision.reason
+
+
+def test_ramp_hysteresis_handles_import_direction_after_export():
+    current = {"value": fixed_now()}
+    c, _, _ = controller({"strategy.ramp_hold_seconds": "120", "strategy.ramp_floor_w": "200", "strategy.ramp_ceiling_w": "1000"}, now=lambda: current["value"])
+    c.handle_mqtt_message("minyad/battery/power_w", b"0")
+    c.handle_mqtt_message("minyad/grid/net_power_w", b"-500")
+    assert c.evaluate().setpoint_w == 0
+
+    current["value"] = fixed_now() + timedelta(seconds=120)
+    c.handle_mqtt_message("minyad/grid/net_power_w", b"500")
+    decision = c.evaluate()
+    assert decision.setpoint_w == 0
+    assert "import" in decision.reason
+
+    current["value"] = fixed_now() + timedelta(seconds=240)
+    decision = c.evaluate()
+    assert decision.setpoint_w == 500
