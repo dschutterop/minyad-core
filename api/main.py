@@ -1592,6 +1592,34 @@ async def create_agent_decision(request: AgentDecisionRequest, session: AsyncSes
     return {"status": "ok", "id": row["id"], "created_at": row["created_at"].replace(tzinfo=timezone.utc).isoformat()}
 
 
+def serialize_agent_decision(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    value = data.get("created_at")
+    if value is not None:
+        data["created_at"] = value.replace(tzinfo=timezone.utc).isoformat()
+    snapshot = data.get("input_snapshot")
+    if isinstance(snapshot, str):
+        try:
+            data["input_snapshot"] = json.loads(snapshot)
+        except json.JSONDecodeError:
+            data["input_snapshot"] = {"raw": snapshot}
+    return data
+
+
+@app.get("/api/agent/decisions")
+async def list_agent_decisions(
+    limit: int = Query(default=50, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    rows = (await session.execute(text("""
+        select id, created_at, action_taken, setpoint_w, reasoning, confidence, input_snapshot, dry_run, model
+        from agent_decisions
+        order by created_at desc
+        limit :limit
+    """), {"limit": limit})).mappings().all()
+    return [serialize_agent_decision(row) for row in rows]
+
+
 def serialize_agent_message(row: Any) -> dict[str, Any]:
     data = dict(row)
     for key in ("created_at", "read_at"):
