@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 
@@ -16,6 +16,17 @@ class InverterState:
     battery_mode: str | None
     inverter_temperature_c: float | None
     grid_power_w: int | None
+
+
+@dataclass(frozen=True)
+class BatteryTelemetry(InverterState):
+    """Merged GoodWe telemetry with optional per-field source metadata."""
+
+    field_sources: dict[str, str] = field(default_factory=dict)
+    modbus_available: bool = False
+    api_available: bool = False
+    modbus_error: str | None = None
+    api_error: str | None = None
 
 
 class InverterBackend(Protocol):

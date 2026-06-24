@@ -27,3 +27,9 @@ same-day local-time `HH:MM-HH:MM` window. `--why` prints the most recent
 setpoint decision with a factor breakdown and the live/default thresholds read
 from the actual control implementation (`control/main.py`,
 `control/hysteresis.py`, and `minyad/strategy/charge_controller.py`).
+
+## GoodWe bridge dual-protocol mode
+
+`goodwe_bridge.py` now composes two GoodWe clients instead of choosing a single exclusive protocol.
+Modbus (`GOODWE_MODBUS_ENABLED`, default `true`) is the source of truth for RS485-reliable control fields: battery voltage (register 35180), battery power (35182), work mode (35187), and actuator writes to charge/discharge limit registers 45565/45566.
+The GoodWe API (`GOODWE_API_ENABLED`, default enabled when `GOODWE_API_HOST` is configured) is supplemental telemetry for fields that are not reliable over RS485, such as SOC, SOH, and battery temperature. API outages are logged but do not stop the control loop when Modbus remains available. Use `GOODWE_DRY_RUN=true` to suppress Modbus writes during tests.
