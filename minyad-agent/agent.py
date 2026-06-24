@@ -55,6 +55,8 @@ def run_cycle() -> None:
     )
     try:
         state = client.get_state()
+        battery_settings = client.get_battery_settings()
+        state.setdefault("settings", {})["battery"] = battery_settings
         forecast = client.get_forecast(hours_ahead=12)
         operator_messages = client.get_unread_operator_messages()
     except (httpx.RequestError, httpx.HTTPStatusError) as exc:
