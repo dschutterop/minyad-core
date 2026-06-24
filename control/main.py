@@ -27,6 +27,7 @@ SOC_FLOOR_DEFAULT = 20
 SOC_CEILING_DEFAULT = 90
 STATUS_HYSTERESE = "HYSTERESE"
 BRIDGE_LAST_SEEN_STALE_SECONDS = int(os.getenv("BRIDGE_LAST_SEEN_STALE_SECONDS", "60"))
+MIN_TARGET_CHANGE_W = int(os.getenv("MIN_TARGET_CHANGE_W", "150"))
 BATTERY_TOPIC_TYPES = {
     "soc": int,
     "soh": int,
@@ -99,6 +100,9 @@ class ControlApp:
         self.bridge_last_seen_error: str | None = "missing bridge last_seen"
         self.bridge_health_event: asyncio.Event | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
+        self._last_published_charge_limit_w = 0
+        self._last_published_discharge_limit_w = 0
+        self._has_published_battery_limits = False
 
     async def start(self) -> None:
         self.loop = asyncio.get_running_loop()
@@ -500,10 +504,19 @@ class ControlApp:
         self.setpoint_w = 0
         self.mqtt.publish_measurement("control", "command", "stop")
         if self.bridge_is_available:
-            self.publish_battery_limits(0, 0)
+            self.publish_battery_limits(0, 0, state_changed=True)
             self.mqtt.publish_measurement("control", "setpoint_w", 0)
 
-    def publish_battery_limits(self, charge_limit_w: int, discharge_limit_w: int) -> None:
+    def publish_battery_limits(self, charge_limit_w: int, discharge_limit_w: int, *, state_changed: bool = False) -> None:
+        charge_limit_w = max(0, int(charge_limit_w))
+        discharge_limit_w = max(0, int(discharge_limit_w))
+        delta = max(abs(charge_limit_w - self._last_published_charge_limit_w), abs(discharge_limit_w - self._last_published_discharge_limit_w))
+        if self._has_published_battery_limits and charge_limit_w == self._last_published_charge_limit_w and discharge_limit_w == self._last_published_discharge_limit_w:
+            LOGGER.info("Control actuator publish skipped reason=unchanged target target_charge_limit_w=%s target_discharge_limit_w=%s", charge_limit_w, discharge_limit_w)
+            return
+        if not state_changed and delta < MIN_TARGET_CHANGE_W:
+            LOGGER.info("Control actuator publish skipped reason=below min delta delta_w=%s min_delta_w=%s target_charge_limit_w=%s target_discharge_limit_w=%s", delta, MIN_TARGET_CHANGE_W, charge_limit_w, discharge_limit_w)
+            return
         LOGGER.info(
             "Control actuator decision p1_grid_power_w=%s charge_limit_w=%s discharge_limit_w=%s battery_power_w=%s",
             self.latest_grid_power_w,
@@ -511,6 +524,9 @@ class ControlApp:
             discharge_limit_w,
             self.latest_battery_power_w,
         )
+        self._last_published_charge_limit_w = charge_limit_w
+        self._last_published_discharge_limit_w = discharge_limit_w
+        self._has_published_battery_limits = True
         self.mqtt.publish_measurement("control", "charge_w", charge_limit_w)
         self.mqtt.publish_measurement("control", "discharge_w", discharge_limit_w)
 
@@ -521,7 +537,7 @@ class ControlApp:
             return
         self.setpoint_w = max(0, watts)
         self.mqtt.publish_measurement("control", "command", "resume" if self.setpoint_w else "stop")
-        self.publish_battery_limits(self.setpoint_w, 0)
+        self.publish_battery_limits(self.setpoint_w, 0, state_changed=self.controller is not None and self.controller.state is ControlState.CHARGING)
         self.mqtt.publish_measurement("control", "setpoint_w", self.setpoint_w)
 
     async def publish_discharge_setpoint(self, watts: int) -> None:
@@ -532,7 +548,7 @@ class ControlApp:
         max_discharge_w = int(self.settings.get("max_discharge_w", 5000))
         self.setpoint_w = max(0, min(watts, max_discharge_w))
         self.mqtt.publish_measurement("control", "command", "discharge" if self.setpoint_w else "stop")
-        self.publish_battery_limits(0, self.setpoint_w)
+        self.publish_battery_limits(0, self.setpoint_w, state_changed=self.controller is not None and self.controller.state is ControlState.DISCHARGING)
         self.mqtt.publish_measurement("control", "setpoint_w", 0)
 
     async def publish_state_loop(self) -> None:

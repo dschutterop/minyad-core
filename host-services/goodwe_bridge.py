@@ -11,6 +11,7 @@ from concurrent.futures import Future
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from time import monotonic, time
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -31,7 +32,11 @@ MQTT_TOPIC_GRID_NET_POWER = "minyad/grid/net_power_w"
 MQTT_TOPIC_CONTROL_STATE = "minyad/control/state"
 MQTT_TOPIC_BATTERY_POLL_INTERVAL = "minyad/settings/battery/inverter_poll_interval_s"
 BATTERY_POLL_INTERVAL_SETTING = "battery.inverter_poll_interval_s"
-DEFAULT_POLL_INTERVAL_SECONDS = 120
+POLL_INTERVAL_SEC = 2
+MIN_WRITE_INTERVAL_SEC = 10
+MIN_TARGET_CHANGE_W = 150
+WRITE_REFRESH_INTERVAL_SEC = 600
+DEFAULT_POLL_INTERVAL_SECONDS = POLL_INTERVAL_SEC
 
 MQTT_TOPIC_INVERTER_STATUS = "minyad/inverter/status"
 MQTT_TOPIC_BRIDGE_STATUS = "minyad/bridge/status"
@@ -92,6 +97,9 @@ class Config:
     max_charge_a: int
     dry_run: bool
     log_level: str
+    min_write_interval_s: float
+    min_target_change_w: int
+    write_refresh_interval_s: float
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -124,6 +132,9 @@ class Config:
             max_charge_a=min(max_charge_a, 30),
             dry_run=os.getenv("DRY_RUN", "false").lower() in {"1", "true", "yes", "on"},
             log_level=os.getenv("LOG_LEVEL", "INFO"),
+            min_write_interval_s=_get_env_float("MIN_WRITE_INTERVAL_SEC", MIN_WRITE_INTERVAL_SEC),
+            min_target_change_w=_get_env_int("MIN_TARGET_CHANGE_W", MIN_TARGET_CHANGE_W),
+            write_refresh_interval_s=_get_env_float("WRITE_REFRESH_INTERVAL_SEC", WRITE_REFRESH_INTERVAL_SEC),
         )
 
 
@@ -147,6 +158,9 @@ def build_backend(config: Config) -> InverterBackend:
             timeout=config.modbus_timeout,
             max_w=config.inverter_max_w,
             dry_run=config.dry_run,
+            min_write_interval_s=config.min_write_interval_s,
+            min_target_change_w=config.min_target_change_w,
+            write_refresh_interval_s=config.write_refresh_interval_s,
         )
     if config.inverter_backend == "goodwe":
         return GoodWeBackend(
@@ -176,9 +190,19 @@ class GoodWeBridge:
         self.control_state = "IDLE"
         self._last_charge_setpoint_w = 0
         self._last_discharge_setpoint_w = 0
-        self._last_p1_grid_power_w: int | None = None
+        self._last_p1_grid_power_w: int | None = 0
+        self._last_p1_grid_power_monotonic: float | None = monotonic()
         self._immediate_poll_task: Future[None] | None = None
         self._mqtt_poll_interval: int | None = None
+        self.modbus_reads_total = 0
+        self.modbus_writes_total = 0
+        self.modbus_write_skipped_total = 0
+        self.modbus_errors_total = 0
+        self.last_successful_read_timestamp: float | None = None
+        self.last_successful_write_timestamp: float | None = None
+        self.target_charge_limit_w = 0
+        self.target_discharge_limit_w = 0
+        self._last_write_monotonic: float | None = None
 
     def load_poll_interval(self) -> int:
         """Return the current inverter polling interval in seconds.
@@ -266,6 +290,7 @@ class GoodWeBridge:
     def handle_grid_power(self, payload: str) -> None:
         try:
             self._last_p1_grid_power_w = int(payload)
+            self._last_p1_grid_power_monotonic = monotonic()
         except ValueError:
             logger.warning("Ignoring invalid grid power payload: %r", payload)
 
@@ -310,30 +335,56 @@ class GoodWeBridge:
             logger.warning("Immediate polling failed: %s", exc, exc_info=True)
 
     async def handle_charge_setpoint(self, watts: int) -> None:
-        if watts == self._last_charge_setpoint_w:
-            logger.debug("Skipping unchanged charge_w=%s", watts)
-            return
-        try:
-            await self.backend.set_battery_limits(watts, self._last_discharge_setpoint_w)
-        except Exception:
-            logger.exception("Failed to handle charge_w=%s", watts)
-            self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
-            return
-        self._last_charge_setpoint_w = watts
-        logger.info("Actuator write success p1_grid_power_w=%s charge_limit_w=%s discharge_limit_w=%s dry_run=%s", self._last_p1_grid_power_w, self._last_charge_setpoint_w, self._last_discharge_setpoint_w, self.config.dry_run)
+        self.target_charge_limit_w = max(0, int(watts))
+        await self._apply_actuator_targets(state_changed=self.control_state == "CHARGING")
 
     async def handle_discharge_setpoint(self, watts: int) -> None:
-        if watts == self._last_discharge_setpoint_w:
-            logger.debug("Skipping unchanged discharge_w=%s", watts)
+        self.target_discharge_limit_w = max(0, int(watts))
+        await self._apply_actuator_targets(state_changed=self.control_state == "DISCHARGING")
+
+    async def _apply_actuator_targets(self, *, state_changed: bool = False) -> None:
+        if self._last_p1_grid_power_w is None or (self._last_p1_grid_power_monotonic is not None and monotonic() - self._last_p1_grid_power_monotonic > 60):
+            self._skip_actuator_write("stale P1 data")
+            return
+        charge = self.target_charge_limit_w
+        discharge = self.target_discharge_limit_w
+        unchanged = charge == self._last_charge_setpoint_w and discharge == self._last_discharge_setpoint_w
+        age = None if self._last_write_monotonic is None else monotonic() - self._last_write_monotonic
+        if unchanged and not (age is not None and age >= self.config.write_refresh_interval_s):
+            self._skip_actuator_write("unchanged target")
+            return
+        delta = max(abs(charge - self._last_charge_setpoint_w), abs(discharge - self._last_discharge_setpoint_w))
+        if not state_changed and delta < self.config.min_target_change_w and not unchanged:
+            self._skip_actuator_write("below min delta")
+            return
+        if age is not None and age < self.config.min_write_interval_s:
+            self._skip_actuator_write("write interval not elapsed")
             return
         try:
-            await self.backend.set_battery_limits(self._last_charge_setpoint_w, watts)
+            await self.backend.set_battery_limits(charge, discharge)
+        except (ConnectionError, TimeoutError):
+            self._skip_actuator_write("modbus unavailable")
+            self.modbus_errors_total += 1
+            logger.exception("Modbus unavailable while applying charge_w=%s discharge_w=%s", charge, discharge)
+            self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
+            return
         except Exception:
-            logger.exception("Failed to handle discharge_w=%s", watts)
+            self.modbus_errors_total += 1
+            logger.exception("Failed to apply charge_w=%s discharge_w=%s", charge, discharge)
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
             return
-        self._last_discharge_setpoint_w = watts
-        logger.info("Actuator write success p1_grid_power_w=%s charge_limit_w=%s discharge_limit_w=%s dry_run=%s", self._last_p1_grid_power_w, self._last_charge_setpoint_w, self._last_discharge_setpoint_w, self.config.dry_run)
+        self._last_charge_setpoint_w = charge
+        self._last_discharge_setpoint_w = discharge
+        self._last_write_monotonic = monotonic()
+        self.last_successful_write_timestamp = time()
+        self.modbus_writes_total += 1
+        self.publish_metrics()
+        logger.info("Actuator write success p1_grid_power_w=%s charge_limit_w=%s discharge_limit_w=%s dry_run=%s", self._last_p1_grid_power_w, charge, discharge, self.config.dry_run)
+
+    def _skip_actuator_write(self, reason: str) -> None:
+        self.modbus_write_skipped_total += 1
+        self.publish_metrics()
+        logger.info("Actuator write skipped reason=%s p1_grid_power_w=%s target_charge_limit_w=%s target_discharge_limit_w=%s current_charge_limit_w=%s current_discharge_limit_w=%s", reason, self._last_p1_grid_power_w, self.target_charge_limit_w, self.target_discharge_limit_w, self._last_charge_setpoint_w, self._last_discharge_setpoint_w)
 
     async def poll_once(self) -> None:
         state = await self.backend.read_state()
@@ -354,6 +405,9 @@ class GoodWeBridge:
                 continue
             self.publish(topic, value, retain=True)
         self.publish_bridge_alive()
+        self.modbus_reads_total += 1
+        self.last_successful_read_timestamp = time()
+        self.publish_metrics()
         logger.info(
             "Poll read success timestamp=%s soc=%s battery_power_w=%s inverter_grid_power_w=%s",
             utc_now_iso(),
@@ -361,6 +415,22 @@ class GoodWeBridge:
             state.battery_power_w,
             state.grid_power_w,
         )
+
+    def publish_metrics(self) -> None:
+        metrics = {
+            "modbus_reads_total": self.modbus_reads_total,
+            "modbus_writes_total": self.modbus_writes_total,
+            "modbus_write_skipped_total": self.modbus_write_skipped_total,
+            "modbus_errors_total": self.modbus_errors_total,
+            "last_successful_read_timestamp": self.last_successful_read_timestamp or "",
+            "last_successful_write_timestamp": self.last_successful_write_timestamp or "",
+            "current_charge_limit_w": self._last_charge_setpoint_w,
+            "current_discharge_limit_w": self._last_discharge_setpoint_w,
+            "target_charge_limit_w": self.target_charge_limit_w,
+            "target_discharge_limit_w": self.target_discharge_limit_w,
+        }
+        for name, value in metrics.items():
+            self.publish(f"minyad/bridge/metrics/{name}", value, retain=True)
 
     async def polling_loop(self) -> None:
         while not self.shutdown_event.is_set():
