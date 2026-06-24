@@ -48,3 +48,27 @@ def test_connection_failure_log_omits_traceback_at_warning(caplog):
     assert "client_id=minyad-control" in record.message
     assert "attempt=3" in record.message
     assert record.exc_info is None
+
+
+def test_publish_forwards_topic_payload_qos_and_retain():
+    client = MinyadMqttClient("minyad-trade", MqttConfig(host="broker", port=1883, keepalive=30))
+    calls = []
+
+    class Result:
+        mid = 7
+        rc = 0
+
+    def fake_publish(topic, *, payload, qos, retain):
+        calls.append({"topic": topic, "payload": payload, "qos": qos, "retain": retain})
+        return Result()
+
+    client.client.publish = fake_publish
+
+    client.publish("minyad/trade/prices/da/2026-06-25/full", "[]", retain=True, qos=1)
+
+    assert calls == [{
+        "topic": "minyad/trade/prices/da/2026-06-25/full",
+        "payload": "[]",
+        "qos": 1,
+        "retain": True,
+    }]
