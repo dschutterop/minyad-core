@@ -52,3 +52,7 @@ class InverterBackend(Protocol):
     async def set_discharge(self, watts: int) -> None:
         """Set discharge-to-load power in watts. 0 = stop discharging."""
         ...
+
+    async def stop_forced_mode(self) -> None:
+        """Stop forced charge/discharge and return to normal/eco operation."""
+        ...

@@ -1,4 +1,4 @@
-"""GoodWe backend composition: API telemetry, Modbus limit actuator only."""
+"""GoodWe backend composition: API telemetry/commands, Modbus limit actuator only."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ logger = logging.getLogger("goodwe_bridge")
 
 
 class GoodWeCompositeBackend:
-    """Use GoodWe API as primary telemetry and Modbus only as the limit actuator.
+    """Use GoodWe API as telemetry/command interface and Modbus only for limits.
 
     Live RS485 tests proved only charge/discharge limit writes on 45565/45566.
     475xx EMS force registers are not available on this inverter, so Modbus
@@ -108,8 +108,22 @@ class GoodWeCompositeBackend:
             raise RuntimeError("GoodWe Modbus actuator disabled; battery limit writes are unavailable")
         return await self.modbus_client.set_battery_limits(charge_limit_w, discharge_limit_w, state_changed=state_changed)
 
+    def _require_api_client(self) -> InverterBackend:
+        if self.api_client is None:
+            raise RuntimeError("GoodWe API command interface disabled; active battery commands are unavailable")
+        return self.api_client
+
     async def set_charge(self, watts: int) -> None:
-        await self.set_battery_limits(watts, 0)
+        await self._require_api_client().set_charge(watts)
 
     async def set_discharge(self, watts: int) -> None:
-        await self.set_battery_limits(0, watts)
+        await self._require_api_client().set_discharge(watts)
+
+    async def stop_forced_mode(self) -> None:
+        client = self._require_api_client()
+        stop = getattr(client, "stop_forced_mode", None)
+        if stop is None:
+            await client.set_charge(0)
+            await client.set_discharge(0)
+            return
+        await stop()
