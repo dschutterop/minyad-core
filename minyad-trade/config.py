@@ -24,6 +24,7 @@ class DayAheadDefaults:
     poll_time_local: str = "13:30"
     retry_attempts: int = 3
     retry_interval_minutes: int = 15
+    entsoe_api_url: str = "https://web-api.tp.entsoe.eu/api"
 
 
 @dataclass(frozen=True)
