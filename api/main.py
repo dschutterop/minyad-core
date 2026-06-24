@@ -31,6 +31,8 @@ LOGGER = logging.getLogger(__name__)
 STARTUP_AT = datetime.now(timezone.utc)
 MQTT_EVENTS: deque[dict[str, str]] = deque(maxlen=100)
 LAST_RETAINED_FETCH: dict[str, Any] = {}
+TRADE_PRICE_CACHE_LOCK = Lock()
+TRADE_PRICE_CACHE: dict[str, list[dict[str, Any]]] = {}
 _debug_enabled = False
 
 MQTT_STATUS_KEYS = {
@@ -176,6 +178,48 @@ def solar_dynamic_status_key(topic: str) -> str | None:
 
 def mqtt_status_key(topic: str) -> str | None:
     return MQTT_STATUS_KEYS.get(topic) or solar_dynamic_status_key(topic)
+
+
+def handle_trade_price_mqtt(topic: str, payload: bytes) -> None:
+    parts = topic.split("/")
+    if len(parts) != 6 or parts[:4] != ["minyad", "trade", "prices", "da"] or parts[5] != "full":
+        return
+    day = parts[4]
+    try:
+        prices = json.loads(payload.decode())
+    except json.JSONDecodeError:
+        LOGGER.warning("Ignoring invalid ENTSO-E price payload on %s", topic)
+        return
+    if not isinstance(prices, list):
+        LOGGER.warning("Ignoring non-list ENTSO-E price payload on %s", topic)
+        return
+    normalized = []
+    for point in prices:
+        if not isinstance(point, dict):
+            continue
+        try:
+            price = float(point["price_eur_kwh"])
+            starts_at = str(point["starts_at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        normalized.append({
+            "date": str(point.get("date") or day),
+            "hour": str(point.get("hour") or starts_at[11:13]),
+            "starts_at": starts_at,
+            "price_eur_kwh": price,
+        })
+    normalized.sort(key=lambda item: item["starts_at"])
+    with TRADE_PRICE_CACHE_LOCK:
+        TRADE_PRICE_CACHE[day] = normalized
+    LOGGER.info("Cached %d ENTSO-E day-ahead price points for %s", len(normalized), day)
+
+
+def latest_trade_prices() -> list[dict[str, Any]]:
+    with TRADE_PRICE_CACHE_LOCK:
+        if not TRADE_PRICE_CACHE:
+            return []
+        day = max(TRADE_PRICE_CACHE)
+        return list(TRADE_PRICE_CACHE[day])
 
 
 def handle_status_mqtt(topic: str, payload: bytes) -> None:
@@ -576,6 +620,7 @@ async def startup() -> None:
     mqtt.subscribe("minyad/grid/+", handle_status_mqtt)
     mqtt.subscribe("minyad/inverter/+", handle_status_mqtt)
     mqtt.subscribe("minyad/solar/#", handle_status_mqtt)
+    mqtt.subscribe("minyad/trade/prices/da/+/full", handle_trade_price_mqtt)
     await publish_battery_mqtt_settings()
     await publish_trade_mqtt_settings()
     asyncio.create_task(_refresh_debug_setting())
@@ -720,6 +765,17 @@ async def trade_settings(session: AsyncSession) -> dict[str, Any]:
         "poll_time_local": merged["poll_time_local"],
         "retry_attempts": int(merged["retry_attempts"]),
         "retry_interval_minutes": int(merged["retry_interval_minutes"]),
+    }
+
+
+@app.get("/trade/prices")
+async def get_trade_prices() -> dict[str, Any]:
+    prices = latest_trade_prices()
+    return {
+        "source": "ENTSO-E",
+        "unit": "EUR/kWh",
+        "date": prices[0]["date"] if prices else None,
+        "prices": prices,
     }
 
 
