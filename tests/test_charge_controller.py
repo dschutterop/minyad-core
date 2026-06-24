@@ -33,7 +33,7 @@ def test_normal_mode_without_forecast_data():
     decision = c.evaluate()
     assert decision.mode == MODE_NORMAL
     assert decision.soc_floor == 20
-    assert decision.soc_ceiling == 80
+    assert decision.soc_ceiling == 90
     assert decision.setpoint_w == 0
 
 
@@ -42,8 +42,8 @@ def test_solar_rich_recalculation_selects_headroom_mode(monkeypatch):
     monkeypatch.setattr(c, "fetch_tomorrow_ghi", lambda: 5.2)
     mode = c.recalculate_daily()
     assert mode.mode == MODE_SOLAR_RICH
-    assert mode.soc_floor == 30
-    assert mode.soc_ceiling == 60
+    assert mode.soc_floor == 20
+    assert mode.soc_ceiling == 90
     assert db["strategy.active"]["mode"] == MODE_SOLAR_RICH
     assert any(topic == "minyad/strategy/active" for topic, _ in mqtt.published)
 
@@ -54,8 +54,26 @@ def test_solar_poor_recalculation_allows_high_but_safe_ceiling(monkeypatch):
     mode = c.recalculate_daily()
     assert mode.mode == MODE_SOLAR_POOR
     assert mode.soc_floor == 20
-    assert mode.soc_ceiling == 92
+    assert mode.soc_ceiling == 90
     assert mode.charge_rate_w == 1440
+
+
+def test_configured_soc_limits_drive_default_strategy_mode():
+    c, _, _ = controller({"battery.soc_floor": "35", "battery.soc_ceiling": "70"})
+    decision = c.evaluate()
+    assert decision.soc_floor == 35
+    assert decision.soc_ceiling == 70
+
+
+def test_configured_soc_floor_blocks_discharge():
+    c, _, _ = controller({"battery.soc_floor": "35", "battery.soc_ceiling": "70"})
+    c.handle_mqtt_message("minyad/battery/soc", b"35")
+    c.handle_mqtt_message("minyad/battery/power_w", b"0")
+    c.handle_mqtt_message("minyad/grid/net_power_w", b"300")
+    decision = c.evaluate()
+    assert decision.setpoint_w == 0
+    assert decision.discharge_allowed is False
+    assert "floor breach" in decision.reason
 
 
 def test_floor_breach_enables_charge_and_blocks_discharge():
@@ -72,7 +90,7 @@ def test_floor_breach_enables_charge_and_blocks_discharge():
 
 def test_ceiling_breach_stops_charge_without_forced_discharge():
     c, _, _ = controller()
-    c.handle_mqtt_message("minyad/battery/soc", b"82")
+    c.handle_mqtt_message("minyad/battery/soc", b"92")
     c.handle_mqtt_message("minyad/battery/power_w", b"-250")
     c.handle_mqtt_message("minyad/grid/net_power_w", b"-150")
     decision = c.evaluate()
@@ -96,7 +114,7 @@ def test_manual_override_clamps_to_24h_and_100_percent():
     c.override(5, 100, fixed_now() + timedelta(days=2))
     active = db["strategy.active"]
     assert active["mode"] == "MANUAL_OVERRIDE"
-    assert active["soc_floor"] == 10
+    assert active["soc_floor"] == 5
     assert active["soc_ceiling"] == 100
 
 
