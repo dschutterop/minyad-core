@@ -61,11 +61,19 @@ def test_startup_falls_back_to_current_day_when_tomorrow_unavailable(monkeypatch
     collector = _load_collector()
     calls = []
 
+    retried = []
+
     def fake_collect(_client, _mqtt, _settings, target_day):
         calls.append(target_day.date().isoformat())
-        return len(calls) > 1
+        if len(calls) == 1:
+            raise RuntimeError("not published yet")
 
-    monkeypatch.setattr(collector, "collect_with_retries", fake_collect)
+    def fake_retry(_client, _mqtt, _settings, target_day):
+        retried.append(target_day.date().isoformat())
+        return True
+
+    monkeypatch.setattr(collector, "collect_once", fake_collect)
+    monkeypatch.setattr(collector, "collect_with_retries", fake_retry)
 
     collector.collect_startup_prices(
         object(),
@@ -75,3 +83,4 @@ def test_startup_falls_back_to_current_day_when_tomorrow_unavailable(monkeypatch
     )
 
     assert calls == ["2026-06-25", "2026-06-24"]
+    assert retried == ["2026-06-25"]
