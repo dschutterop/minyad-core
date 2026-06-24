@@ -100,3 +100,31 @@ def test_household_load_uses_idle_actual_battery_power_over_stale_discharge_setp
 
     assert result["battery_discharge_w"] == 0
     assert result["battery_charge_w"] == 0
+
+
+def test_build_health_status_reports_core_components(monkeypatch):
+    from datetime import datetime, timezone
+    from api.main import build_health_status, mqtt
+
+    now = datetime.now(timezone.utc).isoformat()
+    monkeypatch.setattr(mqtt, "connection_info", lambda: {"host": "mqtt", "port": 1883, "connected": True})
+    payload = build_health_status(
+        {
+            "soc": "80",
+            "power_w": "0",
+            "voltage": "52",
+            "mode": "idle",
+            "bridge_status": "online",
+            "bridge_last_seen": now,
+            "grid_net_power_w": "123",
+            "grid_timestamp": now,
+            "grid_status": "connected",
+            "solar_power_w": "456",
+            "solar_updated_at": now,
+        },
+        db_ok=True,
+    )
+
+    assert payload["status"] in {"ok", "warning"}
+    component_names = {component["name"] for component in payload["components"]}
+    assert {"API", "PostgreSQL", "MQTT broker", "Battery / GoodWe bridge", "DSMR / grid meter", "Solar / Enphase bridge"} <= component_names
