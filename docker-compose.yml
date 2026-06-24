@@ -123,6 +123,16 @@ services:
       - target: 8000
         published: "8002"
     networks: [minyad-internal, minyad-public]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
 
   minyad-frontend:
     build:
@@ -139,7 +149,7 @@ services:
       minyad-migrate:
         condition: service_completed_successfully
       minyad-api:
-        condition: service_started
+        condition: service_healthy
       minyad-mqtt:
         condition: service_healthy
     ports:
@@ -158,7 +168,7 @@ services:
       API_BASE_URL: http://minyad-api:8000
     depends_on:
       minyad-api:
-        condition: service_started
+        condition: service_healthy
     ports:
       - target: 8080
         published: "8085"
@@ -194,7 +204,7 @@ services:
       CYCLE_MINUTES: 15
     depends_on:
       minyad-api:
-        condition: service_started
+        condition: service_healthy
     networks: [minyad-internal, minyad-public]
 
   minyad-trade:
@@ -211,7 +221,7 @@ services:
       minyad-mqtt:
         condition: service_healthy
       minyad-api:
-        condition: service_started
+        condition: service_healthy
     networks: [minyad-internal, minyad-public]
 
   minyad-reporting:
