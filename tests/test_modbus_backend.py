@@ -89,3 +89,51 @@ def test_read_status_decodes_proven_battery_registers():
     assert status.battery_power_w == -100
     assert status.work_mode == 2
     assert status.firmware == (1, 2, 3)
+
+
+def test_modbus_adapter_skips_unchanged_target_and_counts_reason():
+    modbus = import_modbus_backend()
+
+    async def run():
+        backend = modbus.ModbusBackend(
+            "127.0.0.1",
+            502,
+            247,
+            5,
+            5000,
+            min_write_interval_s=0,
+            post_write_feedback_settle_s=0,
+        )
+        first = await backend.set_battery_limits(1000, 0, state_changed=True)
+        second = await backend.set_battery_limits(1000, 0, state_changed=True)
+        return first, second, backend.client.writes, backend.metrics
+
+    first, second, writes, metrics = asyncio.run(run())
+    assert first is True
+    assert second is False
+    assert writes == [(45565, 1000, 247), (45566, 0, 247)]
+    assert metrics.modbus_write_skipped_total == 1
+    assert metrics.skipped_by_reason["unchanged target"] == 1
+
+
+def test_modbus_adapter_enforces_min_write_interval():
+    modbus = import_modbus_backend()
+
+    async def run():
+        backend = modbus.ModbusBackend(
+            "127.0.0.1",
+            502,
+            247,
+            5,
+            5000,
+            min_write_interval_s=10,
+            post_write_feedback_settle_s=0,
+        )
+        await backend.set_battery_limits(1000, 0, state_changed=True)
+        second = await backend.set_battery_limits(2500, 0, state_changed=True)
+        return second, backend.client.writes, backend.metrics
+
+    second, writes, metrics = asyncio.run(run())
+    assert second is False
+    assert writes == [(45565, 1000, 247), (45566, 0, 247)]
+    assert metrics.skipped_by_reason["write interval not elapsed"] == 1
