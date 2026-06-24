@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 app = FastAPI(title="Minyad Frontend")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://minyad-api:8000")
 
-MENU = ["Dashboard", "History", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
+MENU = ["Dashboard", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
 
 BRAND_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
@@ -761,6 +761,42 @@ def history_body() -> str:
     """
 
 
+
+def trade_body() -> str:
+    return """
+    <section class='card'>
+      <span class='kicker'>Minyad-trade</span>
+      <h1 class='page-title'>ENTSO-E day-ahead prices</h1>
+      <p class='page-copy'>Live dashboard for the <code>minyad-trade</code> collector. It reads the retained ENTSO-E/EPEX day-ahead price payload and graphs hourly EUR/kWh values.</p>
+      <div class='history-chart-card'>
+        <div class='history-toolbar'>
+          <div><span class='tile-name'>ENTSO-E day-ahead · EUR/kWh</span><div class='history-hint' id='trade-range'>Loading…</div></div>
+          <button class='secondary' type='button' onclick='loadTradePrices()'>Refresh</button>
+        </div>
+        <div class='chart-wrap'>
+          <svg id='trade-chart' class='history-chart' viewBox='0 0 960 420' role='img' aria-label='ENTSO-E day-ahead electricity price curve'></svg>
+          <div id='trade-tooltip' class='history-tooltip' hidden></div>
+        </div>
+        <div class='history-stats'>
+          <div class='history-stat'><b id='trade-min'>--</b><span>lowest EUR/kWh</span></div>
+          <div class='history-stat'><b id='trade-avg'>--</b><span>average EUR/kWh</span></div>
+          <div class='history-stat'><b id='trade-max'>--</b><span>highest EUR/kWh</span></div>
+          <div class='history-stat'><b id='trade-count'>--</b><span>hourly points</span></div>
+        </div>
+      </div>
+      <pre id='trade-json'></pre>
+    </section>
+    <script>
+      const $=id=>document.getElementById(id); let tradePoints=[];
+      function escapeHtml(value){return String(value||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+      function fmtTime(iso){return new Date(iso).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});}
+      function drawTradeChart(){const svg=$('trade-chart'), W=960,H=420,left=64,right=20,top=28,bot=48; if(!tradePoints.length){svg.innerHTML='<foreignObject width="960" height="420"><div class="history-empty">No retained ENTSO-E prices are available yet. Check minyad-trade and ENTSOE_API_KEY.</div></foreignObject>'; return;} const min=Math.min(...tradePoints.map(p=>p.price_eur_kwh)), max=Math.max(...tradePoints.map(p=>p.price_eur_kwh)), pad=Math.max(.01,(max-min)*.15), lo=min-pad, hi=max+pad; const first=new Date(tradePoints[0].starts_at).getTime(), last=new Date(tradePoints[tradePoints.length-1].starts_at).getTime(); const x=p=>left+(W-left-right)*(new Date(p.starts_at).getTime()-first)/(last-first||1), y=v=>top+(H-top-bot)*(1-(v-lo)/(hi-lo||1)); let out=''; for(let i=0;i<=4;i++){const v=lo+i*(hi-lo)/4, yy=y(v); out+=`<line class="gridline" x1="${left}" y1="${yy}" x2="${W-right}" y2="${yy}"/><text x="10" y="${yy+4}" fill="var(--steel)" font-family="var(--mono)" font-size="10">${v.toFixed(3)}</text>`;} for(const p of tradePoints.filter((_,i)=>i%3===0)){out+=`<text x="${x(p)}" y="${H-14}" fill="var(--steel)" font-family="var(--mono)" font-size="10" text-anchor="middle">${fmtTime(p.starts_at)}</text>`;} const d=tradePoints.map((p,i)=>`${i?'L':'M'}${x(p).toFixed(1)} ${y(p.price_eur_kwh).toFixed(1)}`).join(' '); out+=`<path class="forecast-line" d="${d}"/><path class="chart-hover" d="${d}" onmousemove="showTradeTip(event)" onmouseleave="$('trade-tooltip').hidden=true"/>`; svg.innerHTML=out;}
+      function showTradeTip(event){const svg=$('trade-chart'), pt=svg.createSVGPoint(); pt.x=event.clientX; pt.y=event.clientY; const loc=pt.matrixTransform(svg.getScreenCTM().inverse()); let nearest=tradePoints[0], best=Infinity; for(const p of tradePoints){const dx=Math.abs(loc.x-(64+(960-64-20)*(new Date(p.starts_at)-new Date(tradePoints[0].starts_at))/(new Date(tradePoints.at(-1).starts_at)-new Date(tradePoints[0].starts_at)||1))); if(dx<best){best=dx; nearest=p;}} const tip=$('trade-tooltip'), wrap=svg.parentElement.getBoundingClientRect(); tip.innerHTML=`<b>ENTSO-E · ${fmtTime(nearest.starts_at)}</b><span>${nearest.price_eur_kwh.toFixed(4)} EUR/kWh</span>`; tip.style.left=(event.clientX-wrap.left)+'px'; tip.style.top=(event.clientY-wrap.top)+'px'; tip.hidden=false;}
+      async function loadTradePrices(){const res=await fetch('/api/trade/prices'); const data=res.ok?await res.json():{prices:[]}; tradePoints=(data.prices||[]).filter(p=>Number.isFinite(Number(p.price_eur_kwh))).map(p=>({...p,price_eur_kwh:Number(p.price_eur_kwh)})); $('trade-range').textContent=tradePoints.length?`${data.date||tradePoints[0].date} · ${tradePoints.length} hourly prices from ${data.source||'ENTSO-E'}`:'No retained data'; const vals=tradePoints.map(p=>p.price_eur_kwh); $('trade-min').textContent=vals.length?Math.min(...vals).toFixed(4):'--'; $('trade-max').textContent=vals.length?Math.max(...vals).toFixed(4):'--'; $('trade-avg').textContent=vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(4):'--'; $('trade-count').textContent=String(tradePoints.length||'--'); $('trade-json').textContent=JSON.stringify(data,null,2); drawTradeChart();}
+      loadTradePrices(); setInterval(loadTradePrices,300000);
+    </script>
+    """
+
 def icon(name: str) -> str:
     shapes = {
         'solar': '<rect x="4" y="7" width="12" height="9"/><path d="M4 10h12M8 7v9M12 7v9M10 16v4M7 20h6"/><circle cx="21" cy="6" r="2"/><path d="M21 1v2M21 9v2M16 6h2M24 6h2"/>',
@@ -831,6 +867,8 @@ async def section(section: str) -> str:
         return render_page(title, dsmr_body())
     if title == "History":
         return render_page(title, history_body())
+    if title == "Trade":
+        return render_page(title, trade_body())
     if title == "Solar":
         return render_page(title, solar_body())
     content = f"{title} module scaffold."
