@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 app = FastAPI(title="Minyad Frontend")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://minyad-api:8000")
 
-MENU = ["Dashboard", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
+MENU = ["Dashboard", "Health", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
 
 BRAND_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
@@ -286,6 +286,44 @@ def solar_body() -> str:
       loadSolar(); setInterval(loadSolar, 10000);
     </script>
     """
+
+def health_body() -> str:
+    return """
+    <section class='card'>
+      <span class='kicker'>Health</span>
+      <h1 class='page-title'>Minyad VPP health</h1>
+      <p class='page-copy'>Live status for the API, database, MQTT broker, telemetry bridges, and the endpoints that power the virtual power plant.</p>
+      <div style='display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:18px'>
+        <span class='status-pill' id='overall-pill'><i></i><span id='overall-status'>Loading</span></span>
+        <span class='scale-label'>Last checked <span id='health-checked'>--</span></span>
+        <button class='secondary' onclick='loadHealth()'>Refresh now</button>
+      </div>
+    </section>
+    <section class='health-grid' id='health-grid' style='display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:18px'></section>
+    <section class='card' style='margin-top:18px'>
+      <h2>Raw health payload</h2>
+      <pre id='health-raw'>Loading...</pre>
+    </section>
+    <script>
+      const esc=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+      const statusClass=s=>s==='ok'?'produce-c flash':(s==='error'?'import-c flash':'store-c flash');
+      function setOverall(status){const pill=document.getElementById('overall-pill'); pill.className='status-pill '+statusClass(status); document.getElementById('overall-status').textContent=status.toUpperCase();}
+      function componentCard(item){
+        const facts=Object.entries(item).filter(([k])=>!['name','status','detail'].includes(k)).map(([k,v])=>`<div><span class='scale-label'>${esc(k.replaceAll('_',' '))}</span><br><strong>${esc(typeof v==='object'?JSON.stringify(v):v)}</strong></div>`).join('');
+        return `<article class='card' style='background:#fff'><div class='tile-head'><span class='tile-name'>${esc(item.name)}</span><span class='status-pill ${statusClass(item.status)}'><i></i>${esc(item.status)}</span></div><p>${esc(item.detail)}</p><div class='grid' style='margin-top:12px'>${facts}</div></article>`;
+      }
+      async function loadHealth(){
+        try{
+          const res=await fetch('/api/health/status'); if(!res.ok) throw new Error('Health request failed ('+res.status+')');
+          const data=await res.json(); setOverall(data.status); document.getElementById('health-checked').textContent=new Date(data.generated_at).toLocaleString();
+          document.getElementById('health-grid').innerHTML=(data.components||[]).map(componentCard).join('');
+          document.getElementById('health-raw').textContent=JSON.stringify(data,null,2);
+        }catch(e){setOverall('error'); document.getElementById('health-grid').innerHTML=`<div class='card'><p class='error'>${esc(e.message||'Unable to load health')}</p></div>`;}
+      }
+      loadHealth(); setInterval(loadHealth, 15000);
+    </script>
+    """
+
 
 def battery_settings_body() -> str:
     return """
@@ -859,6 +897,8 @@ async def section(section: str) -> str:
         title = "Dashboard"
     if title == "Settings":
         return render_page(title, battery_settings_body())
+    if title == "Health":
+        return render_page(title, health_body())
     if title == "Battery":
         return render_page(title, battery_control_body())
     if title == "Asset Steering":
