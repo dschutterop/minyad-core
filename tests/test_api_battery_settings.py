@@ -36,3 +36,16 @@ def test_battery_settings_update_accepts_nominal_v():
 def test_battery_settings_update_rejects_invalid_max_charge_a(value):
     with pytest.raises(ValidationError):
         api_main.BatterySettingsUpdate(max_charge_a=value)
+
+
+def test_trade_settings_update_accepts_entsoe_api_url():
+    update = api_main.TradeSettingsUpdate(entsoe_api_url="https://example.test/entsoe/api")
+
+    assert update.entsoe_api_url == "https://example.test/entsoe/api"
+    assert api_main.TRADE_DEFAULTS["entsoe_api_url"] == "https://web-api.tp.entsoe.eu/api"
+
+
+@pytest.mark.parametrize("value", ["", "not-a-url", "ftp://example.test/api"])
+def test_trade_settings_update_rejects_invalid_entsoe_api_url(value):
+    with pytest.raises(ValidationError):
+        api_main.TradeSettingsUpdate(entsoe_api_url=value)

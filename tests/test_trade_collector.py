@@ -84,3 +84,28 @@ def test_startup_falls_back_to_current_day_when_tomorrow_unavailable(monkeypatch
 
     assert calls == ["2026-06-25", "2026-06-24"]
     assert retried == ["2026-06-25"]
+
+
+def test_trade_settings_apply_entsoe_api_url_from_mqtt(monkeypatch):
+    collector = _load_collector()
+    applied = []
+    store = collector.SettingsStore()
+
+    monkeypatch.setattr(collector, "apply_entsoe_api_url", applied.append)
+
+    store.apply_mqtt(
+        f"{collector.MQTT_TOPICS.settings_prefix}/entsoe_api_url",
+        b"https://example.test/entsoe/api",
+    )
+
+    assert store.get().entsoe_api_url == "https://example.test/entsoe/api"
+    assert applied == ["https://example.test/entsoe/api"]
+
+
+def test_trade_settings_reject_invalid_entsoe_api_url_from_mqtt():
+    collector = _load_collector()
+    store = collector.SettingsStore()
+
+    store.apply_mqtt(f"{collector.MQTT_TOPICS.settings_prefix}/entsoe_api_url", b"not-a-url")
+
+    assert store.get().entsoe_api_url == collector.DAY_AHEAD_DEFAULTS.entsoe_api_url

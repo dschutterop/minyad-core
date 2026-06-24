@@ -354,6 +354,7 @@ def battery_settings_body() -> str:
         <label>Poll time Europe/Amsterdam <input name='poll_time_local' type='time'></label>
         <label>Retry attempts <input name='retry_attempts' type='number' min='1' max='24'></label>
         <label>Retry interval minutes <input name='retry_interval_minutes' type='number' min='1' max='240'></label>
+        <label>ENTSO-E API URL <input name='entsoe_api_url' type='url' placeholder='https://web-api.tp.entsoe.eu/api'></label>
         <button type='submit'>Save trade settings</button>
       </form><pre id='trade-result'></pre></div>
 
@@ -420,7 +421,7 @@ def battery_settings_body() -> str:
       }
       document.getElementById('trade-settings').addEventListener('submit', async (event)=>{
         event.preventDefault(); const data = {};
-        new FormData(event.target).forEach((v,k)=>{ data[k] = k === 'bidding_zone' || k === 'poll_time_local' ? v : Number(v); });
+        new FormData(event.target).forEach((v,k)=>{ data[k] = k === 'bidding_zone' || k === 'poll_time_local' || k === 'entsoe_api_url' ? v : Number(v); });
         const res = await fetch('/api/trade/settings',{method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
         document.getElementById('trade-result').textContent = JSON.stringify(await res.json(), null, 2);
       });

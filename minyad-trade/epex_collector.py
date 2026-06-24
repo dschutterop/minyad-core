@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 import pandas as pd
 from config import AMSTERDAM_TZ, DAY_AHEAD_DEFAULTS, ENTSOE, MQTT_TOPICS
@@ -25,6 +26,7 @@ class DayAheadSettings:
     poll_time_local: str = DAY_AHEAD_DEFAULTS.poll_time_local
     retry_attempts: int = DAY_AHEAD_DEFAULTS.retry_attempts
     retry_interval_minutes: int = DAY_AHEAD_DEFAULTS.retry_interval_minutes
+    entsoe_api_url: str = DAY_AHEAD_DEFAULTS.entsoe_api_url
 
 
 class SettingsStore:
@@ -51,6 +53,9 @@ class SettingsStore:
                     updated = replace(current, retry_attempts=max(1, int(raw)))
                 elif key == "retry_interval_minutes":
                     updated = replace(current, retry_interval_minutes=max(1, int(raw)))
+                elif key == "entsoe_api_url":
+                    updated = replace(current, entsoe_api_url=normalize_entsoe_api_url(raw))
+                    apply_entsoe_api_url(updated.entsoe_api_url)
                 else:
                     LOGGER.debug("Ignoring unknown trade setting topic=%s", topic)
                     return
@@ -60,6 +65,20 @@ class SettingsStore:
             if updated != current:
                 self._settings = updated
                 LOGGER.info("Trade settings updated: %s", updated)
+
+
+def normalize_entsoe_api_url(value: str) -> str:
+    url = value.strip() or DAY_AHEAD_DEFAULTS.entsoe_api_url
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("entsoe_api_url must be an absolute HTTP(S) URL")
+    return url
+
+
+def apply_entsoe_api_url(url: str) -> None:
+    import entsoe.entsoe as entsoe_module
+
+    entsoe_module.URL = normalize_entsoe_api_url(url)
 
 
 def next_poll_time(now: datetime, poll_time_local: str) -> datetime:
@@ -180,6 +199,7 @@ def main() -> None:
     mqtt.subscribe(f"{MQTT_TOPICS.settings_prefix}/#", store.apply_mqtt)
     from entsoe import EntsoePandasClient
 
+    apply_entsoe_api_url(store.get().entsoe_api_url)
     client = EntsoePandasClient(api_key=api_key)
     LOGGER.info(
         "minyad-trade started with settings: %s (ENTSOE_API_KEY configured length=%d)",
