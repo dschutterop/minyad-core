@@ -175,10 +175,15 @@ class FakeGridController:
     def __init__(self):
         self.samples = []
         self.state = control_main.ControlState.IDLE
+        self.start_w = 500
+        self.discharge_start_w = -300
         self.override_mode = control_main.OverrideMode.NONE
 
     def tick(self, surplus_w):
         self.samples.append(surplus_w)
+        if surplus_w >= 500:
+            self.state = control_main.ControlState.CHARGING
+            return self.state
         if surplus_w <= -300:
             self.state = control_main.ControlState.DISCHARGING
             return self.state
@@ -201,6 +206,42 @@ def test_grid_net_power_import_is_converted_to_negative_surplus(monkeypatch):
     assert ("control", "state", "DISCHARGING") in app.mqtt.published
     assert stored["state"] == "DISCHARGING"
 
+
+
+def test_below_floor_export_charges_instead_of_adopting_idle_discharge(monkeypatch):
+    stored = {}
+
+    async def capture_store_status(**values):
+        stored.update(values)
+
+    monkeypatch.setattr(control_main, "store_status", capture_store_status)
+    app = make_available_app()
+    app.controller = FakeGridController()
+    app.latest_battery_soc = 10
+    app.latest_battery_power_w = 77
+
+    asyncio.run(app.handle_message("minyad/grid/net_power_w", b"-1971"))
+
+    assert app.controller.samples == [1971]
+    assert ("control", "charge_w", 1971) in app.mqtt.published
+    assert ("control", "discharge_w", 0) in app.mqtt.published
+    assert ("control", "state", "CHARGING") in app.mqtt.published
+    assert ("control", "state", "HYSTERESE") not in app.mqtt.published
+    assert stored["state"] == "CHARGING"
+
+
+def test_below_floor_observed_idle_discharge_is_not_rebalanced(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeGridController()
+    app.latest_battery_soc = 10
+    app.latest_battery_power_w = 77
+
+    rebalanced = asyncio.run(app._rebalance_untracked_idle_discharge(-1971))
+
+    assert rebalanced is False
+    assert app.controller.state is control_main.ControlState.IDLE
+    assert ("control", "discharge_w", 0) not in app.mqtt.published
 
 def test_start_charging_tracks_current_grid_export(monkeypatch):
     monkeypatch.setattr(control_main, "store_status", noop_store_status)
