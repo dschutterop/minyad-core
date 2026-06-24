@@ -64,3 +64,33 @@ GOODWE_DEFAULT_DISCHARGE_LIMIT_W=6000
 GOODWE_CONSERVATIVE_CHARGE_LIMIT_W=1500
 GOODWE_CONSERVATIVE_DISCHARGE_LIMIT_W=1500
 ```
+
+## Charge target ceilings and slow-balance trimming
+
+The control service logs slow-balance charge decisions before and after target
+clamping. For `CHARGING`, export trimming first computes
+`raw_target_power_w = previous_target_power_w + balance_adjustment_w`; it then
+clamps that raw target to the effective charge cap.
+
+Charge caps that can appear in the slow-balance log are:
+
+* `configured_max_charge_w` — the database setting `battery.max_charge_w`. The
+  schema migrations seed this to `1440`, so a target stuck at exactly `1440W`
+  is normally the configured default unless the setting has been raised.
+* `env_default_max_charge_power_w` — the control-service `MAX_CHARGE_POWER_W`
+  fallback used only when `battery.max_charge_w` is absent.
+* `battery_max_charge_a` and `battery_nominal_v` — when both settings are
+  present, their product is logged as `battery_hardware_charge_cap_w` and is
+  also the Modbus/API-style hardware cap.
+* `api_max_charge_w` and `modbus_charge_limit_cap_w` — the control-service view
+  of the API and Modbus actuator ceilings involved in the charge command path.
+* `safety_min_charge_power_w` — the lower safety clamp of `0W`.
+
+The final cap is logged as `effective_charge_cap_w`, and `clamp_reason` names
+which input caused the clamp. For example, with the seeded defaults
+`battery.max_charge_w=1440`, `battery.max_charge_a=30`, and
+`battery.nominal_v=48`, a slow-balance export that computes a raw target of
+`1940W` will remain at `1440W` and log
+`clamp_reason=battery.max_charge_w+battery.max_charge_a*battery.nominal_v`.
+Raise `battery.max_charge_w` (and, if present, the amp/voltage hardware limit)
+to allow upward slow-balance trimming above `1440W`.
