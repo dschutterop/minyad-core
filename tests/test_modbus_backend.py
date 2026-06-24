@@ -77,7 +77,7 @@ def test_dry_run_clamps_but_skips_modbus_writes():
     assert asyncio.run(run()) is None
 
 
-def test_read_status_decodes_proven_battery_registers():
+def test_read_status_reads_only_current_limit_registers_for_debug():
     modbus = import_modbus_backend()
 
     async def run():
@@ -85,10 +85,7 @@ def test_read_status_decodes_proven_battery_registers():
         return await backend.read_status()
 
     status = asyncio.run(run())
-    assert status.battery_voltage_v == 52.0
-    assert status.battery_power_w == -100
-    assert status.work_mode == 2
-    assert status.firmware == (1, 2, 3)
+    assert status == {"charge_limit_w": 0, "discharge_limit_w": 0}
 
 
 def test_modbus_adapter_skips_unchanged_target_and_counts_reason():

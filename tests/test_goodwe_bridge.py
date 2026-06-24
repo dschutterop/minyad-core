@@ -119,7 +119,7 @@ class Backend:
 
 def make_config():
     return goodwe_bridge.Config(
-        goodwe_modbus_enabled=True,
+        goodwe_modbus_limits_enabled=True,
         goodwe_api_enabled=True,
         goodwe_api_host="http://goodwe",
         inverter_max_w=5000,
@@ -142,6 +142,10 @@ def make_config():
         min_write_interval_s=0.0,
         min_target_change_w=0,
         write_refresh_interval_s=600.0,
+        default_charge_limit_w=6000,
+        default_discharge_limit_w=6000,
+        conservative_charge_limit_w=1500,
+        conservative_discharge_limit_w=1500,
     )
 
 
@@ -326,3 +330,39 @@ def test_bridge_does_not_log_success_when_backend_skips_actuator_write(monkeypat
     assert bridge.modbus_writes_total == 0
     assert bridge.modbus_write_skipped_total == 1
     assert bridge._last_charge_setpoint_w == 0
+
+
+class MutablePowerBackend(Backend):
+    def __init__(self):
+        super().__init__()
+        self.power = 100
+
+    async def read_state(self):
+        state = await super().read_state()
+        return InverterState(
+            battery_soc=state.battery_soc,
+            battery_soh=state.battery_soh,
+            battery_power_w=self.power,
+            battery_voltage_v=state.battery_voltage_v,
+            battery_temperature_c=state.battery_temperature_c,
+            battery_mode=state.battery_mode,
+            inverter_temperature_c=state.inverter_temperature_c,
+            grid_power_w=state.grid_power_w,
+        )
+
+
+def test_warns_when_charge_limit_does_not_force_charging(monkeypatch, caplog):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = MutablePowerBackend()
+        config = make_config()
+        bridge = goodwe_bridge.GoodWeBridge(config, backend)
+        bridge.control_state = "CHARGING"
+        await bridge.poll_once()
+        await bridge.handle_charge_setpoint(1500)
+        await bridge.poll_once()
+
+    asyncio.run(run())
+
+    assert "charge limit applied but inverter did not start charging; limit registers are not force setpoints" in caplog.text

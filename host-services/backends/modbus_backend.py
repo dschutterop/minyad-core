@@ -1,8 +1,11 @@
 """Modbus TCP backend for a GoodWe inverter behind a TCP-to-RS485 gateway.
 
-This adapter intentionally stays dumb: it knows GoodWe register addresses and
-how to read/write them, but it does not decide when the battery should charge or
-discharge. Minyad's control service supplies both actuator values.
+This adapter is only the actuator for battery limit ceilings. GoodWe API is the
+primary telemetry source; P1 data is the primary import/export decision source.
+
+Live tests proved registers 45565/45566 are writable. The 475xx EMS force
+registers were tested and are not available on this inverter, so these limits
+are not active force-charge/force-discharge setpoints.
 """
 
 from __future__ import annotations
@@ -20,27 +23,12 @@ logger = logging.getLogger("goodwe_bridge")
 
 REG_BATTERY_CHARGE_LIMIT_W = 45565
 REG_BATTERY_DISCHARGE_LIMIT_W = 45566
-REG_BATTERY_VOLTAGE = 35180
-REG_BATTERY_POWER = 35182
-REG_WORK_MODE = 35187
-REG_FIRMWARE_1 = 35016
-REG_FIRMWARE_2 = 35017
-REG_FIRMWARE_3 = 35020
 
 POLL_INTERVAL_SEC = 2
 MIN_WRITE_INTERVAL_SEC = 10
 MIN_TARGET_CHANGE_W = 150
 WRITE_REFRESH_INTERVAL_SEC = 600
 POST_WRITE_FEEDBACK_SETTLE_SEC = 1.0
-
-
-@dataclass(frozen=True)
-class ModbusStatus:
-    battery_power_w: int
-    battery_voltage_v: float
-    work_mode: int
-    firmware: tuple[int, int, int]
-
 
 
 @dataclass
@@ -64,10 +52,6 @@ class ModbusMetrics:
 def _u16(value: int) -> int:
     return value & 0xFFFF
 
-
-def _s32(high: int, low: int) -> int:
-    value = ((_u16(high) << 16) | _u16(low)) & 0xFFFFFFFF
-    return value - 0x100000000 if value & 0x80000000 else value
 
 
 class ModbusBackend:
@@ -131,20 +115,13 @@ class ModbusBackend:
     def _clamp_watts(self, watts: int) -> int:
         return max(0, min(self.max_w, int(watts)))
 
-    async def read_status(self) -> ModbusStatus:
-        battery = await self._read_holding_registers(REG_BATTERY_VOLTAGE, REG_WORK_MODE - REG_BATTERY_VOLTAGE + 1)
-        firmware_1 = (await self._read_holding_registers(REG_FIRMWARE_1, 2))[:2]
-        firmware_3 = (await self._read_holding_registers(REG_FIRMWARE_3, 1))[0]
+    async def read_status(self) -> dict[str, int]:
+        return await self.read_current_limits()
 
-        def b(address: int) -> int:
-            return battery[address - REG_BATTERY_VOLTAGE]
-
-        return ModbusStatus(
-            battery_power_w=_s32(b(REG_BATTERY_POWER), b(REG_BATTERY_POWER + 1)),
-            battery_voltage_v=_u16(b(REG_BATTERY_VOLTAGE)) / 10.0,
-            work_mode=_u16(b(REG_WORK_MODE)),
-            firmware=(_u16(firmware_1[0]), _u16(firmware_1[1]), _u16(firmware_3)),
-        )
+    async def read_current_limits(self) -> dict[str, int]:
+        """Read proven battery limit registers for verification/debug only."""
+        regs = await self._read_holding_registers(REG_BATTERY_CHARGE_LIMIT_W, 2)
+        return {"charge_limit_w": _u16(regs[0]), "discharge_limit_w": _u16(regs[1])}
 
     async def set_battery_limits(self, charge_limit_w: int, discharge_limit_w: int, *, state_changed: bool = False) -> bool:
         charge = self._clamp_watts(charge_limit_w)
@@ -193,15 +170,4 @@ class ModbusBackend:
         await self.set_battery_limits(0, watts)
 
     async def read_state(self) -> InverterState:
-        status = await self.read_status()
-        mode = {0: "idle", 1: "charge", 2: "discharge"}.get(status.work_mode, "idle")
-        return InverterState(
-            battery_soc=None,
-            battery_soh=None,
-            battery_power_w=status.battery_power_w,
-            battery_voltage_v=status.battery_voltage_v,
-            battery_temperature_c=None,
-            battery_mode=mode,
-            inverter_temperature_c=None,
-            grid_power_w=None,
-        )
+        raise RuntimeError("Modbus telemetry disabled: use GoodWe API for inverter telemetry")
