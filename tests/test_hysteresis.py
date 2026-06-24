@@ -142,6 +142,53 @@ def test_cooldown_still_applies_when_same_direction_trigger_persists():
     assert controller.state is ControlState.COOLDOWN
 
 
+def test_cooldown_expiry_immediately_reevaluates_without_idle_dwell(caplog):
+    """Persistent export after charge cooldown should trim up immediately."""
+    clock = FakeClock()
+    events = []
+    controller = HysteresisController(
+        start_w=500,
+        stop_w=150,
+        discharge_start_w=-300,
+        discharge_stop_w=-100,
+        start_duration=120,
+        stop_duration=5,
+        cooldown=180,
+        on_start=lambda: events.append("trim_up"),
+        on_stop=lambda: events.append("charge_stop"),
+        on_discharge_start=lambda: events.append("trim_down"),
+        on_discharge_stop=lambda: events.append("discharge_stop"),
+        clock=clock,
+    )
+
+    # Initial state: charging at roughly 10A.  A drop below the stop threshold
+    # sends the controller into its stabilization cooldown.
+    controller.tick(1800)
+    clock.advance(120)
+    assert controller.tick(1800) is ControlState.CHARGING
+    assert events == ["trim_up"]
+
+    controller.tick(100)
+    clock.advance(5)
+    assert controller.tick(100) is ControlState.COOLDOWN
+    assert events == ["trim_up", "charge_stop"]
+
+    # Once cooldown expires, the latest export sample is evaluated immediately;
+    # the 120s IDLE start-duration dwell must not run a second time.
+    caplog.set_level("INFO")
+    clock.advance(180)
+    result = controller.tick(1800, grid_power_w=-1800, charge_current_target=10)
+
+    assert result is ControlState.CHARGING
+    assert controller.state is ControlState.CHARGING
+    assert events == ["trim_up", "charge_stop", "trim_up"]
+    assert "Cooldown expired, performing immediate control evaluation" in caplog.text
+    assert "current_fsm_state=COOLDOWN" in caplog.text
+    assert "grid_power=-1800W" in caplog.text
+    assert "calculated_surplus=1800W" in caplog.text
+    assert "current_charge_current_target=10" in caplog.text
+
+
 def test_charge_and_discharge_paths_are_mutually_exclusive():
     clock = FakeClock()
     events = []

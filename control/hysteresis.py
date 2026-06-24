@@ -96,7 +96,13 @@ class HysteresisController:
             self._pause_until = None
             LOGGER.info("%s override cleared", self._timestamp())
 
-    def tick(self, surplus_w: int) -> ControlState | None:
+    def tick(
+        self,
+        surplus_w: int,
+        *,
+        grid_power_w: int | None = None,
+        charge_current_target: int | None = None,
+    ) -> ControlState | None:
         """Evaluate a new surplus sample and return the new state on transition."""
         with self._lock:
             now = self._clock()
@@ -108,7 +114,16 @@ class HysteresisController:
 
             if self._state is ControlState.COOLDOWN:
                 if self._cooldown_until is not None and now >= self._cooldown_until:
-                    return self._transition(ControlState.IDLE, "cooldown elapsed")
+                    LOGGER.info(
+                        "%s Cooldown expired, performing immediate control evaluation current_fsm_state=%s grid_power=%sW calculated_surplus=%sW current_charge_current_target=%s",
+                        self._timestamp(),
+                        self._state.value,
+                        grid_power_w,
+                        surplus_w,
+                        charge_current_target,
+                    )
+                    self._transition(ControlState.IDLE, "cooldown elapsed")
+                    return self._evaluate_idle_sample(surplus_w, now, immediate=True) or ControlState.IDLE
                 # Allow the opposite direction to bypass remaining cooldown if its
                 # trigger has been sustained for start_duration — this prevents a
                 # 10-minute blind spot when e.g. solar appears right after discharge.
@@ -128,22 +143,7 @@ class HysteresisController:
                 return None
 
             if self._state is ControlState.IDLE:
-                if surplus_w >= self.start_w:
-                    self._discharge_since = None
-                    if self._charge_since is None:
-                        self._charge_since = now
-                    if now - self._charge_since >= self.start_duration:
-                        return self._transition(ControlState.CHARGING, f"surplus {surplus_w}W sustained above {self.start_w}W")
-                elif surplus_w <= self.discharge_start_w:
-                    self._charge_since = None
-                    if self._discharge_since is None:
-                        self._discharge_since = now
-                    if now - self._discharge_since >= self.start_duration:
-                        return self._transition(ControlState.DISCHARGING, f"import {surplus_w}W sustained below {self.discharge_start_w}W")
-                else:
-                    self._charge_since = None
-                    self._discharge_since = None
-                return None
+                return self._evaluate_idle_sample(surplus_w, now, immediate=False)
 
             if self._state is ControlState.CHARGING:
                 if surplus_w < self.stop_w:
@@ -168,6 +168,28 @@ class HysteresisController:
                 else:
                     self._stop_since = None
             return None
+
+    def _evaluate_idle_sample(self, surplus_w: int, now: float, *, immediate: bool) -> ControlState | None:
+        if surplus_w >= self.start_w:
+            self._discharge_since = None
+            if immediate:
+                return self._transition(ControlState.CHARGING, f"surplus {surplus_w}W above {self.start_w}W after cooldown")
+            if self._charge_since is None:
+                self._charge_since = now
+            if now - self._charge_since >= self.start_duration:
+                return self._transition(ControlState.CHARGING, f"surplus {surplus_w}W sustained above {self.start_w}W")
+        elif surplus_w <= self.discharge_start_w:
+            self._charge_since = None
+            if immediate:
+                return self._transition(ControlState.DISCHARGING, f"import {surplus_w}W below {self.discharge_start_w}W after cooldown")
+            if self._discharge_since is None:
+                self._discharge_since = now
+            if now - self._discharge_since >= self.start_duration:
+                return self._transition(ControlState.DISCHARGING, f"import {surplus_w}W sustained below {self.discharge_start_w}W")
+        else:
+            self._charge_since = None
+            self._discharge_since = None
+        return None
 
     def _transition(self, new_state: ControlState, reason: str) -> ControlState:
         old_state = self._state
