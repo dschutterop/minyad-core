@@ -84,9 +84,14 @@ class P1Reader:
             return
         delivered = float(self._values[DELIVERED_TOPIC])
         returned = float(self._values[RETURNED_TOPIC])
-        net_power_w = round((returned - delivered) * 1000)
+        # Use the same sign convention as the host-side DSMR bridge and the
+        # control service: positive means grid import (delivered by the grid),
+        # negative means grid export (returned to the grid).  This lets evening
+        # import such as 1400 W trigger battery discharge instead of being
+        # mistaken for solar surplus.
+        net_power_w = round((delivered - returned) * 1000)
         per_phase_w = {
-            phase: round((float(self._values[PHASE_RETURNED_TOPICS[phase]]) - float(self._values[PHASE_DELIVERED_TOPICS[phase]])) * 1000)
+            phase: round((float(self._values[PHASE_DELIVERED_TOPICS[phase]]) - float(self._values[PHASE_RETURNED_TOPICS[phase]])) * 1000)
             for phase in ("L1", "L2", "L3")
         }
         timestamp = self._values[TIMESTAMP_TOPIC]
