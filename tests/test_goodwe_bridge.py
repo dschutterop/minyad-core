@@ -111,7 +111,7 @@ class Backend:
     async def set_discharge(self, watts):
         self.discharge_setpoints.append(watts)
 
-    async def set_battery_limits(self, charge_limit_w, discharge_limit_w):
+    async def set_battery_limits(self, charge_limit_w, discharge_limit_w, *, state_changed=False):
         self.battery_limits.append((charge_limit_w, discharge_limit_w))
         self.charge_setpoints.append(charge_limit_w)
         self.discharge_setpoints.append(discharge_limit_w)
@@ -308,3 +308,21 @@ def test_poll_once_skips_unavailable_modbus_values_instead_of_publishing_zeroes(
     assert "minyad/battery/soc" not in topics
     assert "minyad/battery/soh" not in topics
     assert "minyad/inverter/grid_power_w" not in topics
+
+
+def test_bridge_does_not_log_success_when_backend_skips_actuator_write(monkeypatch):
+    class SkippingBackend(Backend):
+        async def set_battery_limits(self, charge_limit_w, discharge_limit_w, *, state_changed=False):
+            await super().set_battery_limits(charge_limit_w, discharge_limit_w, state_changed=state_changed)
+            return False
+
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+    bridge = goodwe_bridge.GoodWeBridge(make_config(), SkippingBackend())
+    bridge._last_p1_grid_power_w = -2493
+    bridge._last_p1_grid_power_monotonic = goodwe_bridge.monotonic()
+
+    asyncio.run(bridge.handle_charge_setpoint(2411))
+
+    assert bridge.modbus_writes_total == 0
+    assert bridge.modbus_write_skipped_total == 1
+    assert bridge._last_charge_setpoint_w == 0
