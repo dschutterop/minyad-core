@@ -85,10 +85,10 @@ class GoodWeCompositeBackend:
             api_error=api_error,
         )
 
-    async def set_battery_limits(self, charge_limit_w: int, discharge_limit_w: int) -> None:
+    async def set_battery_limits(self, charge_limit_w: int, discharge_limit_w: int, *, state_changed: bool = False) -> bool | None:
         if self.modbus_client is None:
             raise RuntimeError("GoodWe Modbus actuator disabled; battery limit writes are unavailable")
-        await self.modbus_client.set_battery_limits(charge_limit_w, discharge_limit_w)
+        return await self.modbus_client.set_battery_limits(charge_limit_w, discharge_limit_w, state_changed=state_changed)
 
     async def set_charge(self, watts: int) -> None:
         await self.set_battery_limits(watts, 0)

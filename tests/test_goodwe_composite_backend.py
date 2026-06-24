@@ -36,8 +36,10 @@ class FakeClient:
             raise self.error
         return self.result
 
-    async def set_battery_limits(self, charge_limit_w, discharge_limit_w):
+    async def set_battery_limits(self, charge_limit_w, discharge_limit_w, *, state_changed=False):
         self.limits.append((charge_limit_w, discharge_limit_w))
+        self.state_changed = state_changed
+        return True
 
 
 def read(backend):
@@ -146,3 +148,12 @@ def test_protocol_logs_include_source_prefixes(caplog):
     messages = [record.getMessage() for record in caplog.records]
     assert any(message.startswith("[modbus] GoodWe modbus read failed") for message in messages)
     assert any(message.startswith("[api] GoodWe api read failed") for message in messages)
+
+
+def test_set_battery_limits_returns_modbus_write_result_and_passes_state_changed():
+    modbus = FakeClient()
+    result = asyncio.run(GoodWeCompositeBackend(modbus, None).set_battery_limits(1200, 0, state_changed=True))
+
+    assert result is True
+    assert modbus.limits == [(1200, 0)]
+    assert modbus.state_changed is True

@@ -71,7 +71,7 @@ class GoodWeBackend:
             await self._wait_for_request_slot()
             return dict(await inv.read_runtime_data())
 
-    async def set_battery_limits(self, charge_limit_w: int, discharge_limit_w: int) -> None:
+    async def set_battery_limits(self, charge_limit_w: int, discharge_limit_w: int, *, state_changed: bool = False) -> bool:
         charge_pct = self._watts_to_pct(charge_limit_w)
         discharge_pct = self._watts_to_pct(discharge_limit_w)
         async with self._request_lock:
@@ -85,6 +85,7 @@ class GoodWeBackend:
             max(0, min(self.max_w, int(discharge_limit_w))),
             discharge_pct,
         )
+        return True
 
     async def set_charge(self, watts: int) -> None:
         await self.set_battery_limits(watts, 0)
