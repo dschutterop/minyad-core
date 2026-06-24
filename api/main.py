@@ -83,6 +83,8 @@ RETAINED_STATUS_TIMEOUT_SECONDS = 1.0
 MQTT_BATTERY_SETTINGS_PREFIX = "minyad/settings/battery"
 MQTT_BATTERY_SETTING_TOPICS = {
     "inverter_poll_interval_s": f"{MQTT_BATTERY_SETTINGS_PREFIX}/inverter_poll_interval_s",
+    "soc_floor": f"{MQTT_BATTERY_SETTINGS_PREFIX}/soc_floor",
+    "soc_ceiling": f"{MQTT_BATTERY_SETTINGS_PREFIX}/soc_ceiling",
 }
 MQTT_TRADE_SETTINGS_PREFIX = "minyad/settings/trade"
 MQTT_TRADE_SETTING_TOPICS = {
@@ -100,6 +102,8 @@ BATTERY_KEYS = {
     "cooldown": (60, 7200),
     "max_charge_w": (100, 5000),
     "max_discharge_w": (0, 5000),
+    "soc_floor": (0, 100),
+    "soc_ceiling": (0, 100),
     "nominal_v": (40, 60),
     "inverter_retries": (1, 10),
     "inverter_delay": (1, 30),
@@ -674,6 +678,8 @@ class BatterySettingsUpdate(BaseModel):
     cooldown: int | None = None
     max_charge_w: int | None = None
     max_discharge_w: int | None = None
+    soc_floor: int | None = Field(default=None, ge=0, le=100)
+    soc_ceiling: int | None = Field(default=None, ge=0, le=100)
     inverter_ip: str | None = None
     inverter_retries: int | None = None
     inverter_delay: int | None = None
@@ -1607,6 +1613,21 @@ async def mark_agent_message_read(message_id: int, session: AsyncSession = Depen
 @app.post("/battery/override")
 async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     settings = await battery_settings(session)
+    soc_floor = int(settings.get("soc_floor", 20))
+    soc_ceiling = int(settings.get("soc_ceiling", 90))
+    payload_status = battery_status_payload(latest_mqtt_status())
+    soc = payload_status.get("soc")
+    if soc in (None, ""):
+        db_soc = await session.execute(text("select value from settings where key = 'battery.status.soc'"))
+        soc = db_soc.scalar_one_or_none()
+    try:
+        soc_value = float(soc) if soc not in (None, "") else None
+    except (TypeError, ValueError):
+        soc_value = None
+    if request.mode == "force_discharge" and soc_value is not None and soc_value <= soc_floor:
+        raise HTTPException(status_code=422, detail=f"discharge blocked because SoC {soc_value:g}% is at or below configured floor {soc_floor}%")
+    if request.mode == "force_on" and soc_value is not None and soc_value >= soc_ceiling:
+        raise HTTPException(status_code=422, detail=f"charge blocked because SoC {soc_value:g}% is at or above configured ceiling {soc_ceiling}%")
     configured_max_w = int(settings.get("max_charge_w", 0))
     hardware_max_w = int(settings.get("max_charge_a", 30)) * int(settings.get("nominal_v", 48))
     max_charge_w = min(configured_max_w, hardware_max_w)
@@ -1638,11 +1659,13 @@ async def clear_battery_override(session: AsyncSession = Depends(get_session)) -
     return {"status": "ok", "mode": "none"}
 
 
+@app.get("/api/battery/settings")
 @app.get("/battery/settings")
 async def get_battery_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     return await battery_settings(session)
 
 
+@app.put("/api/battery/settings")
 @app.put("/battery/settings")
 async def update_battery_settings(update: BatterySettingsUpdate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     data = update.model_dump(exclude_unset=True)
@@ -1650,6 +1673,8 @@ async def update_battery_settings(update: BatterySettingsUpdate, session: AsyncS
     merged = {**current, **data}
     if "stop_w" in merged and "start_w" in merged and int(merged["stop_w"]) > int(merged["start_w"]):
         raise HTTPException(status_code=422, detail="stop_w must be less than or equal to start_w")
+    if "soc_floor" in merged and "soc_ceiling" in merged and int(merged["soc_floor"]) >= int(merged["soc_ceiling"]):
+        raise HTTPException(status_code=422, detail="soc_floor must be lower than soc_ceiling")
     for key, value in data.items():
         if key in BATTERY_KEYS:
             lo, hi = BATTERY_KEYS[key]

@@ -227,6 +227,7 @@ class ControlApp:
             command = json.loads(decoded)
             if command.get("mode") == "reload_settings":
                 await self.reload_settings()
+                await self.enforce_soc_guard_now()
             else:
                 await self.apply_override(command)
             return
