@@ -119,7 +119,8 @@ class Backend:
 
 def make_config():
     return goodwe_bridge.Config(
-        inverter_backend="goodwe",
+        goodwe_modbus_enabled=True,
+        goodwe_api_enabled=True,
         goodwe_api_host="http://goodwe",
         inverter_max_w=5000,
         inverter_retries=5,
