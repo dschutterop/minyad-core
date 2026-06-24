@@ -63,6 +63,7 @@ async def load_settings() -> dict[str, Any]:
         "cooldown",
         "max_charge_w",
         "max_charge_a",
+        "nominal_v",
         "max_discharge_w",
         "soc_floor",
         "soc_ceiling",
@@ -492,11 +493,64 @@ class ControlApp:
     def _clamp(value: float, minimum: float, maximum: float) -> float:
         return max(minimum, min(value, maximum))
 
+    def _charge_cap_inputs(self) -> dict[str, int | None]:
+        configured_max_charge_w = self.settings.get("max_charge_w")
+        max_charge_a = self.settings.get("max_charge_a")
+        nominal_v = self.settings.get("nominal_v")
+        hardware_charge_cap_w = None
+        if max_charge_a is not None and nominal_v is not None:
+            hardware_charge_cap_w = int(max_charge_a) * int(nominal_v)
+        configured_cap = int(configured_max_charge_w) if configured_max_charge_w is not None else None
+        api_max_charge_w = configured_cap
+        if api_max_charge_w is not None and hardware_charge_cap_w is not None:
+            api_max_charge_w = min(api_max_charge_w, hardware_charge_cap_w)
+        return {
+            "configured_max_charge_w": configured_cap,
+            "env_default_max_charge_power_w": MAX_CHARGE_POWER_W,
+            "battery_max_charge_a": int(max_charge_a) if max_charge_a is not None else None,
+            "battery_nominal_v": int(nominal_v) if nominal_v is not None else None,
+            "battery_hardware_charge_cap_w": hardware_charge_cap_w,
+            "api_max_charge_w": api_max_charge_w,
+            "modbus_charge_limit_cap_w": hardware_charge_cap_w,
+            "safety_min_charge_power_w": 0,
+        }
+
+    @staticmethod
+    def _effective_cap_from_inputs(inputs: dict[str, int | None], configured_key: str, env_default_key: str, hardware_key: str) -> int:
+        configured_cap = inputs[configured_key]
+        cap = configured_cap if configured_cap is not None else int(inputs[env_default_key] or 0)
+        hardware_cap = inputs[hardware_key]
+        if hardware_cap is not None:
+            cap = min(cap, hardware_cap)
+        return int(cap)
+
     def _max_charge_power_w(self) -> int:
-        return int(self.settings.get("max_charge_w", MAX_CHARGE_POWER_W))
+        inputs = self._charge_cap_inputs()
+        return self._effective_cap_from_inputs(inputs, "configured_max_charge_w", "env_default_max_charge_power_w", "battery_hardware_charge_cap_w")
 
     def _max_discharge_power_w(self) -> int:
         return int(self.settings.get("max_discharge_w", MAX_DISCHARGE_POWER_W))
+
+    @staticmethod
+    def _clamp_reason(raw_target: int, clamped_target: int, cap_w: int, cap_source: str) -> str:
+        if raw_target < 0:
+            return "safety_min_charge_power_w"
+        if raw_target > cap_w:
+            return cap_source
+        if clamped_target != raw_target:
+            return "unknown"
+        return "none"
+
+    @staticmethod
+    def _charge_cap_source(inputs: dict[str, int | None], effective_cap_w: int) -> str:
+        sources = []
+        if inputs["configured_max_charge_w"] == effective_cap_w:
+            sources.append("battery.max_charge_w")
+        if inputs["battery_hardware_charge_cap_w"] == effective_cap_w:
+            sources.append("battery.max_charge_a*battery.nominal_v")
+        if inputs["configured_max_charge_w"] is None and inputs["env_default_max_charge_power_w"] == effective_cap_w:
+            sources.append("MAX_CHARGE_POWER_W_env_default")
+        return "+".join(sources) if sources else "effective_charge_cap_w"
 
     async def apply_slow_balance(self, desired_state: ControlState) -> None:
         now = monotonic()
@@ -504,6 +558,7 @@ class ControlApp:
             return
         self._last_balance_at = now
         previous_target = int(self.setpoint_w)
+        raw_target = previous_target
         new_target = previous_target
         grid_power_w = int(self.latest_grid_power_w)
         residual_export_w = max(0, -grid_power_w - GRID_DEADBAND_W)
@@ -513,20 +568,40 @@ class ControlApp:
         soc = self.latest_battery_soc
         soc_floor = int(self.settings.get("soc_floor", SOC_FLOOR_DEFAULT))
         soc_ceiling = int(self.settings.get("soc_ceiling", SOC_CEILING_DEFAULT))
+        max_charge_power_w = self._max_charge_power_w()
+        effective_charge_cap_w = max_charge_power_w
+        charge_cap_inputs = self._charge_cap_inputs()
+        clamp_reason = "none"
 
         if desired_state is ControlState.CHARGING:
             if soc is not None and soc >= soc_ceiling:
                 reason = "slow_balance_soc_ceiling"
-                new_target = 0
+                raw_target = 0
+                new_target = raw_target
             elif residual_export_w > 0:
                 adjustment = int(self._clamp(residual_export_w * BALANCE_GAIN, BALANCE_STEP_W, 500))
-                new_target = previous_target + adjustment
+                raw_target = previous_target + adjustment
+                new_target = raw_target
                 reason = "slow_balance_export"
             elif residual_import_w > 0:
                 adjustment = -int(self._clamp(residual_import_w * BALANCE_GAIN, BALANCE_STEP_W, 500))
-                new_target = previous_target + adjustment
+                raw_target = previous_target + adjustment
+                new_target = raw_target
                 reason = "slow_balance_import"
-            new_target = max(0, min(new_target, self._max_charge_power_w()))
+            charge_cap_inputs = self._charge_cap_inputs()
+            max_charge_power_w = self._max_charge_power_w()
+            effective_charge_cap_w = max_charge_power_w
+            charge_cap_source = self._charge_cap_source(charge_cap_inputs, effective_charge_cap_w)
+            LOGGER.debug(
+                "Slow balance pre-clamp desired_state=%s p1_grid_power_w=%s previous_target_power_w=%s raw_target_power_w=%s balance_adjustment_w=%s max_charge_power_w=%s effective_charge_cap_w=%s cap_inputs=%s",
+                desired_state.value, grid_power_w, previous_target, raw_target, adjustment, max_charge_power_w, effective_charge_cap_w, charge_cap_inputs,
+            )
+            new_target = max(0, min(raw_target, effective_charge_cap_w))
+            clamp_reason = self._clamp_reason(raw_target, new_target, effective_charge_cap_w, charge_cap_source)
+            LOGGER.debug(
+                "Slow balance post-clamp desired_state=%s p1_grid_power_w=%s previous_target_power_w=%s raw_target_power_w=%s balance_adjustment_w=%s new_target_power_w=%s max_charge_power_w=%s effective_charge_cap_w=%s cap_inputs=%s clamp_reason=%s",
+                desired_state.value, grid_power_w, previous_target, raw_target, adjustment, new_target, max_charge_power_w, effective_charge_cap_w, charge_cap_inputs, clamp_reason,
+            )
             api_sent, modbus_written = await self._publish_balanced_target(desired_state, previous_target, new_target, reason)
         elif desired_state is ControlState.DISCHARGING:
             if soc is not None and soc <= soc_floor:
@@ -540,14 +615,15 @@ class ControlApp:
                 adjustment = -int(self._clamp(residual_export_w * BALANCE_GAIN, BALANCE_STEP_W, 500))
                 new_target = previous_target + adjustment
                 reason = "slow_balance_export"
+            raw_target = new_target
             new_target = max(0, min(new_target, self._max_discharge_power_w()))
             api_sent, modbus_written = await self._publish_balanced_target(desired_state, previous_target, new_target, reason)
         else:
             return
 
         LOGGER.info(
-            "Slow balance decision p1_grid_power_w=%s desired_state=%s previous_target_power_w=%s new_target_power_w=%s residual_export_w=%s residual_import_w=%s balance_adjustment_w=%s reason=%s soc=%s soc_floor=%s soc_ceiling=%s api_command_sent=%s modbus_limit_written=%s",
-            grid_power_w, desired_state.value, previous_target, new_target, residual_export_w, residual_import_w, adjustment, reason, soc, soc_floor, soc_ceiling, api_sent, modbus_written,
+            "Slow balance decision p1_grid_power_w=%s desired_state=%s previous_target_power_w=%s raw_target_power_w=%s new_target_power_w=%s residual_export_w=%s residual_import_w=%s balance_adjustment_w=%s reason=%s soc=%s soc_floor=%s soc_ceiling=%s max_charge_power_w=%s effective_charge_cap_w=%s cap_inputs=%s clamp_reason=%s api_command_sent=%s modbus_limit_written=%s",
+            grid_power_w, desired_state.value, previous_target, raw_target, new_target, residual_export_w, residual_import_w, adjustment, reason, soc, soc_floor, soc_ceiling, max_charge_power_w, effective_charge_cap_w, charge_cap_inputs, clamp_reason, api_sent, modbus_written,
         )
 
     async def _publish_balanced_target(self, desired_state: ControlState, previous_target: int, new_target: int, reason: str) -> tuple[bool, bool]:
