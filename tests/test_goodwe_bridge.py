@@ -246,3 +246,61 @@ def test_invalid_mqtt_poll_interval_keeps_previous_value(monkeypatch):
     bridge.handle_poll_interval("invalid")
 
     assert bridge.load_poll_interval() == 30
+
+
+def test_subscribes_to_grid_power_topics_for_actuator_logging(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+    bridge = goodwe_bridge.GoodWeBridge(make_config(), Backend())
+
+    bridge.on_connect(bridge.mqtt_client, None, {}, 0)
+
+    assert (goodwe_bridge.MQTT_TOPIC_DSMR_NET_POWER, 1) in bridge.mqtt_client.subscriptions
+    assert (goodwe_bridge.MQTT_TOPIC_GRID_NET_POWER, 1) in bridge.mqtt_client.subscriptions
+
+
+def test_grid_power_topic_is_remembered_for_actuator_boundary(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+    bridge = goodwe_bridge.GoodWeBridge(make_config(), Backend())
+    bridge.loop = asyncio.new_event_loop()
+
+    class Message:
+        topic = goodwe_bridge.MQTT_TOPIC_GRID_NET_POWER
+        payload = b"-321"
+
+    try:
+        bridge.on_message(bridge.mqtt_client, None, Message())
+        assert bridge._last_p1_grid_power_w == -321
+    finally:
+        bridge.loop.close()
+
+
+class PartialBackend(Backend):
+    async def read_state(self):
+        return InverterState(
+            battery_soc=None,
+            battery_soh=None,
+            battery_power_w=-123,
+            battery_voltage_v=51.8,
+            battery_temperature_c=None,
+            battery_mode="charge",
+            inverter_temperature_c=None,
+            grid_power_w=None,
+        )
+
+
+def test_poll_once_skips_unavailable_modbus_values_instead_of_publishing_zeroes(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), PartialBackend())
+        await bridge.poll_once()
+        return bridge.mqtt_client.published
+
+    published = asyncio.run(run())
+    topics = [topic for topic, _payload, _retain in published]
+    assert "minyad/battery/power_w" in topics
+    assert "minyad/battery/voltage_v" in topics
+    assert "minyad/battery/mode" in topics
+    assert "minyad/battery/soc" not in topics
+    assert "minyad/battery/soh" not in topics
+    assert "minyad/inverter/grid_power_w" not in topics

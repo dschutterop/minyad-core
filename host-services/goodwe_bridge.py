@@ -26,6 +26,8 @@ logger = logging.getLogger(LOGGER_NAME)
 
 MQTT_TOPIC_CHARGE_W = "minyad/control/charge_w"
 MQTT_TOPIC_DISCHARGE_W = "minyad/control/discharge_w"
+MQTT_TOPIC_DSMR_NET_POWER = "minyad/dsmr/net_power_w"
+MQTT_TOPIC_GRID_NET_POWER = "minyad/grid/net_power_w"
 MQTT_TOPIC_CONTROL_STATE = "minyad/control/state"
 MQTT_TOPIC_BATTERY_POLL_INTERVAL = "minyad/settings/battery/inverter_poll_interval_s"
 BATTERY_POLL_INTERVAL_SETTING = "battery.inverter_poll_interval_s"
@@ -174,6 +176,7 @@ class GoodWeBridge:
         self.control_state = "IDLE"
         self._last_charge_setpoint_w = 0
         self._last_discharge_setpoint_w = 0
+        self._last_p1_grid_power_w: int | None = None
         self._immediate_poll_task: Future[None] | None = None
         self._mqtt_poll_interval: int | None = None
 
@@ -219,7 +222,7 @@ class GoodWeBridge:
     def on_connect(self, client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
         if rc == 0:
             logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
-            client.subscribe([(MQTT_TOPIC_CHARGE_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1), (MQTT_TOPIC_CONTROL_STATE, 1), (MQTT_TOPIC_BATTERY_POLL_INTERVAL, 1)])
+            client.subscribe([(MQTT_TOPIC_CHARGE_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1), (MQTT_TOPIC_CONTROL_STATE, 1), (MQTT_TOPIC_BATTERY_POLL_INTERVAL, 1), (MQTT_TOPIC_DSMR_NET_POWER, 1), (MQTT_TOPIC_GRID_NET_POWER, 1)])
             self.publish_bridge_alive()
         else:
             logger.error("MQTT connection failed with rc=%s", rc)
@@ -245,6 +248,9 @@ class GoodWeBridge:
         if message.topic == MQTT_TOPIC_BATTERY_POLL_INTERVAL:
             self.handle_poll_interval(payload)
             return
+        if message.topic in {MQTT_TOPIC_DSMR_NET_POWER, MQTT_TOPIC_GRID_NET_POWER}:
+            self.handle_grid_power(payload)
+            return
 
         try:
             watts = int(payload)
@@ -256,6 +262,12 @@ class GoodWeBridge:
             asyncio.run_coroutine_threadsafe(self.handle_charge_setpoint(watts), self.loop)
         elif message.topic == MQTT_TOPIC_DISCHARGE_W:
             asyncio.run_coroutine_threadsafe(self.handle_discharge_setpoint(watts), self.loop)
+
+    def handle_grid_power(self, payload: str) -> None:
+        try:
+            self._last_p1_grid_power_w = int(payload)
+        except ValueError:
+            logger.warning("Ignoring invalid grid power payload: %r", payload)
 
     def handle_poll_interval(self, payload: str) -> None:
         try:
@@ -308,7 +320,7 @@ class GoodWeBridge:
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
             return
         self._last_charge_setpoint_w = watts
-        logger.info("Actuator write success p1_grid_power_w=unknown charge_limit_w=%s discharge_limit_w=%s dry_run=%s", self._last_charge_setpoint_w, self._last_discharge_setpoint_w, self.config.dry_run)
+        logger.info("Actuator write success p1_grid_power_w=%s charge_limit_w=%s discharge_limit_w=%s dry_run=%s", self._last_p1_grid_power_w, self._last_charge_setpoint_w, self._last_discharge_setpoint_w, self.config.dry_run)
 
     async def handle_discharge_setpoint(self, watts: int) -> None:
         if watts == self._last_discharge_setpoint_w:
@@ -321,7 +333,7 @@ class GoodWeBridge:
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
             return
         self._last_discharge_setpoint_w = watts
-        logger.info("Actuator write success p1_grid_power_w=unknown charge_limit_w=%s discharge_limit_w=%s dry_run=%s", self._last_charge_setpoint_w, self._last_discharge_setpoint_w, self.config.dry_run)
+        logger.info("Actuator write success p1_grid_power_w=%s charge_limit_w=%s discharge_limit_w=%s dry_run=%s", self._last_p1_grid_power_w, self._last_charge_setpoint_w, self._last_discharge_setpoint_w, self.config.dry_run)
 
     async def poll_once(self) -> None:
         state = await self.backend.read_state()
@@ -337,6 +349,9 @@ class GoodWeBridge:
             MQTT_TOPIC_INVERTER_STATUS: STATUS_OK,
         }
         for topic, value in values.items():
+            if value is None:
+                logger.debug("Skipping unavailable inverter value topic=%s", topic)
+                continue
             self.publish(topic, value, retain=True)
         self.publish_bridge_alive()
         logger.info(
