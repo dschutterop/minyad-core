@@ -363,6 +363,22 @@ def test_soc_guard_forces_idle_when_discharging_at_floor(monkeypatch):
     assert app.controller.state is control_main.ControlState.IDLE
 
 
+def test_enforce_soc_guard_now_stops_active_discharge_at_floor(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_app_with_soc(soc=15, controller_state=control_main.ControlState.DISCHARGING)
+    app.setpoint_w = 600
+    app._last_published_discharge_limit_w = 600
+    app._has_published_battery_limits = True
+
+    asyncio.run(app.enforce_soc_guard_now())
+
+    assert app.controller.state is control_main.ControlState.IDLE
+    assert app.setpoint_w == 0
+    assert ("control", "command", "stop") in app.mqtt.published
+    assert ("control", "discharge_w", 0) in app.mqtt.published
+    assert ("control", "state", "IDLE") in app.mqtt.published
+
+
 def test_soc_guard_does_not_interfere_above_floor(monkeypatch):
     monkeypatch.setattr(control_main, "store_status", noop_store_status)
     app = make_app_with_soc(soc=50)
