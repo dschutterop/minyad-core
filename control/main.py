@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from time import monotonic
 from typing import Any
 
 from sqlalchemy import text
@@ -27,7 +28,14 @@ SOC_FLOOR_DEFAULT = 20
 SOC_CEILING_DEFAULT = 90
 STATUS_HYSTERESE = "HYSTERESE"
 BRIDGE_LAST_SEEN_STALE_SECONDS = int(os.getenv("BRIDGE_LAST_SEEN_STALE_SECONDS", "60"))
-MIN_TARGET_CHANGE_W = int(os.getenv("MIN_TARGET_CHANGE_W", "150"))
+MIN_TARGET_CHANGE_W = int(os.getenv("MIN_TARGET_CHANGE_W", os.getenv("TARGET_MIN_CHANGE_W", "100")))
+GRID_DEADBAND_W = int(os.getenv("GRID_DEADBAND_W", "150"))
+CONTROL_INTERVAL_SEC = int(os.getenv("CONTROL_INTERVAL_SEC", "10"))
+BALANCE_STEP_W = int(os.getenv("BALANCE_STEP_W", "100"))
+BALANCE_GAIN = float(os.getenv("BALANCE_GAIN", "0.5"))
+MAX_CHARGE_POWER_W = int(os.getenv("MAX_CHARGE_POWER_W", "6000"))
+MAX_DISCHARGE_POWER_W = int(os.getenv("MAX_DISCHARGE_POWER_W", "6000"))
+CONTROL_REFRESH_INTERVAL_SEC = int(os.getenv("CONTROL_REFRESH_INTERVAL_SEC", "300"))
 BATTERY_TOPIC_TYPES = {
     "soc": int,
     "soh": int,
@@ -103,6 +111,10 @@ class ControlApp:
         self._last_published_charge_limit_w = 0
         self._last_published_discharge_limit_w = 0
         self._has_published_battery_limits = False
+        self._last_balance_at = 0.0
+        self._last_api_command_at = 0.0
+        self._last_api_command_target_w: int | None = None
+        self._last_api_command_direction: ControlState | None = None
 
     async def start(self) -> None:
         self.loop = asyncio.get_running_loop()
@@ -217,9 +229,13 @@ class ControlApp:
                 " transitioned_from=" + previous_state.value if state else "",
             )
             if state is ControlState.CHARGING:
-                await self.publish_setpoint(self.charge_target_w())
+                await self.publish_setpoint(self.charge_target_w(), state_changed=True)
+            elif self.controller.state is ControlState.CHARGING:
+                await self.apply_slow_balance(ControlState.CHARGING)
             if state is ControlState.DISCHARGING and not rebalanced_idle_discharge:
-                await self.publish_discharge_setpoint(self.discharge_target_w())
+                await self.publish_discharge_setpoint(self.discharge_target_w(), state_changed=True)
+            elif self.controller.state is ControlState.DISCHARGING and not rebalanced_idle_discharge:
+                await self.apply_slow_balance(ControlState.DISCHARGING)
             if state:
                 await self.publish_state(state)
             return
@@ -472,6 +488,87 @@ class ControlApp:
                 return self.controller.start_w - 1
         return surplus_w
 
+    @staticmethod
+    def _clamp(value: float, minimum: float, maximum: float) -> float:
+        return max(minimum, min(value, maximum))
+
+    def _max_charge_power_w(self) -> int:
+        return int(self.settings.get("max_charge_w", MAX_CHARGE_POWER_W))
+
+    def _max_discharge_power_w(self) -> int:
+        return int(self.settings.get("max_discharge_w", MAX_DISCHARGE_POWER_W))
+
+    async def apply_slow_balance(self, desired_state: ControlState) -> None:
+        now = monotonic()
+        if now - self._last_balance_at < CONTROL_INTERVAL_SEC:
+            return
+        self._last_balance_at = now
+        previous_target = int(self.setpoint_w)
+        new_target = previous_target
+        grid_power_w = int(self.latest_grid_power_w)
+        residual_export_w = max(0, -grid_power_w - GRID_DEADBAND_W)
+        residual_import_w = max(0, grid_power_w - GRID_DEADBAND_W)
+        adjustment = 0
+        reason = "slow_balance_deadband"
+        soc = self.latest_battery_soc
+        soc_floor = int(self.settings.get("soc_floor", SOC_FLOOR_DEFAULT))
+        soc_ceiling = int(self.settings.get("soc_ceiling", SOC_CEILING_DEFAULT))
+
+        if desired_state is ControlState.CHARGING:
+            if soc is not None and soc >= soc_ceiling:
+                reason = "slow_balance_soc_ceiling"
+                new_target = 0
+            elif residual_export_w > 0:
+                adjustment = int(self._clamp(residual_export_w * BALANCE_GAIN, BALANCE_STEP_W, 500))
+                new_target = previous_target + adjustment
+                reason = "slow_balance_export"
+            elif residual_import_w > 0:
+                adjustment = -int(self._clamp(residual_import_w * BALANCE_GAIN, BALANCE_STEP_W, 500))
+                new_target = previous_target + adjustment
+                reason = "slow_balance_import"
+            new_target = max(0, min(new_target, self._max_charge_power_w()))
+            api_sent, modbus_written = await self._publish_balanced_target(desired_state, previous_target, new_target, reason)
+        elif desired_state is ControlState.DISCHARGING:
+            if soc is not None and soc <= soc_floor:
+                reason = "slow_balance_soc_floor"
+                new_target = 0
+            elif residual_import_w > 0:
+                adjustment = int(self._clamp(residual_import_w * BALANCE_GAIN, BALANCE_STEP_W, 500))
+                new_target = previous_target + adjustment
+                reason = "slow_balance_import"
+            elif residual_export_w > 0:
+                adjustment = -int(self._clamp(residual_export_w * BALANCE_GAIN, BALANCE_STEP_W, 500))
+                new_target = previous_target + adjustment
+                reason = "slow_balance_export"
+            new_target = max(0, min(new_target, self._max_discharge_power_w()))
+            api_sent, modbus_written = await self._publish_balanced_target(desired_state, previous_target, new_target, reason)
+        else:
+            return
+
+        LOGGER.info(
+            "Slow balance decision p1_grid_power_w=%s desired_state=%s previous_target_power_w=%s new_target_power_w=%s residual_export_w=%s residual_import_w=%s balance_adjustment_w=%s reason=%s soc=%s soc_floor=%s soc_ceiling=%s api_command_sent=%s modbus_limit_written=%s",
+            grid_power_w, desired_state.value, previous_target, new_target, residual_export_w, residual_import_w, adjustment, reason, soc, soc_floor, soc_ceiling, api_sent, modbus_written,
+        )
+
+    async def _publish_balanced_target(self, desired_state: ControlState, previous_target: int, new_target: int, reason: str) -> tuple[bool, bool]:
+        now = monotonic()
+        delta = abs(new_target - previous_target)
+        refresh_due = (
+            self._last_api_command_target_w is not None
+            and (self._last_api_command_direction is not desired_state or now - self._last_api_command_at >= CONTROL_REFRESH_INTERVAL_SEC)
+        )
+        should_write = delta >= MIN_TARGET_CHANGE_W or refresh_due or reason in {"slow_balance_soc_floor", "slow_balance_soc_ceiling"}
+        if not should_write:
+            return False, False
+        if desired_state is ControlState.CHARGING:
+            await self.publish_setpoint(new_target)
+        else:
+            await self.publish_discharge_setpoint(new_target)
+        self._last_api_command_at = now
+        self._last_api_command_target_w = new_target
+        self._last_api_command_direction = desired_state
+        return True, True
+
     def charge_target_w(self) -> int:
         """Return the charge setpoint needed to absorb current grid export.
 
@@ -541,26 +638,31 @@ class ControlApp:
         self.mqtt.publish_measurement("control", "charge_w", charge_limit_w)
         self.mqtt.publish_measurement("control", "discharge_w", discharge_limit_w)
 
-    async def publish_setpoint(self, watts: int) -> None:
+    async def publish_setpoint(self, watts: int, *, state_changed: bool = False) -> None:
         if not self.bridge_is_available:
             LOGGER.warning("GoodWe bridge is %s; charge setpoint %sW not published", self.bridge_status, watts)
             self.setpoint_w = 0
             return
-        self.setpoint_w = max(0, watts)
+        self.setpoint_w = max(0, min(watts, self._max_charge_power_w()))
         self.mqtt.publish_measurement("control", "command", "resume" if self.setpoint_w else "stop")
-        self.publish_battery_limits(self.setpoint_w, 0, state_changed=self.controller is not None and self.controller.state is ControlState.CHARGING)
+        self.publish_battery_limits(self.setpoint_w, 0, state_changed=state_changed)
         self.mqtt.publish_measurement("control", "setpoint_w", self.setpoint_w)
+        self._last_api_command_at = monotonic()
+        self._last_api_command_target_w = self.setpoint_w
+        self._last_api_command_direction = ControlState.CHARGING
 
-    async def publish_discharge_setpoint(self, watts: int) -> None:
+    async def publish_discharge_setpoint(self, watts: int, *, state_changed: bool = False) -> None:
         if not self.bridge_is_available:
             LOGGER.warning("GoodWe bridge is %s; discharge setpoint %sW not published", self.bridge_status, watts)
             self.setpoint_w = 0
             return
-        max_discharge_w = int(self.settings.get("max_discharge_w", 5000))
-        self.setpoint_w = max(0, min(watts, max_discharge_w))
+        self.setpoint_w = max(0, min(watts, self._max_discharge_power_w()))
         self.mqtt.publish_measurement("control", "command", "discharge" if self.setpoint_w else "stop")
-        self.publish_battery_limits(0, self.setpoint_w, state_changed=self.controller is not None and self.controller.state is ControlState.DISCHARGING)
+        self.publish_battery_limits(0, self.setpoint_w, state_changed=state_changed)
         self.mqtt.publish_measurement("control", "setpoint_w", 0)
+        self._last_api_command_at = monotonic()
+        self._last_api_command_target_w = self.setpoint_w
+        self._last_api_command_direction = ControlState.DISCHARGING
 
     async def publish_state_loop(self) -> None:
         while True:
