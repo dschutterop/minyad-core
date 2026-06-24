@@ -336,6 +336,8 @@ def battery_settings_body() -> str:
         <label>Cooldown s <input name='cooldown' type='number' min='60' max='7200'></label>
         <label>Max charge W <input name='max_charge_w' type='number' min='100' max='5000'></label>
         <label>Max discharge W <input name='max_discharge_w' type='number' min='0' max='5000'></label>
+        <label>Minimum SoC % <input name='soc_floor' type='number' min='0' max='100'></label>
+        <label>Maximum SoC % <input name='soc_ceiling' type='number' min='0' max='100'></label>
         <label>Inverter IP <input name='inverter_ip' type='text' pattern='^([0-9]{1,3}\\.){3}[0-9]{1,3}$'></label>
         <label>Retries <input name='inverter_retries' type='number' min='1' max='10'></label>
         <label>Retry delay s <input name='inverter_delay' type='number' min='1' max='30'></label>

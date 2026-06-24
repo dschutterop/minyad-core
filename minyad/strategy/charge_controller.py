@@ -35,8 +35,10 @@ MODE_SOLAR_RICH = "SOLAR_RICH"
 MODE_SOLAR_POOR = "SOLAR_POOR"
 MODE_MANUAL_OVERRIDE = "MANUAL_OVERRIDE"
 
-ABSOLUTE_FLOOR = 10
-ABSOLUTE_DAILY_CEILING = 95
+DEFAULT_SOC_FLOOR = 20
+DEFAULT_SOC_CEILING = 90
+ABSOLUTE_FLOOR = 0
+ABSOLUTE_DAILY_CEILING = 100
 ABSOLUTE_OVERRIDE_CEILING = 100
 DEFAULT_MAX_CHARGE_W = 1440
 DEFAULT_MAX_DISCHARGE_W = 5000
@@ -233,7 +235,7 @@ class ChargeController:
         """Return the DB-selected active mode, or NORMAL if none exists."""
         if self._last_mode and self._last_mode.valid_until > self._now():
             return self._last_mode
-        mode = self._load_active_mode_sync() or ModeConfig(MODE_NORMAL, 20, 80, self._max_charge_w_sync(), "default; no forecast data available", self._end_of_next_local_day(), None)
+        mode = self._load_active_mode_sync() or ModeConfig(MODE_NORMAL, self._soc_floor_sync(), self._soc_ceiling_sync(), self._max_charge_w_sync(), "default; no forecast data available", self._end_of_next_local_day(), None)
         self._last_mode = self._clamp_mode(mode)
         return self._last_mode
 
@@ -254,12 +256,14 @@ class ChargeController:
         """Fetch tomorrow's GHI forecast for Schipluiden and persist selected mode."""
         forecast_ghi = self.fetch_tomorrow_ghi()
         max_charge = self._max_charge_w_sync()
+        configured_floor = self._soc_floor_sync()
+        configured_ceiling = self._soc_ceiling_sync()
         if forecast_ghi > self._float_setting_sync("strategy.ghi_solar_rich_threshold", 4.5):
-            mode = ModeConfig(MODE_SOLAR_RICH, 30, 60, None, "forecast GHI tomorrow above solar-rich threshold", self._end_of_next_local_day(), forecast_ghi)
+            mode = ModeConfig(MODE_SOLAR_RICH, configured_floor, configured_ceiling, None, "forecast GHI tomorrow above solar-rich threshold", self._end_of_next_local_day(), forecast_ghi)
         elif forecast_ghi < self._float_setting_sync("strategy.ghi_solar_poor_threshold", 1.5):
-            mode = ModeConfig(MODE_SOLAR_POOR, 20, 92, max_charge, "forecast GHI tomorrow below solar-poor threshold", self._end_of_next_local_day(), forecast_ghi)
+            mode = ModeConfig(MODE_SOLAR_POOR, configured_floor, configured_ceiling, max_charge, "forecast GHI tomorrow below solar-poor threshold", self._end_of_next_local_day(), forecast_ghi)
         else:
-            mode = ModeConfig(MODE_NORMAL, 20, 80, max_charge, "forecast GHI tomorrow in normal band", self._end_of_next_local_day(), forecast_ghi)
+            mode = ModeConfig(MODE_NORMAL, configured_floor, configured_ceiling, max_charge, "forecast GHI tomorrow in normal band", self._end_of_next_local_day(), forecast_ghi)
         mode = self._clamp_mode(mode)
         self._last_mode = mode
         self._store_active_mode_sync(mode)
@@ -318,7 +322,12 @@ class ChargeController:
 
     def _clamp_mode(self, mode: ModeConfig) -> ModeConfig:
         ceiling_limit = ABSOLUTE_OVERRIDE_CEILING if mode.mode == MODE_MANUAL_OVERRIDE else ABSOLUTE_DAILY_CEILING
-        return ModeConfig(mode.mode, max(ABSOLUTE_FLOOR, mode.soc_floor), min(ceiling_limit, mode.soc_ceiling), mode.charge_rate_w, mode.reason, mode.valid_until.astimezone(timezone.utc), mode.forecast_ghi)
+        floor = max(ABSOLUTE_FLOOR, mode.soc_floor)
+        ceiling = min(ceiling_limit, mode.soc_ceiling)
+        if floor >= ceiling:
+            floor = DEFAULT_SOC_FLOOR
+            ceiling = DEFAULT_SOC_CEILING
+        return ModeConfig(mode.mode, floor, ceiling, mode.charge_rate_w, mode.reason, mode.valid_until.astimezone(timezone.utc), mode.forecast_ghi)
 
     def _end_of_next_local_day(self) -> datetime:
         local = self._now().astimezone(AMSTERDAM) + timedelta(days=1)
@@ -357,6 +366,12 @@ class ChargeController:
 
     def _max_discharge_w_sync(self) -> int:
         return int(self._float_setting_sync("battery.max_discharge_w", DEFAULT_MAX_DISCHARGE_W))
+
+    def _soc_floor_sync(self) -> int:
+        return int(self._float_setting_sync("battery.soc_floor", DEFAULT_SOC_FLOOR))
+
+    def _soc_ceiling_sync(self) -> int:
+        return int(self._float_setting_sync("battery.soc_ceiling", DEFAULT_SOC_CEILING))
 
     def _float_setting_sync(self, key: str, default: float) -> float:
         if isinstance(self.db_session_factory, dict):

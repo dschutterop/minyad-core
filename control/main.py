@@ -226,6 +226,7 @@ class ControlApp:
             command = json.loads(decoded)
             if command.get("mode") == "reload_settings":
                 await self.reload_settings()
+                await self.enforce_soc_guard_now()
             else:
                 await self.apply_override(command)
             return
@@ -431,6 +432,15 @@ class ControlApp:
 
     async def start_charging(self) -> None:
         await self.publish_setpoint(self.charge_target_w())
+
+    async def enforce_soc_guard_now(self) -> None:
+        if self.controller is None or self.latest_battery_soc is None:
+            return
+        previous_state = self.controller.state
+        self._apply_soc_guard(self.latest_grid_power_w)
+        if previous_state is not ControlState.IDLE and self.controller.state is ControlState.IDLE:
+            await self.stop_charging()
+            await self.publish_state(ControlState.IDLE)
 
     def _apply_soc_guard(self, surplus_w: int) -> int:
         """Block discharge below soc_floor and charge above soc_ceiling.
