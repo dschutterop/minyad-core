@@ -378,12 +378,12 @@ class GoodWeBridge:
         except (ConnectionError, TimeoutError):
             self._skip_actuator_write("modbus unavailable")
             self.modbus_errors_total += 1
-            logger.exception("Modbus unavailable while applying charge_w=%s discharge_w=%s", charge, discharge)
+            logger.exception("[modbus] Modbus unavailable while applying charge_w=%s discharge_w=%s", charge, discharge)
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
             return
         except Exception:
             self.modbus_errors_total += 1
-            logger.exception("Failed to apply charge_w=%s discharge_w=%s", charge, discharge)
+            logger.exception("[modbus] Failed to apply charge_w=%s discharge_w=%s", charge, discharge)
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
             return
         self._last_charge_setpoint_w = charge
@@ -392,12 +392,12 @@ class GoodWeBridge:
         self.last_successful_write_timestamp = time()
         self.modbus_writes_total += 1
         self.publish_metrics()
-        logger.info("Actuator write success p1_grid_power_w=%s charge_limit_w=%s discharge_limit_w=%s dry_run=%s", self._last_p1_grid_power_w, charge, discharge, self.config.dry_run)
+        logger.info("[modbus] Actuator write success p1_grid_power_w=%s charge_limit_w=%s discharge_limit_w=%s dry_run=%s", self._last_p1_grid_power_w, charge, discharge, self.config.dry_run)
 
     def _skip_actuator_write(self, reason: str) -> None:
         self.modbus_write_skipped_total += 1
         self.publish_metrics()
-        logger.info("Actuator write skipped reason=%s p1_grid_power_w=%s target_charge_limit_w=%s target_discharge_limit_w=%s current_charge_limit_w=%s current_discharge_limit_w=%s", reason, self._last_p1_grid_power_w, self.target_charge_limit_w, self.target_discharge_limit_w, self._last_charge_setpoint_w, self._last_discharge_setpoint_w)
+        logger.info("[modbus] Actuator write skipped reason=%s p1_grid_power_w=%s target_charge_limit_w=%s target_discharge_limit_w=%s current_charge_limit_w=%s current_discharge_limit_w=%s", reason, self._last_p1_grid_power_w, self.target_charge_limit_w, self.target_discharge_limit_w, self._last_charge_setpoint_w, self._last_discharge_setpoint_w)
 
     async def poll_once(self) -> None:
         state = await self.backend.read_state()
@@ -459,11 +459,11 @@ class GoodWeBridge:
             except (ConnectionError, TimeoutError) as exc:
                 self.publish_bridge_alive()
                 self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
-                logger.warning("Polling failed: %s", exc, exc_info=True)
+                logger.warning("[modbus|api] Polling failed: %s", exc, exc_info=True)
             except Exception as exc:
                 self.publish_bridge_alive()
                 self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
-                logger.warning("Polling failed: %s", exc, exc_info=True)
+                logger.warning("[modbus|api] Polling failed: %s", exc, exc_info=True)
 
             try:
                 await asyncio.wait_for(self.shutdown_event.wait(), timeout=self.load_poll_interval())
@@ -489,7 +489,7 @@ async def main() -> None:
     config = Config.from_env()
     configure_logging(config.log_level)
     backend = build_backend(config)
-    logger.info("Using GoodWe protocols: modbus_enabled=%s api_enabled=%s dry_run=%s", config.goodwe_modbus_enabled, config.goodwe_api_enabled, config.dry_run)
+    logger.info("[modbus|api] Using GoodWe protocols: modbus_enabled=%s api_enabled=%s dry_run=%s", config.goodwe_modbus_enabled, config.goodwe_api_enabled, config.dry_run)
     bridge = GoodWeBridge(config, backend)
 
     loop = asyncio.get_running_loop()
