@@ -138,6 +138,9 @@ def make_config():
         max_charge_a=30,
         dry_run=False,
         log_level="INFO",
+        min_write_interval_s=0.0,
+        min_target_change_w=0,
+        write_refresh_interval_s=600.0,
     )
 
 
