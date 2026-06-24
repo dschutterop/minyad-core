@@ -9,8 +9,8 @@ from minyad_client import MinyadClient
 
 LOGGER = logging.getLogger(__name__)
 INVERTER_MAX_W = 5000
-MIN_SOC = 20
-MAX_SOC_FOR_FORCED_CHARGE = 95
+DEFAULT_MIN_SOC = 20
+DEFAULT_MAX_SOC = 90
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -72,16 +72,19 @@ def clip_setpoint(setpoint_w: int, state: dict[str, Any]) -> tuple[int, list[str
     clipped = max(-INVERTER_MAX_W, min(INVERTER_MAX_W, int(setpoint_w)))
     if clipped != setpoint_w:
         warnings.append(f"setpoint clipped from {setpoint_w}W to {clipped}W by inverter limit")
+    battery_settings = state.get("settings", {}).get("battery", {})
+    min_soc = int(battery_settings.get("soc_floor", DEFAULT_MIN_SOC))
+    max_soc = int(battery_settings.get("soc_ceiling", DEFAULT_MAX_SOC))
     soc = state.get("battery", {}).get("soc") or state.get("soc")
     try:
         soc_value = float(soc)
     except (TypeError, ValueError):
         soc_value = None
-    if soc_value is not None and clipped < 0 and soc_value <= MIN_SOC:
-        warnings.append(f"discharge clipped to 0W because SoC {soc_value}% <= {MIN_SOC}%")
+    if soc_value is not None and clipped < 0 and soc_value <= min_soc:
+        warnings.append(f"discharge clipped to 0W because SoC {soc_value}% <= configured minimum {min_soc}%")
         clipped = 0
-    if soc_value is not None and clipped > 0 and soc_value >= MAX_SOC_FOR_FORCED_CHARGE:
-        warnings.append(f"charge clipped to 0W because SoC {soc_value}% >= {MAX_SOC_FOR_FORCED_CHARGE}%")
+    if soc_value is not None and clipped > 0 and soc_value >= max_soc:
+        warnings.append(f"charge clipped to 0W because SoC {soc_value}% >= configured maximum {max_soc}%")
         clipped = 0
     for warning in warnings:
         LOGGER.warning(warning)

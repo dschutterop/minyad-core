@@ -30,6 +30,9 @@ class MinyadClient:
     def get_state(self) -> dict[str, Any]:
         return self._get("/api/state")
 
+    def get_battery_settings(self) -> dict[str, Any]:
+        return self._get("/api/battery/settings")
+
     def get_forecast(self, hours_ahead: int = 12) -> dict[str, Any]:
         return self._get("/api/forecast", params={"hours_ahead": hours_ahead})
 
