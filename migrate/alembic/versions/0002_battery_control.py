@@ -31,7 +31,7 @@ DEFAULT_SETTINGS = {
     "battery.stop_w": "150",
     "battery.start_duration": "180",
     "battery.stop_duration": "300",
-    "battery.cooldown": "600",
+    "battery.cooldown": "180",
     "battery.max_charge_w": "1440",
     "battery.max_discharge_w": "5000",
     "battery.max_charge_a": "30",

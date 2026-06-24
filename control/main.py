@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from inspect import signature
 from time import monotonic
 from typing import Any
 
@@ -162,6 +163,14 @@ class ControlApp:
                 self.bridge_status,
             )
 
+    def _tick_controller(self, surplus_w: int, grid_power_w: int) -> ControlState | None:
+        if self.controller is None:
+            return None
+        tick_parameters = signature(self.controller.tick).parameters
+        if "grid_power_w" in tick_parameters or "charge_current_target" in tick_parameters:
+            return self.controller.tick(surplus_w, grid_power_w=grid_power_w, charge_current_target=self.setpoint_w)
+        return self.controller.tick(surplus_w)
+
     def _schedule_start_charging(self) -> None:
         if self.loop is None:
             raise RuntimeError("control app event loop is not initialized")
@@ -220,7 +229,7 @@ class ControlApp:
                 await self.stop_charging()
                 await self.publish_state(ControlState.IDLE)
             rebalanced_idle_discharge = await self._rebalance_untracked_idle_discharge(grid_power_w)
-            state = self.controller.tick(surplus_w)
+            state = self._tick_controller(surplus_w, grid_power_w)
             LOGGER.info(
                 "Grid control sample topic=%s grid_power=%sW surplus=%sW state=%s%s",
                 topic,
