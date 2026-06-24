@@ -84,6 +84,6 @@ def test_goodwe_backend_reuses_connection_for_sequential_requests():
     assert fake_goodwe.instances[0].commands == [
         ("032c050000173b00", "03AC"),
         ("032d050000173b14", "03AD"),
-        ("032d050000173b00", "03AD"),
         ("032c050000173b0a", "03AC"),
+        ("032d050000173b00", "03AD"),
     ]

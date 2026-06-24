@@ -428,3 +428,17 @@ def test_charge_transition_publishes_initial_setpoint(monkeypatch):
 
     assert ("control", "charge_w", 700) in app.mqtt.published
     assert app.controller.ticked == [700]
+
+
+def test_control_service_publishes_two_actuator_values_without_modbus(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_discharge_w": 5000}
+    app.latest_grid_power_w = 450
+    app.latest_battery_power_w = 150
+
+    asyncio.run(app.publish_discharge_setpoint(app.discharge_target_w()))
+
+    assert ("control", "charge_w", 0) in app.mqtt.published
+    assert ("control", "discharge_w", 600) in app.mqtt.published
+    assert all(topic[1] != "modbus" for topic in app.mqtt.published)
