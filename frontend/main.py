@@ -335,6 +335,8 @@ def battery_settings_body() -> str:
         <label>Stop duration s <input name='stop_duration' type='number' min='10' max='3600'></label>
         <label>Cooldown s <input name='cooldown' type='number' min='60' max='7200'></label>
         <label>Max charge W <input name='max_charge_w' type='number' min='100' max='5000'></label>
+        <label>Max charge A <input name='max_charge_a' type='number' min='1' max='200'></label>
+        <label>Nominal battery V <input name='nominal_v' type='number' min='40' max='60'></label>
         <label>Max discharge W <input name='max_discharge_w' type='number' min='0' max='5000'></label>
         <label>Minimum SoC % <input name='soc_floor' type='number' min='0' max='100'></label>
         <label>Maximum SoC % <input name='soc_ceiling' type='number' min='0' max='100'></label>
@@ -342,6 +344,7 @@ def battery_settings_body() -> str:
         <label>Retries <input name='inverter_retries' type='number' min='1' max='10'></label>
         <label>Retry delay s <input name='inverter_delay' type='number' min='1' max='30'></label>
         <label>GoodWe poll interval s <input name='inverter_poll_interval_s' type='number' min='1' max='3600'></label>
+        <p style='grid-column:1/-1;color:var(--steel);font-size:14px;margin:0'>Effective charge cap = min(max_charge_w, max_charge_a × nominal_v): <strong id='effective-charge-cap'>-- W</strong></p>
         <button type='submit'>Save battery settings</button>
       </form><pre id='settings-result'></pre></div>
 
@@ -386,16 +389,28 @@ def battery_settings_body() -> str:
     </div>
 
     <script>
+      function updateEffectiveChargeCap(){
+        const form = document.getElementById('battery-settings');
+        const maxW = Number(form.elements.max_charge_w?.value || 0);
+        const maxA = Number(form.elements.max_charge_a?.value || 0);
+        const nominalV = Number(form.elements.nominal_v?.value || 0);
+        const effective = Math.min(maxW || Infinity, (maxA && nominalV) ? maxA * nominalV : Infinity);
+        document.getElementById('effective-charge-cap').textContent = Number.isFinite(effective) ? `${effective} W` : '-- W';
+      }
       async function loadBatterySettings(){
         const res = await fetch('/api/battery/settings'); const data = await res.json();
         for (const [k,v] of Object.entries(data)){ const el = document.querySelector(`[name="${k}"]`); if(el) el.value = v; }
+        updateEffectiveChargeCap();
         document.getElementById('settings-result').textContent = JSON.stringify(data, null, 2);
       }
+      document.getElementById('battery-settings').addEventListener('input', updateEffectiveChargeCap);
       document.getElementById('battery-settings').addEventListener('submit', async (event)=>{
         event.preventDefault(); const data = {};
         new FormData(event.target).forEach((v,k)=>{ data[k] = k === 'inverter_ip' ? v : Number(v); });
         const res = await fetch('/api/battery/settings',{method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
-        document.getElementById('settings-result').textContent = JSON.stringify(await res.json(), null, 2);
+        const updated = await res.json();
+        document.getElementById('settings-result').textContent = JSON.stringify(updated, null, 2);
+        updateEffectiveChargeCap();
       });
 
       async function loadTradeSettings(){

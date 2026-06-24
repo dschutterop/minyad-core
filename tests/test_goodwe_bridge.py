@@ -36,6 +36,7 @@ def install_import_stubs() -> None:
 
         mqtt_client.Client = FakeClient
         mqtt_client.MQTTv311 = 4
+        mqtt_client.CallbackAPIVersion = types.SimpleNamespace(VERSION2=2)
         paho.mqtt = mqtt_package
         mqtt_package.client = mqtt_client
         sys.modules["paho"] = paho
@@ -137,6 +138,7 @@ def make_config():
         poll_interval=120,
         database_url=None,
         max_charge_a=30,
+        max_allowed_charge_a=30,
         dry_run=False,
         log_level="INFO",
         min_write_interval_s=0.0,
@@ -496,3 +498,45 @@ def test_modbus_skipped_unchanged_does_not_count_as_failure(monkeypatch):
         assert backend.api_commands == [("discharge", 600)]
 
     asyncio.run(run())
+
+
+def _set_required_bridge_env(monkeypatch, *, max_charge_a: str, max_allowed_charge_a: str | None):
+    monkeypatch.setenv("MQTT_BROKER", "mqtt")
+    monkeypatch.setenv("GOODWE_API_HOST", "http://goodwe")
+    monkeypatch.setenv("MODBUS_GW_IP", "127.0.0.1")
+    monkeypatch.setenv("MAX_CHARGE_A", max_charge_a)
+    if max_allowed_charge_a is None:
+        monkeypatch.delenv("MAX_ALLOWED_CHARGE_A", raising=False)
+        monkeypatch.delenv("GOODWE_MAX_ALLOWED_CHARGE_A", raising=False)
+    else:
+        monkeypatch.setenv("MAX_ALLOWED_CHARGE_A", max_allowed_charge_a)
+
+
+def test_config_allows_60a_when_safety_ceiling_is_60(monkeypatch):
+    _set_required_bridge_env(monkeypatch, max_charge_a="60", max_allowed_charge_a="60")
+
+    config = goodwe_bridge.Config.from_env()
+
+    assert config.max_charge_a == 60
+    assert config.max_allowed_charge_a == 60
+
+
+def test_config_clamps_60a_to_explicit_30a_safety_ceiling(monkeypatch, caplog):
+    _set_required_bridge_env(monkeypatch, max_charge_a="60", max_allowed_charge_a="30")
+
+    with caplog.at_level("WARNING", logger=goodwe_bridge.LOGGER_NAME):
+        config = goodwe_bridge.Config.from_env()
+
+    assert config.max_charge_a == 30
+    assert config.max_allowed_charge_a == 30
+    assert "requested_max_charge_a=60" in caplog.text
+    assert "bridge_max_allowed_charge_a=30" in caplog.text
+    assert "clamp_reason=MAX_CHARGE_A_above_MAX_ALLOWED_CHARGE_A" in caplog.text
+
+
+def test_config_has_no_hidden_30a_cap_when_safety_ceiling_is_raised(monkeypatch):
+    _set_required_bridge_env(monkeypatch, max_charge_a="73", max_allowed_charge_a="200")
+
+    config = goodwe_bridge.Config.from_env()
+
+    assert config.max_charge_a == 73

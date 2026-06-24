@@ -101,6 +101,7 @@ BATTERY_KEYS = {
     "stop_duration": (10, 3600),
     "cooldown": (60, 7200),
     "max_charge_w": (100, 5000),
+    "max_charge_a": (1, 200),
     "max_discharge_w": (0, 5000),
     "soc_floor": (0, 100),
     "soc_ceiling": (0, 100),
@@ -677,6 +678,8 @@ class BatterySettingsUpdate(BaseModel):
     stop_duration: int | None = None
     cooldown: int | None = None
     max_charge_w: int | None = None
+    max_charge_a: int | None = Field(default=None, ge=1, le=200)
+    nominal_v: int | None = Field(default=None, ge=40, le=60)
     max_discharge_w: int | None = None
     soc_floor: int | None = Field(default=None, ge=0, le=100)
     soc_ceiling: int | None = Field(default=None, ge=0, le=100)
