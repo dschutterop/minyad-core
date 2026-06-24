@@ -366,3 +366,125 @@ def test_warns_when_charge_limit_does_not_force_charging(monkeypatch, caplog):
     asyncio.run(run())
 
     assert "charge limit applied but inverter did not start charging; limit registers are not force setpoints" in caplog.text
+
+class CommandBackend(Backend):
+    def __init__(self):
+        super().__init__()
+        self.api_commands = []
+        self.fail_api = False
+        self.skip_modbus = False
+
+    async def set_charge(self, watts):
+        if self.fail_api:
+            raise RuntimeError("api down")
+        self.api_commands.append(("charge", watts))
+
+    async def set_discharge(self, watts):
+        if self.fail_api:
+            raise RuntimeError("api down")
+        self.api_commands.append(("discharge", watts))
+
+    async def stop_forced_mode(self):
+        if self.fail_api:
+            raise RuntimeError("api down")
+        self.api_commands.append(("stop_forced_mode", 0))
+
+    async def set_battery_limits(self, charge_limit_w, discharge_limit_w, *, state_changed=False):
+        self.battery_limits.append((charge_limit_w, discharge_limit_w))
+        if self.skip_modbus:
+            return False
+        return True
+
+
+def test_export_charging_sends_api_charge_command_and_modbus_charge_limit(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+        bridge.handle_grid_power("-1200")
+        bridge.control_state = "CHARGING"
+        await bridge.handle_charge_setpoint(1100)
+        assert backend.battery_limits == [(1100, 0)]
+        assert backend.api_commands == [("charge", 1100)]
+
+    asyncio.run(run())
+
+
+def test_import_discharging_sends_api_discharge_command_and_modbus_discharge_limit(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+        bridge.handle_grid_power("900")
+        bridge.control_state = "DISCHARGING"
+        await bridge.handle_discharge_setpoint(800)
+        assert backend.battery_limits == [(0, 800)]
+        assert backend.api_commands == [("discharge", 800)]
+
+    asyncio.run(run())
+
+
+def test_idle_stops_forced_mode(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+        bridge.handle_grid_power("0")
+        bridge.control_state = "IDLE"
+        await bridge.handle_charge_setpoint(0)
+        assert backend.api_commands == [("stop_forced_mode", 0)]
+
+    asyncio.run(run())
+
+
+def test_unchanged_api_command_is_not_sent_twice(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+        bridge.handle_grid_power("1000")
+        bridge.control_state = "DISCHARGING"
+        await bridge.handle_discharge_setpoint(700)
+        await bridge._apply_api_command(0, 700)
+        assert backend.api_commands == [("discharge", 700)]
+
+    asyncio.run(run())
+
+
+def test_api_command_failure_is_not_masked_by_successful_modbus_write(monkeypatch, caplog):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        backend.fail_api = True
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+        bridge.handle_grid_power("1000")
+        bridge.control_state = "DISCHARGING"
+        await bridge.handle_discharge_setpoint(600)
+        assert backend.battery_limits == [(0, 600)]
+        assert bridge.modbus_writes_total == 1
+
+    asyncio.run(run())
+    assert "Active command failed" in caplog.text
+    assert "battery likely not actively steered" in caplog.text
+
+
+def test_modbus_skipped_unchanged_does_not_count_as_failure(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        backend.skip_modbus = True
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+        bridge.handle_grid_power("1000")
+        bridge.control_state = "DISCHARGING"
+        await bridge.handle_discharge_setpoint(600)
+        assert bridge.modbus_errors_total == 0
+        assert bridge.modbus_write_skipped_total == 1
+        assert backend.api_commands == [("discharge", 600)]
+
+    asyncio.run(run())
