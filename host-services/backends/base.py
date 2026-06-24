@@ -19,6 +19,14 @@ class InverterState:
 
 
 class InverterBackend(Protocol):
+    async def read_status(self) -> object:
+        """Poll raw backend status, when supported."""
+        ...
+
+    async def set_battery_limits(self, charge_limit_w: int, discharge_limit_w: int) -> None:
+        """Apply charge/discharge actuator limits in watts."""
+        ...
+
     async def read_state(self) -> InverterState:
         """Poll inverter and return structured state."""
         ...
