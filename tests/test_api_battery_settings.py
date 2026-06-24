@@ -49,3 +49,19 @@ def test_trade_settings_update_accepts_entsoe_api_url():
 def test_trade_settings_update_rejects_invalid_entsoe_api_url(value):
     with pytest.raises(ValidationError):
         api_main.TradeSettingsUpdate(entsoe_api_url=value)
+
+
+def test_claude_agent_settings_update_defaults_and_validation():
+    update = api_main.ClaudeAgentSettingsUpdate(min_tokens_remaining=0)
+
+    assert update.min_tokens_remaining == 0
+    assert api_main.CLAUDE_AGENT_DEFAULTS == {
+        "enabled": "false",
+        "token_guard_enabled": "true",
+        "min_tokens_remaining": "5000",
+    }
+
+
+def test_claude_agent_settings_update_rejects_negative_min_tokens():
+    with pytest.raises(ValidationError):
+        api_main.ClaudeAgentSettingsUpdate(min_tokens_remaining=-1)

@@ -123,6 +123,12 @@ STRATEGY_DEFAULTS = {
     "ramp_ceiling_w": "1000",
     "ramp_hold_seconds": "120",
 }
+CLAUDE_AGENT_DEFAULTS = {
+    "enabled": "false",
+    "token_guard_enabled": "true",
+    "min_tokens_remaining": "5000",
+}
+
 TRADE_DEFAULTS = {
     "bidding_zone": "10YNL----------L",
     "poll_time_local": "13:30",
@@ -596,6 +602,12 @@ class SystemSettingsUpdate(BaseModel):
     theme: Literal["system", "light", "dark"] | None = None
 
 
+class ClaudeAgentSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    token_guard_enabled: bool | None = None
+    min_tokens_remaining: int | None = Field(default=None, ge=0)
+
+
 class AssetSteeringSettingsUpdate(BaseModel):
     ghi_solar_rich_threshold: float | None = None
     ghi_solar_poor_threshold: float | None = None
@@ -789,6 +801,7 @@ async def debug_status(session: AsyncSession = Depends(get_session)) -> dict[str
         "mqtt_status_missing_keys": missing_keys,
         "recent_mqtt_events": list(MQTT_EVENTS)[-50:],
         "last_retained_fetch": LAST_RETAINED_FETCH,
+        "claude_agent": await claude_agent_settings(session),
     }
 
 
@@ -825,6 +838,51 @@ async def update_system_settings(update: SystemSettingsUpdate, session: AsyncSes
     if update.debug_logging is not None or update.theme is not None:
         await session.commit()
     return await get_system_settings(session)
+
+
+async def claude_agent_settings(session: AsyncSession) -> dict[str, Any]:
+    result = await session.execute(text("select key, value from settings where key like 'claude_agent.%'"))
+    values = {row.key.removeprefix("claude_agent."): row.value for row in result}
+    merged = {**CLAUDE_AGENT_DEFAULTS, **values}
+    enabled = str(merged["enabled"]).lower() in {"1", "true", "yes", "on"}
+    token_guard_enabled = str(merged["token_guard_enabled"]).lower() in {"1", "true", "yes", "on"}
+    min_tokens_remaining = max(0, int(merged["min_tokens_remaining"]))
+    return {
+        "enabled": enabled,
+        "token_guard_enabled": token_guard_enabled,
+        "min_tokens_remaining": min_tokens_remaining,
+        "status": "enabled" if enabled else "disabled",
+        "token_guard_status": "enabled" if token_guard_enabled else "disabled",
+    }
+
+
+@app.get("/api/claude-agent/settings")
+@app.get("/claude-agent/settings")
+async def get_claude_agent_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    return await claude_agent_settings(session)
+
+
+@app.patch("/api/claude-agent/settings")
+@app.patch("/claude-agent/settings")
+@app.put("/api/claude-agent/settings")
+@app.put("/claude-agent/settings")
+async def update_claude_agent_settings(
+    update: ClaudeAgentSettingsUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    data = update.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        stored = "true" if isinstance(value, bool) and value else "false" if isinstance(value, bool) else str(value)
+        await session.execute(
+            text("""
+                insert into settings (key, value, encrypted, updated_at) values (:key, :value, false, now())
+                on conflict (key) do update set value=:value, encrypted=false, updated_at=now()
+            """),
+            {"key": f"claude_agent.{key}", "value": stored},
+        )
+    if data:
+        await session.commit()
+    return await claude_agent_settings(session)
 
 
 async def asset_steering_settings(session: AsyncSession) -> dict[str, Any]:

@@ -358,6 +358,20 @@ def battery_settings_body() -> str:
         <button type='submit'>Save trade settings</button>
       </form><pre id='trade-result'></pre></div>
 
+
+    <div class='card'>
+      <h2>Claude agent</h2>
+      <p style='color:var(--steel);font-size:14px;margin:0 0 12px'>Laat de Claude-agentcontainer normaal draaien, maar beheer runtime of de agent Claude.ai/API-aanroepen mag doen. Wijzigingen vereisen geen containerrestart.</p>
+      <p>Huidige status: <strong id='claude-agent-status' class='badge'>...</strong></p>
+      <form id='claude-agent-settings' class='grid'>
+        <label><input name='enabled' type='checkbox' style='width:auto'> Claude agent inschakelen</label>
+        <label><input name='token_guard_enabled' type='checkbox' style='width:auto'> Token guard inschakelen</label>
+        <label>Minimum tokens overhouden <input name='min_tokens_remaining' type='number' min='0' step='1'></label>
+        <button type='submit'>Save Claude agent settings</button>
+      </form>
+      <pre id='claude-agent-result'></pre>
+    </div>
+
     <div class='card'>
       <h2>Appearance</h2>
       <p style='color:var(--steel);font-size:14px;margin:0 0 12px'>Choose how Minyad should render every web interface. The preference is saved server-side and cached locally for instant page loads.</p>
@@ -426,6 +440,31 @@ def battery_settings_body() -> str:
         document.getElementById('trade-result').textContent = JSON.stringify(await res.json(), null, 2);
       });
 
+
+      function renderClaudeAgentSettings(data){
+        const form = document.getElementById('claude-agent-settings');
+        form.elements.enabled.checked = Boolean(data.enabled);
+        form.elements.token_guard_enabled.checked = Boolean(data.token_guard_enabled);
+        form.elements.min_tokens_remaining.value = data.min_tokens_remaining ?? 5000;
+        document.getElementById('claude-agent-status').textContent = data.enabled ? 'enabled' : 'disabled';
+        document.getElementById('claude-agent-result').textContent = JSON.stringify(data, null, 2);
+      }
+      async function loadClaudeAgentSettings(){
+        const res = await fetch('/api/claude-agent/settings');
+        renderClaudeAgentSettings(await res.json());
+      }
+      document.getElementById('claude-agent-settings').addEventListener('submit', async (event)=>{
+        event.preventDefault();
+        const form = event.target;
+        const data = {
+          enabled: form.elements.enabled.checked,
+          token_guard_enabled: form.elements.token_guard_enabled.checked,
+          min_tokens_remaining: Number(form.elements.min_tokens_remaining.value || 0),
+        };
+        const res = await fetch('/api/claude-agent/settings',{method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+        renderClaudeAgentSettings(await res.json());
+      });
+
       let debugRefreshTimer = null;
 
       function applyDebugState(enabled) {
@@ -491,6 +530,7 @@ def battery_settings_body() -> str:
 
       loadBatterySettings();
       loadTradeSettings();
+      loadClaudeAgentSettings();
       loadSystemSettings();
     </script>
     """

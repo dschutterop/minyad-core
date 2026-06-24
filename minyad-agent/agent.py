@@ -21,6 +21,21 @@ MAX_TOOL_ROUNDS = 4
 SYSTEM_PROMPT_CACHE_TTL = "1h"
 
 
+def claude_skip_reason(settings: dict[str, Any], estimated_tokens: int) -> str | None:
+    if not settings.get("enabled", False):
+        return "waiting_for_claude"
+    if settings.get("token_guard_enabled", True):
+        remaining = settings.get("tokens_remaining")
+        if remaining is not None and int(remaining) < int(settings.get("min_tokens_remaining", 5000)):
+            return "token_guard_active"
+        estimated_remaining = settings.get("estimated_tokens_remaining")
+        if estimated_remaining is not None and int(estimated_remaining) < int(settings.get("min_tokens_remaining", 5000)):
+            return "token_guard_active"
+        if int(settings.get("min_tokens_remaining", 0)) > 0 and estimated_tokens < 0:
+            return "token_guard_active"
+    return None
+
+
 def log_api_usage(response: Any) -> None:
     usage = getattr(response, "usage", None)
     usage_payload = {
@@ -54,6 +69,32 @@ def run_cycle() -> None:
         backoff_seconds=config.MINYAD_API_RETRY_BACKOFF_SECONDS,
     )
     try:
+        claude_settings = client.get_claude_agent_settings()
+        skip_reason = claude_skip_reason(claude_settings, config.MAX_TOKENS)
+        if skip_reason is not None:
+            LOGGER.info("skipping Claude agent cycle reason=%s settings=%s", skip_reason, {k: v for k, v in claude_settings.items() if "key" not in k.lower()})
+            client.log_decision({
+                "action_taken": "hold",
+                "setpoint_w": None,
+                "reasoning": f"Claude call skipped: {skip_reason}",
+                "confidence": "low",
+                "input_snapshot": {"claude_agent": claude_settings, "skip_reason": skip_reason},
+                "dry_run": config.DRY_RUN,
+                "model": config.MODEL,
+            })
+            return
+        if not config.ANTHROPIC_API_KEY:
+            LOGGER.warning("skipping Claude agent cycle because ANTHROPIC_API_KEY is not configured")
+            client.log_decision({
+                "action_taken": "hold",
+                "setpoint_w": None,
+                "reasoning": "Claude call skipped: missing Anthropic API key",
+                "confidence": "low",
+                "input_snapshot": {"claude_agent": claude_settings, "skip_reason": "missing_api_key"},
+                "dry_run": config.DRY_RUN,
+                "model": config.MODEL,
+            })
+            return
         state = client.get_state()
         battery_settings = client.get_battery_settings()
         state.setdefault("settings", {})["battery"] = battery_settings
@@ -123,7 +164,7 @@ def run_cycle() -> None:
 
 def main() -> None:
     if not config.ANTHROPIC_API_KEY:
-        raise RuntimeError("ANTHROPIC_API_KEY is required")
+        LOGGER.warning("ANTHROPIC_API_KEY is not configured; container will keep running and skip Claude calls when reached")
     scheduler = BlockingScheduler()
     scheduler.add_job(run_cycle, "interval", minutes=config.CYCLE_MINUTES, next_run_time=None)
     LOGGER.info("starting Minyad agent dry_run=%s cycle_minutes=%s", config.DRY_RUN, config.CYCLE_MINUTES)
