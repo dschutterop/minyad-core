@@ -107,11 +107,15 @@ def publish_prices(mqtt: MinyadMqttClient, prices: list[dict[str, Any]]) -> None
     LOGGER.info("Published %d day-ahead price points for %s", len(prices), day)
 
 
+def collect_once(client: Any, mqtt: MinyadMqttClient, settings: DayAheadSettings, target_day: datetime) -> None:
+    prices = fetch_day_ahead(client, settings, target_day)
+    publish_prices(mqtt, prices)
+
+
 def collect_with_retries(client: Any, mqtt: MinyadMqttClient, settings: DayAheadSettings, target_day: datetime) -> bool:
     for attempt in range(1, settings.retry_attempts + 1):
         try:
-            prices = fetch_day_ahead(client, settings, target_day)
-            publish_prices(mqtt, prices)
+            collect_once(client, mqtt, settings, target_day)
             return True
         except Exception as exc:  # ENTSO-E uses several exception types for unavailable data.
             if attempt >= settings.retry_attempts:
@@ -131,16 +135,32 @@ def collect_with_retries(client: Any, mqtt: MinyadMqttClient, settings: DayAhead
 def collect_startup_prices(client: Any, mqtt: MinyadMqttClient, settings: DayAheadSettings, now: datetime) -> None:
     target = _target_day(now)
     LOGGER.info("Running startup ENTSO-E day-ahead poll for %s", target.date())
-    if collect_with_retries(client, mqtt, settings, target):
+    try:
+        collect_once(client, mqtt, settings, target)
         return
+    except Exception as exc:  # ENTSO-E uses several exception types for unavailable data.
+        LOGGER.warning(
+            "Startup day-ahead prices for %s are unavailable; immediately fetching current-day prices so the dashboard is populated: %r",
+            target.date(),
+            exc,
+        )
 
     current_day = now.astimezone(AMSTERDAM_TZ)
-    LOGGER.warning(
-        "Startup day-ahead prices for %s are unavailable; fetching current-day prices for %s so the dashboard is populated",
-        target.date(),
-        current_day.date(),
-    )
-    collect_with_retries(client, mqtt, settings, current_day)
+    try:
+        collect_once(client, mqtt, settings, current_day)
+        LOGGER.info(
+            "Published current-day prices for %s during startup; continuing to retry target day %s",
+            current_day.date(),
+            target.date(),
+        )
+    except Exception as exc:  # ENTSO-E uses several exception types for unavailable data.
+        LOGGER.warning(
+            "Current-day prices for %s are unavailable during startup; retrying target day %s with configured retry policy: %r",
+            current_day.date(),
+            target.date(),
+            exc,
+        )
+    collect_with_retries(client, mqtt, settings, target)
 
 
 def _target_day(now: datetime) -> datetime:
