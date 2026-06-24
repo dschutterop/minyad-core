@@ -18,7 +18,7 @@ import paho.mqtt.client as mqtt
 import psycopg2
 from dotenv import load_dotenv
 
-from backends import GoodWeBackend, InverterBackend, ModbusBackend
+from backends import BatteryTelemetry, GoodWeBackend, GoodWeCompositeBackend, InverterBackend, ModbusBackend
 
 load_dotenv()
 
@@ -78,8 +78,9 @@ def _get_required_env(name: str) -> str:
 
 @dataclass(frozen=True)
 class Config:
-    inverter_backend: str
-    goodwe_api_host: str
+    goodwe_modbus_enabled: bool
+    goodwe_api_enabled: bool
+    goodwe_api_host: str | None
     inverter_max_w: int
     inverter_retries: int
     inverter_delay: int
@@ -107,14 +108,22 @@ class Config:
         if not mqtt_host:
             raise ValueError("MQTT_BROKER is required")
 
-        inverter_backend = os.getenv("INVERTER_BACKEND", "goodwe").lower()
-        if inverter_backend not in {"modbus", "goodwe"}:
-            raise ValueError("INVERTER_BACKEND must be 'modbus' or 'goodwe'")
+        legacy_backend = os.getenv("INVERTER_BACKEND")
+        if legacy_backend:
+            logger.warning("INVERTER_BACKEND is deprecated; use GOODWE_MODBUS_ENABLED and GOODWE_API_ENABLED")
+        goodwe_api_host = os.getenv("GOODWE_API_HOST", "").strip() or None
+        goodwe_modbus_enabled = os.getenv("GOODWE_MODBUS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+        goodwe_api_enabled = os.getenv("GOODWE_API_ENABLED", "").lower() in {"1", "true", "yes", "on"} if os.getenv("GOODWE_API_ENABLED") is not None else goodwe_api_host is not None
+        if goodwe_api_enabled and not goodwe_api_host:
+            raise ValueError("GOODWE_API_HOST is required when GOODWE_API_ENABLED=true")
+        if not goodwe_modbus_enabled and not goodwe_api_enabled:
+            raise ValueError("At least one of GOODWE_MODBUS_ENABLED or GOODWE_API_ENABLED must be true")
 
         max_charge_a = _get_env_int("MAX_CHARGE_A", 30)
         return cls(
-            inverter_backend=inverter_backend,
-            goodwe_api_host=_get_required_env("GOODWE_API_HOST"),
+            goodwe_modbus_enabled=goodwe_modbus_enabled,
+            goodwe_api_enabled=goodwe_api_enabled,
+            goodwe_api_host=goodwe_api_host,
             inverter_max_w=_get_env_int("INVERTER_MAX_W", _get_env_int("MAX_DISCHARGE_W", 5000)),
             inverter_retries=_get_env_int("INVERTER_RETRIES", 5),
             inverter_delay=_get_env_int("INVERTER_DELAY", 3),
@@ -130,7 +139,7 @@ class Config:
             poll_interval=_get_env_int("POLL_INTERVAL", DEFAULT_POLL_INTERVAL_SECONDS),
             database_url=os.getenv("DB_URL") or os.getenv("DATABASE_URL"),
             max_charge_a=min(max_charge_a, 30),
-            dry_run=os.getenv("DRY_RUN", "false").lower() in {"1", "true", "yes", "on"},
+            dry_run=os.getenv("GOODWE_DRY_RUN", os.getenv("DRY_RUN", "false")).lower() in {"1", "true", "yes", "on"},
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             min_write_interval_s=_get_env_float("MIN_WRITE_INTERVAL_SEC", MIN_WRITE_INTERVAL_SEC),
             min_target_change_w=_get_env_int("MIN_TARGET_CHANGE_W", MIN_TARGET_CHANGE_W),
@@ -150,8 +159,10 @@ def utc_now_iso() -> str:
 
 
 def build_backend(config: Config) -> InverterBackend:
-    if config.inverter_backend == "modbus":
-        return ModbusBackend(
+    modbus_client: InverterBackend | None = None
+    api_client: InverterBackend | None = None
+    if config.goodwe_modbus_enabled:
+        modbus_client = ModbusBackend(
             host=config.modbus_gw_ip,
             port=config.modbus_gw_port,
             slave_id=config.modbus_slave_id,
@@ -162,15 +173,17 @@ def build_backend(config: Config) -> InverterBackend:
             min_target_change_w=config.min_target_change_w,
             write_refresh_interval_s=config.write_refresh_interval_s,
         )
-    if config.inverter_backend == "goodwe":
-        return GoodWeBackend(
+    if config.goodwe_api_enabled:
+        if not config.goodwe_api_host:
+            raise ValueError("GOODWE_API_HOST is required when GOODWE_API_ENABLED=true")
+        api_client = GoodWeBackend(
             config.goodwe_api_host,
             config.inverter_max_w,
             retries=config.inverter_retries,
             delay=config.inverter_delay,
             min_request_interval_s=config.goodwe_min_request_interval_s,
         )
-    raise ValueError("INVERTER_BACKEND must be 'modbus' or 'goodwe'")
+    return GoodWeCompositeBackend(modbus_client, api_client)
 
 
 class GoodWeBridge:
@@ -397,7 +410,7 @@ class GoodWeBridge:
             "minyad/battery/mode": state.battery_mode,
             "minyad/inverter/temperature_c": state.inverter_temperature_c,
             "minyad/inverter/grid_power_w": state.grid_power_w,
-            MQTT_TOPIC_INVERTER_STATUS: STATUS_OK,
+            MQTT_TOPIC_INVERTER_STATUS: self._status_for_state(state),
         }
         for topic, value in values.items():
             if value is None:
@@ -407,6 +420,8 @@ class GoodWeBridge:
         self.publish_bridge_alive()
         self.modbus_reads_total += 1
         self.last_successful_read_timestamp = time()
+        if isinstance(state, BatteryTelemetry) and state.modbus_error and state.modbus_error != "disabled":
+            self.modbus_errors_total += 1
         self.publish_metrics()
         logger.info(
             "Poll read success timestamp=%s soc=%s battery_power_w=%s inverter_grid_power_w=%s",
@@ -415,6 +430,11 @@ class GoodWeBridge:
             state.battery_power_w,
             state.grid_power_w,
         )
+
+    def _status_for_state(self, state: InverterState) -> str:
+        if isinstance(state, BatteryTelemetry) and state.modbus_error and state.modbus_error != "disabled":
+            return STATUS_UNREACHABLE
+        return STATUS_OK
 
     def publish_metrics(self) -> None:
         metrics = {
@@ -469,7 +489,7 @@ async def main() -> None:
     config = Config.from_env()
     configure_logging(config.log_level)
     backend = build_backend(config)
-    logger.info("Using inverter backend: %s", config.inverter_backend)
+    logger.info("Using GoodWe protocols: modbus_enabled=%s api_enabled=%s dry_run=%s", config.goodwe_modbus_enabled, config.goodwe_api_enabled, config.dry_run)
     bridge = GoodWeBridge(config, backend)
 
     loop = asyncio.get_running_loop()
