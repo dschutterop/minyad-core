@@ -2,7 +2,7 @@ import os
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from api.main import battery_status_payload, derive_battery_state, grid_status_payload
+from api.main import battery_curve_power_w, battery_status_payload, compute_household_load, derive_battery_state, grid_status_payload
 
 
 def test_battery_status_payload_excludes_grid_keys():
@@ -75,3 +75,28 @@ def test_derive_battery_state_uses_bridge_power_sign_without_mode():
 
 def test_derive_battery_state_keeps_fallback_inside_deadband():
     assert derive_battery_state({"power_w": "4", "mode": "idle"}, fallback="IDLE") == "IDLE"
+
+
+def test_battery_curve_power_prefers_actual_power_over_stale_setpoint():
+    payload = {"power_w": "0", "discharge_w": "2200", "setpoint_w": "0"}
+
+    assert battery_curve_power_w(payload) == 0
+
+
+def test_battery_curve_power_falls_back_to_setpoint_without_actual_power():
+    assert battery_curve_power_w({"discharge_w": "2200"}) == 2200
+    assert battery_curve_power_w({"setpoint_w": "1400"}) == -1400
+
+
+def test_household_load_uses_idle_actual_battery_power_over_stale_discharge_setpoint():
+    payload = {
+        "solar_power_w": "1000",
+        "power_w": "0",
+        "discharge_w": "2200",
+        "grid_net_power_w": "500",
+    }
+
+    result = compute_household_load(payload)
+
+    assert result["battery_discharge_w"] == 0
+    assert result["battery_charge_w"] == 0
