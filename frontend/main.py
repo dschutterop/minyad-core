@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 app = FastAPI(title="Minyad Frontend")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://minyad-api:8000")
 
-MENU = ["Dashboard", "Health", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
+MENU = ["Dashboard", "Agent", "Health", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
 
 BRAND_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
@@ -112,6 +112,8 @@ html[data-theme=light] .tile,html[data-theme=light] .chart-card,html[data-theme=
 html[data-theme=light] .window-tab,html[data-theme=light] .layout-toggle,html[data-theme=light] .layout-toggle button.active,html[data-theme=light] .bar,html[data-theme=light] .thin,html[data-theme=light] .cells i,html[data-theme=light] .chart-tooltip,html[data-theme=light] .mailbox-button,html[data-theme=light] .mailbox-item,html[data-theme=light] .reply-box textarea,html[data-theme=light] .reply-box button,html[data-theme=light] .mailbox-head button{background:#fff;color:#15202A;border-color:rgba(74,98,118,.18)}
 html[data-theme=light] .mailbox-panel{background:#fff;border-color:rgba(74,98,118,.18)}
 .theme-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}.theme-option{border:1px solid rgba(74,98,118,.22);border-radius:12px;padding:14px;background:rgba(255,255,255,.5)}.theme-option input{width:auto;margin:0 8px 0 0}.theme-option b{display:block}.theme-option span{display:block;color:var(--steel);font-size:13px;margin-top:4px}@media(max-width:700px){.theme-options{grid-template-columns:1fr}}
+
+.agent-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.agent-stat{background:#fff;border:1px solid rgba(74,98,118,.18);border-radius:12px;padding:16px}.agent-stat b{display:block;font-family:var(--mono);font-size:26px}.agent-layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);gap:16px}.agent-list{display:grid;gap:10px}.agent-decision,.agent-message-card{background:#fff;border:1px solid rgba(74,98,118,.18);border-left:4px solid var(--steel);border-radius:12px;padding:14px}.agent-decision.charge{border-left-color:var(--store)}.agent-decision.discharge{border-left-color:var(--produce)}.agent-decision.hold{border-left-color:var(--steel)}.agent-decision header,.agent-message-card header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.agent-meta{font-family:var(--mono);font-size:11px;color:var(--steel);letter-spacing:.08em;text-transform:uppercase}.agent-reason{white-space:pre-wrap;line-height:1.45}.agent-controls{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.agent-controls button{border:1px solid rgba(74,98,118,.25);background:#fff;border-radius:999px;padding:10px 14px;cursor:pointer}.agent-controls button.active{background:var(--panel);color:var(--p-ink)}.agent-snapshot{max-height:260px}.agent-empty{border:1px dashed rgba(74,98,118,.28);border-radius:12px;padding:24px;text-align:center;color:var(--steel);font-family:var(--mono)}html[data-theme=dark] .agent-stat,html[data-theme=dark] .agent-decision,html[data-theme=dark] .agent-message-card,html[data-theme=dark] .agent-controls button{background:#101b24;color:var(--ink);border-color:rgba(184,210,228,.14)}html[data-theme=dark] .agent-controls button.active{background:#E6EDF2;color:#071017}@media(max-width:900px){.agent-hero{grid-template-columns:repeat(2,1fr)}.agent-layout{grid-template-columns:1fr}}
 """
 
 def brand_mark() -> str:
@@ -183,6 +185,69 @@ def render_dashboard_page() -> str:
     </html>
     """
 
+
+def agent_body() -> str:
+    return """
+    <div class='card'>
+      <span class='kicker'>Operator agent</span>
+      <h1 class='page-title'>Agent dashboard</h1>
+      <p class='page-copy'>Track agent activity, decisions, setpoints, confidence, dry-run state, and recent mailbox messages from one dedicated page.</p>
+      <div class='agent-hero'>
+        <div class='agent-stat'><span class='agent-meta'>Last decision</span><b id='agent-last-action'>--</b></div>
+        <div class='agent-stat'><span class='agent-meta'>Setpoint</span><b id='agent-last-setpoint'>--</b></div>
+        <div class='agent-stat'><span class='agent-meta'>Confidence</span><b id='agent-last-confidence'>--</b></div>
+        <div class='agent-stat'><span class='agent-meta'>Unread messages</span><b id='agent-unread'>--</b></div>
+      </div>
+      <div class='agent-controls'>
+        <button type='button' class='active' data-limit='25'>Latest 25</button>
+        <button type='button' data-limit='50'>Latest 50</button>
+        <button type='button' data-limit='100'>Latest 100</button>
+        <button type='button' onclick='loadAgentDashboard()'>Refresh</button>
+      </div>
+    </div>
+    <div class='agent-layout' style='margin-top:16px'>
+      <section class='panel'>
+        <h2>Decision activity</h2>
+        <div id='agent-decisions' class='agent-list'><div class='agent-empty'>Loading decisions…</div></div>
+      </section>
+      <aside class='panel'>
+        <h2>Recent messages</h2>
+        <div id='agent-messages' class='agent-list'><div class='agent-empty'>Loading messages…</div></div>
+      </aside>
+    </div>
+    <script>
+      let agentLimit=25;
+      const agentEl=id=>document.getElementById(id);
+      const agentEsc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+      const fmtTime=value=>value?new Date(value).toLocaleString():'--';
+      const fmtSetpoint=value=>value===null||value===undefined?'hold':`${Number(value).toLocaleString()} W`;
+      function snapshotPreview(snapshot){try{return JSON.stringify(snapshot,null,2)}catch(e){return '{}'}}
+      function renderDecisions(items){
+        const wrap=agentEl('agent-decisions');
+        if(!items.length){wrap.innerHTML='<div class="agent-empty">No agent decisions recorded yet.</div>';return;}
+        const latest=items[0];
+        agentEl('agent-last-action').textContent=latest.action_taken;
+        agentEl('agent-last-setpoint').textContent=fmtSetpoint(latest.setpoint_w);
+        agentEl('agent-last-confidence').textContent=latest.confidence;
+        wrap.innerHTML=items.map(d=>`<article class="agent-decision ${agentEsc(d.action_taken)}"><header><strong>${agentEsc(d.action_taken)} · ${fmtSetpoint(d.setpoint_w)}</strong><span class="agent-meta">${fmtTime(d.created_at)}</span></header><div class="agent-meta">${agentEsc(d.confidence)} confidence · ${d.dry_run?'dry run':'live'} · ${agentEsc(d.model)}</div><p class="agent-reason">${agentEsc(d.reasoning)}</p><details><summary class="agent-meta">Input snapshot</summary><pre class="agent-snapshot">${agentEsc(snapshotPreview(d.input_snapshot))}</pre></details></article>`).join('');
+      }
+      function renderMessages(items){
+        const wrap=agentEl('agent-messages');
+        if(!items.length){wrap.innerHTML='<div class="agent-empty">No recent agent messages.</div>';return;}
+        wrap.innerHTML=items.map(m=>`<article class="agent-message-card"><header><strong>${agentEsc(m.subject)}</strong><span class="agent-meta">${fmtTime(m.created_at)}</span></header><div class="agent-meta">${agentEsc(m.category)} · ${agentEsc(m.severity)} · ${m.read_at?'read':'unread'}</div><p class="agent-reason">${agentEsc(m.body)}</p></article>`).join('');
+      }
+      async function loadAgentDashboard(){
+        try{
+          const [decisionsRes,messagesRes,unreadRes]=await Promise.all([fetch(`/api/agent/decisions?limit=${agentLimit}`),fetch('/api/messages?sender=agent&limit=10'),fetch('/api/messages/unread-count')]);
+          renderDecisions(decisionsRes.ok?await decisionsRes.json():[]);
+          renderMessages(messagesRes.ok?await messagesRes.json():[]);
+          const unread=unreadRes.ok?await unreadRes.json():{unread_count:0}; agentEl('agent-unread').textContent=String(unread.unread_count||0);
+        }catch(err){agentEl('agent-decisions').innerHTML=`<div class='agent-empty error'>${agentEsc(err.message||'Unable to load agent activity')}</div>`;}
+      }
+      document.querySelectorAll('[data-limit]').forEach(btn=>btn.addEventListener('click',()=>{agentLimit=Number(btn.dataset.limit);document.querySelectorAll('[data-limit]').forEach(b=>b.classList.toggle('active',b===btn));loadAgentDashboard();}));
+      loadAgentDashboard(); setInterval(loadAgentDashboard,15000);
+    </script>
+    """
 
 def asset_steering_body() -> str:
     return """
@@ -957,6 +1022,8 @@ async def section(section: str) -> str:
         title = "Dashboard"
     if title == "Settings":
         return render_page(title, battery_settings_body())
+    if title == "Agent":
+        return render_page(title, agent_body())
     if title == "Health":
         return render_page(title, health_body())
     if title == "Battery":
