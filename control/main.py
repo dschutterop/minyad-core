@@ -460,6 +460,23 @@ class ControlApp:
         soc_floor = int(self.settings.get("soc_floor", SOC_FLOOR_DEFAULT))
         return soc > soc_floor
 
+    async def enforce_soc_guard_now(self) -> None:
+        """Immediately apply SoC limits after settings reloads.
+
+        Grid samples normally run through ``_apply_soc_guard`` before the
+        hysteresis controller can act.  A settings reload can move the floor or
+        ceiling across the current battery SoC without a new grid sample, so
+        enforce the same guard immediately to stop any now-forbidden active
+        charge/discharge state.
+        """
+        if self.controller is None:
+            return
+        previous_state = self.controller.state
+        self._apply_soc_guard(0)
+        if previous_state is not ControlState.IDLE and self.controller.state is ControlState.IDLE:
+            await self.stop_charging()
+            await self.publish_state(ControlState.IDLE)
+
     def _apply_soc_guard(self, surplus_w: int) -> int:
         """Block discharge below soc_floor and charge above soc_ceiling.
 
