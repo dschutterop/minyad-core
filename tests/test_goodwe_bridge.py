@@ -91,6 +91,7 @@ class Backend:
     def __init__(self):
         self.charge_setpoints = []
         self.discharge_setpoints = []
+        self.battery_limits = []
 
     async def read_state(self):
         return InverterState(
@@ -109,6 +110,11 @@ class Backend:
 
     async def set_discharge(self, watts):
         self.discharge_setpoints.append(watts)
+
+    async def set_battery_limits(self, charge_limit_w, discharge_limit_w):
+        self.battery_limits.append((charge_limit_w, discharge_limit_w))
+        self.charge_setpoints.append(charge_limit_w)
+        self.discharge_setpoints.append(discharge_limit_w)
 
 
 def make_config():
@@ -130,6 +136,7 @@ def make_config():
         poll_interval=120,
         database_url=None,
         max_charge_a=30,
+        dry_run=False,
         log_level="INFO",
     )
 

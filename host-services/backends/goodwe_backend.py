@@ -65,27 +65,35 @@ class GoodWeBackend:
         await self._wait_for_request_slot()
         await inv._read_from_socket(Aa55ProtocolCommand(command, response_type))
 
-    async def set_charge(self, watts: int) -> None:
-        pct = self._watts_to_pct(watts)
-        async with self._request_lock:
-            inv = await self._get_inverter()
-            await self._send_command(inv, "032d050000173b00", "03AD")
-            await self._send_command(inv, f"032c050000173b{pct:02x}", "03AC")
-        logger.info("GoodWe write: charge=%sW (%s%%)", max(0, min(self.max_w, int(watts))), pct)
-
-    async def set_discharge(self, watts: int) -> None:
-        pct = self._watts_to_pct(watts)
-        async with self._request_lock:
-            inv = await self._get_inverter()
-            await self._send_command(inv, "032c050000173b00", "03AC")
-            await self._send_command(inv, f"032d050000173b{pct:02x}", "03AD")
-        logger.info("GoodWe write: discharge=%sW (%s%%)", max(0, min(self.max_w, int(watts))), pct)
-
-    async def read_state(self) -> InverterState:
+    async def read_status(self) -> dict[str, Any]:
         async with self._request_lock:
             inv = await self._get_inverter()
             await self._wait_for_request_slot()
-            data = await inv.read_runtime_data()
+            return dict(await inv.read_runtime_data())
+
+    async def set_battery_limits(self, charge_limit_w: int, discharge_limit_w: int) -> None:
+        charge_pct = self._watts_to_pct(charge_limit_w)
+        discharge_pct = self._watts_to_pct(discharge_limit_w)
+        async with self._request_lock:
+            inv = await self._get_inverter()
+            await self._send_command(inv, f"032c050000173b{charge_pct:02x}", "03AC")
+            await self._send_command(inv, f"032d050000173b{discharge_pct:02x}", "03AD")
+        logger.info(
+            "GoodWe limits applied charge_limit_w=%s (%s%%) discharge_limit_w=%s (%s%%)",
+            max(0, min(self.max_w, int(charge_limit_w))),
+            charge_pct,
+            max(0, min(self.max_w, int(discharge_limit_w))),
+            discharge_pct,
+        )
+
+    async def set_charge(self, watts: int) -> None:
+        await self.set_battery_limits(watts, 0)
+
+    async def set_discharge(self, watts: int) -> None:
+        await self.set_battery_limits(0, watts)
+
+    async def read_state(self) -> InverterState:
+        data = await self.read_status()
         mode = _battery_mode_label(data.get("battery_mode"), data.get("battery_mode_label"))
         return InverterState(
             battery_soc=int(data["battery_soc"]),
