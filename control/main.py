@@ -500,9 +500,19 @@ class ControlApp:
         self.setpoint_w = 0
         self.mqtt.publish_measurement("control", "command", "stop")
         if self.bridge_is_available:
-            self.mqtt.publish_measurement("control", "charge_w", 0)
+            self.publish_battery_limits(0, 0)
             self.mqtt.publish_measurement("control", "setpoint_w", 0)
-            self.mqtt.publish_measurement("control", "discharge_w", 0)
+
+    def publish_battery_limits(self, charge_limit_w: int, discharge_limit_w: int) -> None:
+        LOGGER.info(
+            "Control actuator decision p1_grid_power_w=%s charge_limit_w=%s discharge_limit_w=%s battery_power_w=%s",
+            self.latest_grid_power_w,
+            charge_limit_w,
+            discharge_limit_w,
+            self.latest_battery_power_w,
+        )
+        self.mqtt.publish_measurement("control", "charge_w", charge_limit_w)
+        self.mqtt.publish_measurement("control", "discharge_w", discharge_limit_w)
 
     async def publish_setpoint(self, watts: int) -> None:
         if not self.bridge_is_available:
@@ -511,8 +521,7 @@ class ControlApp:
             return
         self.setpoint_w = max(0, watts)
         self.mqtt.publish_measurement("control", "command", "resume" if self.setpoint_w else "stop")
-        self.mqtt.publish_measurement("control", "discharge_w", 0)
-        self.mqtt.publish_measurement("control", "charge_w", self.setpoint_w)
+        self.publish_battery_limits(self.setpoint_w, 0)
         self.mqtt.publish_measurement("control", "setpoint_w", self.setpoint_w)
 
     async def publish_discharge_setpoint(self, watts: int) -> None:
@@ -523,9 +532,8 @@ class ControlApp:
         max_discharge_w = int(self.settings.get("max_discharge_w", 5000))
         self.setpoint_w = max(0, min(watts, max_discharge_w))
         self.mqtt.publish_measurement("control", "command", "discharge" if self.setpoint_w else "stop")
-        self.mqtt.publish_measurement("control", "charge_w", 0)
+        self.publish_battery_limits(0, self.setpoint_w)
         self.mqtt.publish_measurement("control", "setpoint_w", 0)
-        self.mqtt.publish_measurement("control", "discharge_w", self.setpoint_w)
 
     async def publish_state_loop(self) -> None:
         while True:
