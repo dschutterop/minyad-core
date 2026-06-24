@@ -690,3 +690,30 @@ def test_slow_balance_no_oscillation_around_deadband(monkeypatch):
 
     assert app.setpoint_w == 500
     assert not any(measurement == "charge_w" for _, measurement, _ in app.mqtt.published)
+
+
+def test_charge_cap_uses_30a_hardware_limit(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_charge_w": 3500, "max_charge_a": 30, "nominal_v": 48}
+
+    assert app._max_charge_power_w() == 1440
+    assert app._charge_cap_inputs()["battery_hardware_charge_cap_w"] == 1440
+
+
+def test_charge_cap_uses_60a_hardware_limit(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_charge_w": 3500, "max_charge_a": 60, "nominal_v": 48}
+
+    assert app._max_charge_power_w() == 2880
+    assert app._charge_cap_inputs()["battery_hardware_charge_cap_w"] == 2880
+
+
+def test_charge_cap_uses_configured_watts_when_amp_limit_is_higher(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_charge_w": 3500, "max_charge_a": 80, "nominal_v": 48}
+
+    assert app._max_charge_power_w() == 3500
+    assert app._charge_cap_inputs()["battery_hardware_charge_cap_w"] == 3840

@@ -87,10 +87,30 @@ Charge caps that can appear in the slow-balance log are:
 * `safety_min_charge_power_w` — the lower safety clamp of `0W`.
 
 The final cap is logged as `effective_charge_cap_w`, and `clamp_reason` names
-which input caused the clamp. For example, with the seeded defaults
-`battery.max_charge_w=1440`, `battery.max_charge_a=30`, and
-`battery.nominal_v=48`, a slow-balance export that computes a raw target of
-`1940W` will remain at `1440W` and log
+which input caused the clamp. Conceptually, the charge command path is capped as:
+
+```text
+effective_charge_cap_w = min(
+    battery.max_charge_w,
+    battery.max_charge_a * battery.nominal_v,
+    bridge.MAX_CHARGE_A * battery.nominal_v  # when the GoodWe bridge amp cap applies
+)
+```
+
+Both the control-service database settings and the host-side GoodWe bridge
+environment can limit charging. The database values `battery.max_charge_a` and
+`battery.nominal_v` are configurable via `/api/battery/settings` and the settings
+UI. The bridge reads `MAX_CHARGE_A` as the requested amp limit and
+`MAX_ALLOWED_CHARGE_A` (or `GOODWE_MAX_ALLOWED_CHARGE_A`) as the explicit safety
+ceiling; it logs `bridge_max_charge_a`, `bridge_max_allowed_charge_a`, and a
+clamp reason when the requested bridge current is reduced. For two supported
+parallel battery packs, operators may intentionally raise both the database amp
+setting and the bridge environment ceiling after verifying inverter, wiring, and
+BMS limits.
+
+For example, with the seeded defaults `battery.max_charge_w=1440`,
+`battery.max_charge_a=30`, and `battery.nominal_v=48`, a slow-balance export
+that computes a raw target of `1940W` will remain at `1440W` and log
 `clamp_reason=battery.max_charge_w+battery.max_charge_a*battery.nominal_v`.
 Raise `battery.max_charge_w` (and, if present, the amp/voltage hardware limit)
 to allow upward slow-balance trimming above `1440W`.
