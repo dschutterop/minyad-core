@@ -1,0 +1,13 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+COPY minyad-trade/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+COPY shared /app/shared
+COPY minyad-trade /app/module
+WORKDIR /app/module
+CMD ["python", "epex_collector.py"]

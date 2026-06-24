@@ -305,6 +305,15 @@ def battery_settings_body() -> str:
         <button type='submit'>Save battery settings</button>
       </form><pre id='settings-result'></pre></div>
 
+    <div class='card'><h2>Energy trade</h2><p>EPEX day-ahead collection settings. Changes are published to MQTT and picked up without restarting <code>minyad-trade</code>.</p>
+      <form id='trade-settings' class='grid'>
+        <label>Bidding zone <input name='bidding_zone' type='text'></label>
+        <label>Poll time Europe/Amsterdam <input name='poll_time_local' type='time'></label>
+        <label>Retry attempts <input name='retry_attempts' type='number' min='1' max='24'></label>
+        <label>Retry interval minutes <input name='retry_interval_minutes' type='number' min='1' max='240'></label>
+        <button type='submit'>Save trade settings</button>
+      </form><pre id='trade-result'></pre></div>
+
     <div class='card'>
       <h2>Appearance</h2>
       <p style='color:var(--steel);font-size:14px;margin:0 0 12px'>Choose how Minyad should render every web interface. The preference is saved server-side and cached locally for instant page loads.</p>
@@ -347,6 +356,18 @@ def battery_settings_body() -> str:
         new FormData(event.target).forEach((v,k)=>{ data[k] = k === 'inverter_ip' ? v : Number(v); });
         const res = await fetch('/api/battery/settings',{method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
         document.getElementById('settings-result').textContent = JSON.stringify(await res.json(), null, 2);
+      });
+
+      async function loadTradeSettings(){
+        const res = await fetch('/api/trade/settings'); const data = await res.json();
+        for (const [k,v] of Object.entries(data)){ const el = document.querySelector(`#trade-settings [name="${k}"]`); if(el) el.value = v; }
+        document.getElementById('trade-result').textContent = JSON.stringify(data, null, 2);
+      }
+      document.getElementById('trade-settings').addEventListener('submit', async (event)=>{
+        event.preventDefault(); const data = {};
+        new FormData(event.target).forEach((v,k)=>{ data[k] = k === 'bidding_zone' || k === 'poll_time_local' ? v : Number(v); });
+        const res = await fetch('/api/trade/settings',{method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+        document.getElementById('trade-result').textContent = JSON.stringify(await res.json(), null, 2);
       });
 
       let debugRefreshTimer = null;
@@ -413,6 +434,7 @@ def battery_settings_body() -> str:
       }
 
       loadBatterySettings();
+      loadTradeSettings();
       loadSystemSettings();
     </script>
     """
