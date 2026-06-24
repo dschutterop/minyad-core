@@ -148,6 +148,11 @@ class MinyadMqttClient:
             )
             self._connection_thread.start()
 
+    def publish(self, topic: str, payload: str | int | float, *, retain: bool = False, qos: int = 0) -> None:
+        LOGGER.debug("MQTT tx: topic=%s qos=%d retain=%s payload=%r", topic, qos, retain, str(payload))
+        result = self.client.publish(topic, payload=str(payload), qos=qos, retain=retain)
+        LOGGER.debug("MQTT tx queued: topic=%s mid=%s rc=%s", topic, getattr(result, "mid", None), result.rc)
+
     def publish_measurement(self, source: str, measurement: str, payload: str | int | float) -> None:
         topic = f"minyad/{source}/{measurement}"
         LOGGER.debug("MQTT tx: topic=%s payload=%r", topic, str(payload))
