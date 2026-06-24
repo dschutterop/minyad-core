@@ -1,4 +1,4 @@
-"""Dual-protocol GoodWe backend that composes Modbus and GoodWe API data."""
+"""GoodWe backend composition: API telemetry, Modbus limit actuator only."""
 
 from __future__ import annotations
 
@@ -9,7 +9,12 @@ logger = logging.getLogger("goodwe_bridge")
 
 
 class GoodWeCompositeBackend:
-    """Merge GoodWe Modbus and API telemetry while keeping Modbus as truth for control fields."""
+    """Use GoodWe API as primary telemetry and Modbus only as the limit actuator.
+
+    Live RS485 tests proved only charge/discharge limit writes on 45565/45566.
+    475xx EMS force registers are not available on this inverter, so Modbus
+    limits are ceilings, not active charge/discharge setpoints.
+    """
 
     def __init__(self, modbus_client: InverterBackend | None, api_client: InverterBackend | None) -> None:
         self.modbus_client = modbus_client
@@ -19,23 +24,35 @@ class GoodWeCompositeBackend:
         return await self.read_state()
 
     async def read_state(self) -> BatteryTelemetry:
-        modbus_state, modbus_error = await self._read_optional("modbus", self.modbus_client)
         api_state, api_error = await self._read_optional("api", self.api_client)
-        if modbus_state is None and api_state is None:
-            raise RuntimeError(f"GoodWe telemetry unavailable: modbus={modbus_error}; api={api_error}")
-        telemetry = self.merge_telemetry(modbus_state, api_state, modbus_error=modbus_error, api_error=api_error)
-        logger.info(
-            "[modbus|api] GoodWe telemetry merged sources=%s modbus_available=%s api_available=%s modbus_error=%s api_error=%s",
-            telemetry.field_sources,
-            telemetry.modbus_available,
-            telemetry.api_available,
-            telemetry.modbus_error,
-            telemetry.api_error,
-        )
-        if modbus_error:
-            logger.warning("[modbus] GoodWe Modbus telemetry degraded: %s", modbus_error)
-        if api_error:
-            logger.info("[api] GoodWe API telemetry unavailable; continuing with Modbus/control data: %s", api_error)
+        if api_state is None:
+            logger.warning("[api] GoodWe API telemetry degraded; values unknown: %s", api_error)
+            return BatteryTelemetry(
+                battery_soc=None,
+                battery_soh=None,
+                battery_power_w=None,
+                battery_voltage_v=None,
+                battery_temperature_c=None,
+                battery_mode=None,
+                inverter_temperature_c=None,
+                grid_power_w=None,
+                field_sources={
+                    "battery_soc": "unavailable",
+                    "battery_soh": "unavailable",
+                    "battery_power_w": "unavailable",
+                    "battery_voltage_v": "unavailable",
+                    "battery_temperature_c": "unavailable",
+                    "battery_mode": "unavailable",
+                    "inverter_temperature_c": "unavailable",
+                    "grid_power_w": "unavailable",
+                },
+                modbus_available=self.modbus_client is not None,
+                api_available=False,
+                modbus_error=None if self.modbus_client is not None else "disabled",
+                api_error=api_error,
+            )
+        telemetry = self.merge_telemetry(None, api_state, modbus_error=None if self.modbus_client is not None else "disabled", api_error=api_error)
+        logger.info("[api] GoodWe telemetry success sources=%s", telemetry.field_sources)
         return telemetry
 
     async def _read_optional(self, name: str, client: InverterBackend | None) -> tuple[InverterState | None, str | None]:
@@ -55,31 +72,32 @@ class GoodWeCompositeBackend:
         modbus_error: str | None = None,
         api_error: str | None = None,
     ) -> BatteryTelemetry:
-        sources: dict[str, str] = {}
-
-        def pick(field: str, preferred: InverterState | None, preferred_name: str, fallback: InverterState | None, fallback_name: str):
-            value = getattr(preferred, field) if preferred is not None else None
-            if value is not None:
-                sources[field] = preferred_name
-                return value
-            value = getattr(fallback, field) if fallback is not None else None
-            if value is not None:
-                sources[field] = fallback_name
-                return value
-            sources[field] = "unavailable"
-            return None
-
+        # API is the primary and only normal telemetry source. The modbus
+        # argument is accepted for backward-compatible tests/callers but is not
+        # used as fallback telemetry. P1 remains the decision source outside this backend.
+        del modbus
+        fields = (
+            "battery_soc",
+            "battery_soh",
+            "battery_power_w",
+            "battery_voltage_v",
+            "battery_temperature_c",
+            "battery_mode",
+            "inverter_temperature_c",
+            "grid_power_w",
+        )
+        sources = {field: ("api" if api is not None and getattr(api, field) is not None else "unavailable") for field in fields}
         return BatteryTelemetry(
-            battery_soc=pick("battery_soc", api, "api", modbus, "modbus"),
-            battery_soh=pick("battery_soh", api, "api", modbus, "modbus"),
-            battery_power_w=pick("battery_power_w", modbus, "modbus", None, "unavailable"),
-            battery_voltage_v=pick("battery_voltage_v", modbus, "modbus", None, "unavailable"),
-            battery_temperature_c=pick("battery_temperature_c", api, "api", modbus, "modbus"),
-            battery_mode=pick("battery_mode", modbus, "modbus", None, "unavailable"),
-            inverter_temperature_c=pick("inverter_temperature_c", api, "api", modbus, "modbus"),
-            grid_power_w=pick("grid_power_w", api, "api", modbus, "modbus"),
+            battery_soc=None if api is None else api.battery_soc,
+            battery_soh=None if api is None else api.battery_soh,
+            battery_power_w=None if api is None else api.battery_power_w,
+            battery_voltage_v=None if api is None else api.battery_voltage_v,
+            battery_temperature_c=None if api is None else api.battery_temperature_c,
+            battery_mode=None if api is None else api.battery_mode,
+            inverter_temperature_c=None if api is None else api.inverter_temperature_c,
+            grid_power_w=None if api is None else api.grid_power_w,
             field_sources=sources,
-            modbus_available=modbus is not None,
+            modbus_available=modbus_error is None,
             api_available=api is not None,
             modbus_error=modbus_error,
             api_error=api_error,

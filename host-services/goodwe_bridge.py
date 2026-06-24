@@ -78,7 +78,7 @@ def _get_required_env(name: str) -> str:
 
 @dataclass(frozen=True)
 class Config:
-    goodwe_modbus_enabled: bool
+    goodwe_modbus_limits_enabled: bool
     goodwe_api_enabled: bool
     goodwe_api_host: str | None
     inverter_max_w: int
@@ -101,6 +101,10 @@ class Config:
     min_write_interval_s: float
     min_target_change_w: int
     write_refresh_interval_s: float
+    default_charge_limit_w: int
+    default_discharge_limit_w: int
+    conservative_charge_limit_w: int
+    conservative_discharge_limit_w: int
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -112,25 +116,25 @@ class Config:
         if legacy_backend:
             logger.warning("INVERTER_BACKEND is deprecated; use GOODWE_MODBUS_ENABLED and GOODWE_API_ENABLED")
         goodwe_api_host = os.getenv("GOODWE_API_HOST", "").strip() or None
-        goodwe_modbus_enabled = os.getenv("GOODWE_MODBUS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-        goodwe_api_enabled = os.getenv("GOODWE_API_ENABLED", "").lower() in {"1", "true", "yes", "on"} if os.getenv("GOODWE_API_ENABLED") is not None else goodwe_api_host is not None
+        goodwe_modbus_enabled = os.getenv("GOODWE_MODBUS_LIMITS_ENABLED", os.getenv("GOODWE_MODBUS_ENABLED", "true")).lower() in {"1", "true", "yes", "on"}
+        goodwe_api_enabled = os.getenv("GOODWE_API_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
         if goodwe_api_enabled and not goodwe_api_host:
             raise ValueError("GOODWE_API_HOST is required when GOODWE_API_ENABLED=true")
         if not goodwe_modbus_enabled and not goodwe_api_enabled:
-            raise ValueError("At least one of GOODWE_MODBUS_ENABLED or GOODWE_API_ENABLED must be true")
+            raise ValueError("At least one of GOODWE_MODBUS_LIMITS_ENABLED or GOODWE_API_ENABLED must be true")
 
         max_charge_a = _get_env_int("MAX_CHARGE_A", 30)
         return cls(
-            goodwe_modbus_enabled=goodwe_modbus_enabled,
+            goodwe_modbus_limits_enabled=goodwe_modbus_enabled,
             goodwe_api_enabled=goodwe_api_enabled,
             goodwe_api_host=goodwe_api_host,
             inverter_max_w=_get_env_int("INVERTER_MAX_W", _get_env_int("MAX_DISCHARGE_W", 5000)),
             inverter_retries=_get_env_int("INVERTER_RETRIES", 5),
             inverter_delay=_get_env_int("INVERTER_DELAY", 3),
             goodwe_min_request_interval_s=_get_env_float("GOODWE_MIN_REQUEST_INTERVAL_S", 2.0),
-            modbus_gw_ip=_get_required_env("MODBUS_GW_IP"),
-            modbus_gw_port=_get_env_int("MODBUS_GW_PORT", 502),
-            modbus_slave_id=_get_env_int("MODBUS_SLAVE_ID", 247),
+            modbus_gw_ip=(os.getenv("GOODWE_MODBUS_HOST") or os.getenv("MODBUS_GW_IP") or ("" if not goodwe_modbus_enabled else _get_required_env("MODBUS_GW_IP"))),
+            modbus_gw_port=_get_env_int("GOODWE_MODBUS_PORT", _get_env_int("MODBUS_GW_PORT", 502)),
+            modbus_slave_id=_get_env_int("GOODWE_MODBUS_DEVICE_ID", _get_env_int("MODBUS_SLAVE_ID", 247)),
             modbus_timeout=_get_env_float("MODBUS_TIMEOUT", 5.0),
             mqtt_host=mqtt_host,
             mqtt_port=_get_env_int("MQTT_PORT", 1883),
@@ -141,9 +145,13 @@ class Config:
             max_charge_a=min(max_charge_a, 30),
             dry_run=os.getenv("GOODWE_DRY_RUN", os.getenv("DRY_RUN", "false")).lower() in {"1", "true", "yes", "on"},
             log_level=os.getenv("LOG_LEVEL", "INFO"),
-            min_write_interval_s=_get_env_float("MIN_WRITE_INTERVAL_SEC", MIN_WRITE_INTERVAL_SEC),
-            min_target_change_w=_get_env_int("MIN_TARGET_CHANGE_W", MIN_TARGET_CHANGE_W),
+            min_write_interval_s=_get_env_float("GOODWE_LIMIT_WRITE_INTERVAL_SEC", _get_env_float("MIN_WRITE_INTERVAL_SEC", MIN_WRITE_INTERVAL_SEC)),
+            min_target_change_w=_get_env_int("GOODWE_LIMIT_MIN_CHANGE_W", _get_env_int("MIN_TARGET_CHANGE_W", MIN_TARGET_CHANGE_W)),
             write_refresh_interval_s=_get_env_float("WRITE_REFRESH_INTERVAL_SEC", WRITE_REFRESH_INTERVAL_SEC),
+            default_charge_limit_w=_get_env_int("GOODWE_DEFAULT_CHARGE_LIMIT_W", 6000),
+            default_discharge_limit_w=_get_env_int("GOODWE_DEFAULT_DISCHARGE_LIMIT_W", 6000),
+            conservative_charge_limit_w=_get_env_int("GOODWE_CONSERVATIVE_CHARGE_LIMIT_W", 1500),
+            conservative_discharge_limit_w=_get_env_int("GOODWE_CONSERVATIVE_DISCHARGE_LIMIT_W", 1500),
         )
 
 
@@ -161,7 +169,7 @@ def utc_now_iso() -> str:
 def build_backend(config: Config) -> InverterBackend:
     modbus_client: InverterBackend | None = None
     api_client: InverterBackend | None = None
-    if config.goodwe_modbus_enabled:
+    if config.goodwe_modbus_limits_enabled:
         modbus_client = ModbusBackend(
             host=config.modbus_gw_ip,
             port=config.modbus_gw_port,
@@ -216,6 +224,10 @@ class GoodWeBridge:
         self.target_charge_limit_w = 0
         self.target_discharge_limit_w = 0
         self._last_write_monotonic: float | None = None
+        self._last_api_battery_power_w: int | None = None
+        self._last_api_grid_power_w: int | None = None
+        self._last_api_battery_soc: int | None = None
+        self._pending_charge_check: tuple[float, int, int | None] | None = None
 
     def load_poll_interval(self) -> int:
         """Return the current inverter polling interval in seconds.
@@ -376,7 +388,7 @@ class GoodWeBridge:
         try:
             applied = await self.backend.set_battery_limits(charge, discharge, state_changed=state_changed)
         except (ConnectionError, TimeoutError):
-            self._skip_actuator_write("modbus unavailable")
+            self._skip_actuator_write("actuator_unavailable")
             self.modbus_errors_total += 1
             logger.exception("[modbus] Modbus unavailable while applying charge_w=%s discharge_w=%s", charge, discharge)
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
@@ -395,15 +407,36 @@ class GoodWeBridge:
         self.last_successful_write_timestamp = time()
         self.modbus_writes_total += 1
         self.publish_metrics()
-        logger.info("[modbus] Actuator write success p1_grid_power_w=%s charge_limit_w=%s discharge_limit_w=%s dry_run=%s", self._last_p1_grid_power_w, charge, discharge, self.config.dry_run)
+        self._log_control_decision(charge, discharge, modbus_write_success=True)
+        if self.control_state == "CHARGING" and charge > 0:
+            self._pending_charge_check = (monotonic(), charge, self._last_api_battery_power_w)
 
     def _skip_actuator_write(self, reason: str) -> None:
         self.modbus_write_skipped_total += 1
         self.publish_metrics()
         logger.info("[modbus] Actuator write skipped reason=%s p1_grid_power_w=%s target_charge_limit_w=%s target_discharge_limit_w=%s current_charge_limit_w=%s current_discharge_limit_w=%s", reason, self._last_p1_grid_power_w, self.target_charge_limit_w, self.target_discharge_limit_w, self._last_charge_setpoint_w, self._last_discharge_setpoint_w)
+        self._log_control_decision(self.target_charge_limit_w, self.target_discharge_limit_w, modbus_write_success=False)
+
+    def _log_control_decision(self, charge: int, discharge: int, *, modbus_write_success: bool) -> None:
+        logger.info(
+            "[control] decision p1_grid_power_w=%s desired_state=%s charge_limit_w=%s discharge_limit_w=%s api_battery_power_w=%s api_grid_power_w=%s battery_soc=%s modbus_write_success=%s dry_run=%s note=limits_are_not_force_setpoints",
+            self._last_p1_grid_power_w,
+            self.control_state,
+            charge,
+            discharge,
+            self._last_api_battery_power_w,
+            self._last_api_grid_power_w,
+            self._last_api_battery_soc,
+            modbus_write_success,
+            self.config.dry_run,
+        )
 
     async def poll_once(self) -> None:
         state = await self.backend.read_state()
+        self._last_api_battery_power_w = state.battery_power_w
+        self._last_api_grid_power_w = state.grid_power_w
+        self._last_api_battery_soc = state.battery_soc
+        self._check_charge_limit_effect(state)
         values = {
             "minyad/battery/soc": state.battery_soc,
             "minyad/battery/soh": state.battery_soh,
@@ -433,6 +466,17 @@ class GoodWeBridge:
             state.battery_power_w,
             state.grid_power_w,
         )
+
+    def _check_charge_limit_effect(self, state: InverterState) -> None:
+        if self._pending_charge_check is None:
+            return
+        started_at, charge_limit_w, previous_power = self._pending_charge_check
+        if monotonic() - started_at < self.config.min_write_interval_s:
+            return
+        current_power = state.battery_power_w
+        if current_power is None or current_power >= 0 or (previous_power is not None and current_power >= previous_power):
+            logger.warning("charge limit applied but inverter did not start charging; limit registers are not force setpoints")
+        self._pending_charge_check = None
 
     def _status_for_state(self, state: InverterState) -> str:
         if isinstance(state, BatteryTelemetry) and state.modbus_error and state.modbus_error != "disabled":
@@ -492,7 +536,7 @@ async def main() -> None:
     config = Config.from_env()
     configure_logging(config.log_level)
     backend = build_backend(config)
-    logger.info("[modbus|api] Using GoodWe protocols: modbus_enabled=%s api_enabled=%s dry_run=%s", config.goodwe_modbus_enabled, config.goodwe_api_enabled, config.dry_run)
+    logger.info("[modbus|api] Using GoodWe protocols: modbus_enabled=%s api_enabled=%s dry_run=%s", config.goodwe_modbus_limits_enabled, config.goodwe_api_enabled, config.dry_run)
     bridge = GoodWeBridge(config, backend)
 
     loop = asyncio.get_running_loop()
