@@ -479,6 +479,106 @@ def enrich_bridge_health(payload: dict[str, Any]) -> None:
         payload["available"] = False
 
 
+def component_status(name: str, status: Literal["ok", "warning", "error"], detail: str, **extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {"name": name, "status": status, "detail": detail}
+    payload.update(extra)
+    return payload
+
+
+def value_is_fresh_iso(value: Any, max_age_seconds: int = 120) -> tuple[bool, int | None]:
+    if not isinstance(value, str) or not value:
+        return False, None
+    parsed = parse_bridge_last_seen(value)
+    if parsed is None:
+        return False, None
+    age = max(0, round((datetime.now(timezone.utc) - parsed).total_seconds()))
+    return age <= max_age_seconds, age
+
+
+def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None = None) -> dict[str, Any]:
+    api_status = component_status("API", "ok", "Minyad API process is serving requests", endpoint="/health")
+    db_status = component_status(
+        "PostgreSQL",
+        "ok" if db_ok else "error",
+        "Database query succeeded" if db_ok else f"Database query failed: {db_error or 'unknown error'}",
+        endpoint="DB_URL",
+    )
+    mqtt_info = mqtt.connection_info()
+    mqtt_ok = bool(mqtt_info.get("connected"))
+    mqtt_status = component_status(
+        "MQTT broker",
+        "ok" if mqtt_ok else "error",
+        "API MQTT client is connected" if mqtt_ok else "API MQTT client is not connected",
+        endpoint=f"{mqtt_info.get('host')}:{mqtt_info.get('port')}",
+        **mqtt_info,
+    )
+
+    battery_required = ("soc", "power_w", "voltage", "mode", "bridge_status", "bridge_last_seen")
+    battery_missing = [key for key in battery_required if not cache.get(key)]
+    bridge_fresh, bridge_age = value_is_fresh_iso(cache.get("bridge_last_seen"), 90)
+    battery_ok = not battery_missing and str(cache.get("bridge_status", "")).lower() == "online" and bridge_fresh
+    battery = component_status(
+        "Battery / GoodWe bridge",
+        "ok" if battery_ok else "warning",
+        "GoodWe bridge telemetry is current" if battery_ok else "Missing, stale, or offline GoodWe telemetry",
+        endpoint="/battery/status",
+        missing_keys=battery_missing,
+        bridge_status=cache.get("bridge_status"),
+        last_seen=cache.get("bridge_last_seen"),
+        age_seconds=bridge_age,
+    )
+
+    grid_required = ("grid_net_power_w", "grid_timestamp", "grid_status")
+    grid_missing = [key for key in grid_required if not cache.get(key)]
+    grid_fresh, grid_age = value_is_fresh_iso(cache.get("grid_timestamp"), 120)
+    grid_ok = not grid_missing and grid_fresh
+    grid = component_status(
+        "DSMR / grid meter",
+        "ok" if grid_ok else "warning",
+        "Grid meter telemetry is current" if grid_ok else "Missing or stale DSMR grid telemetry",
+        endpoint="/dsmr/status",
+        missing_keys=grid_missing,
+        grid_status=cache.get("grid_status"),
+        last_seen=cache.get("grid_timestamp"),
+        age_seconds=grid_age,
+    )
+
+    solar_fresh, solar_age = value_is_fresh_iso(cache.get("solar_updated_at") or cache.get("solar_bridge_last_seen"), 180)
+    inverter_keys = [key for key in cache if key.startswith("solar_inverter_") and key.endswith("_power_w")]
+    solar_ok = bool(cache.get("solar_power_w") is not None or inverter_keys) and solar_fresh
+    solar = component_status(
+        "Solar / Enphase bridge",
+        "ok" if solar_ok else "warning",
+        "Solar production telemetry is current" if solar_ok else "Missing or stale solar telemetry",
+        endpoint="/solar/status",
+        bridge_status=cache.get("solar_bridge_status"),
+        last_seen=cache.get("solar_updated_at") or cache.get("solar_bridge_last_seen"),
+        age_seconds=solar_age,
+        inverter_count=len(inverter_keys),
+    )
+
+    endpoint_items = [
+        component_status("Dashboard state", "ok", "Energy dashboard API endpoint is registered", endpoint="/api/state"),
+        component_status("Forecast", "ok", "Forecast API endpoint is registered", endpoint="/api/forecast"),
+        component_status("History curves", "ok", "Dashboard curves API endpoint is registered", endpoint="/dashboard/curves"),
+        component_status(
+            "Trade prices",
+            "ok" if latest_trade_prices() else "warning",
+            "Latest cached day-ahead prices available" if latest_trade_prices() else "No day-ahead prices cached yet",
+            endpoint="/trade/prices",
+        ),
+        component_status("Agent messages", "ok", "Agent mailbox API endpoint is registered", endpoint="/api/messages"),
+    ]
+    components = [api_status, db_status, mqtt_status, battery, grid, solar, *endpoint_items]
+    overall = "error" if any(item["status"] == "error" for item in components) else "warning" if any(item["status"] == "warning" for item in components) else "ok"
+    return {
+        "status": overall,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "startup_at": STARTUP_AT.isoformat(),
+        "components": components,
+    }
+
+
 class ApiKeyCreate(BaseModel):
     name: str
 
@@ -629,6 +729,20 @@ async def startup() -> None:
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/health/status")
+async def health_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    db_ok = True
+    db_error = None
+    try:
+        await session.execute(text("select 1"))
+    except Exception as exc:  # pragma: no cover - depends on deployment database state
+        db_ok = False
+        db_error = str(exc)
+    with MQTT_STATUS_LOCK:
+        cache = dict(MQTT_STATUS)
+    return build_health_status(cache, db_ok=db_ok, db_error=db_error)
 
 
 @app.get("/debug/status")
