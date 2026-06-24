@@ -7,12 +7,13 @@ import logging
 import os
 import threading
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-import pandas as pd
+import requests
 from config import AMSTERDAM_TZ, DAY_AHEAD_DEFAULTS, ENTSOE, MQTT_TOPICS
 from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
@@ -76,9 +77,7 @@ def normalize_entsoe_api_url(value: str) -> str:
 
 
 def apply_entsoe_api_url(url: str) -> None:
-    import entsoe.entsoe as entsoe_module
-
-    entsoe_module.URL = normalize_entsoe_api_url(url)
+    normalize_entsoe_api_url(url)
 
 
 def next_poll_time(now: datetime, poll_time_local: str) -> datetime:
@@ -89,29 +88,62 @@ def next_poll_time(now: datetime, poll_time_local: str) -> datetime:
     return candidate
 
 
-def normalize_prices(series: pd.Series) -> list[dict[str, Any]]:
-    prices = []
-    for timestamp, eur_mwh in series.items():
-        local_ts = timestamp.to_pydatetime().astimezone(AMSTERDAM_TZ)
-        prices.append({
-            "date": local_ts.strftime("%Y-%m-%d"),
-            "hour": local_ts.strftime("%H"),
-            "starts_at": local_ts.isoformat(),
-            "price_eur_kwh": float(eur_mwh) / ENTSOE.price_unit_divisor,
-        })
+def _format_entsoe_period(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y%m%d%H00")
+
+
+def parse_entsoe_publication_document(xml_text: str) -> list[dict[str, Any]]:
+    root = ET.fromstring(xml_text)
+    ns = {"ns": root.tag.removesuffix("Publication_MarketDocument").rstrip("}").lstrip("{")}
+    prices: list[dict[str, Any]] = []
+
+    for series in root.findall(".//ns:TimeSeries", ns):
+        for period in series.findall(".//ns:Period", ns):
+            start_element = period.find("./ns:timeInterval/ns:start", ns)
+            if start_element is None or not start_element.text:
+                continue
+            interval_start = datetime.fromisoformat(start_element.text.replace("Z", "+00:00"))
+
+            for point in period.findall("./ns:Point", ns):
+                position_element = point.find("ns:position", ns)
+                price_element = point.find("ns:price.amount", ns)
+                if position_element is None or price_element is None:
+                    continue
+                timestamp = interval_start + timedelta(hours=int(position_element.text or "0") - 1)
+                local_ts = timestamp.astimezone(AMSTERDAM_TZ)
+                eur_mwh = float(price_element.text or "0")
+                prices.append({
+                    "date": local_ts.strftime("%Y-%m-%d"),
+                    "hour": local_ts.strftime("%H"),
+                    "starts_at": local_ts.isoformat(),
+                    "price_eur_kwh": eur_mwh / ENTSOE.price_unit_divisor,
+                })
+
     return prices
 
 
 def fetch_day_ahead(client: Any, settings: DayAheadSettings, target_day: datetime) -> list[dict[str, Any]]:
-    start = pd.Timestamp(target_day.date(), tz=ENTSOE.timezone_name)
-    end = start + pd.DateOffset(days=1)
+    start = datetime.combine(target_day.astimezone(AMSTERDAM_TZ).date(), datetime.min.time(), AMSTERDAM_TZ)
+    end = start + timedelta(days=1)
     LOGGER.info("Fetching day-ahead prices zone=%s day=%s", settings.bidding_zone, start.date())
-    series = client.query_day_ahead_prices(settings.bidding_zone, start=start, end=end)
-    if series is None or series.empty:
-        return []
-    prices = normalize_prices(series)
+    params = {
+        "securityToken": client.api_key,
+        "documentType": "A44",
+        "in_Domain": settings.bidding_zone,
+        "out_Domain": settings.bidding_zone,
+        "periodStart": _format_entsoe_period(start),
+        "periodEnd": _format_entsoe_period(end),
+    }
+    response = client.session.get(settings.entsoe_api_url, params=params, timeout=30)
+    response.raise_for_status()
     target_date = start.date().isoformat()
-    return [point for point in prices if point["date"] == target_date]
+    return [point for point in parse_entsoe_publication_document(response.text) if point["date"] == target_date]
+
+
+@dataclass(frozen=True)
+class EntsoeXmlClient:
+    api_key: str
+    session: Any = requests
 
 
 def publish_prices(mqtt: MinyadMqttClient, prices: list[dict[str, Any]]) -> None:
@@ -197,10 +229,7 @@ def main() -> None:
     mqtt = MinyadMqttClient("minyad-trade")
     mqtt.start()
     mqtt.subscribe(f"{MQTT_TOPICS.settings_prefix}/#", store.apply_mqtt)
-    from entsoe import EntsoePandasClient
-
-    apply_entsoe_api_url(store.get().entsoe_api_url)
-    client = EntsoePandasClient(api_key=api_key)
+    client = EntsoeXmlClient(api_key=api_key)
     LOGGER.info(
         "minyad-trade started with settings: %s (ENTSOE_API_KEY configured length=%d)",
         store.get(),

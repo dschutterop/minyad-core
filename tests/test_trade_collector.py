@@ -33,21 +33,36 @@ def test_next_poll_time_rolls_to_tomorrow_after_poll_time():
     assert poll_at.isoformat() == "2026-06-25T13:30:00+02:00"
 
 
-def test_fetch_day_ahead_filters_entsoe_expanded_window_to_target_day():
+def test_fetch_day_ahead_requests_entsoe_xml_and_filters_to_target_day():
     collector = _load_collector()
 
-    class Client:
-        def query_day_ahead_prices(self, _zone, *, start, end):
-            return collector.pd.Series(
-                [20.0, 10.0],
-                index=collector.pd.DatetimeIndex([
-                    "2026-06-24T23:00:00+02:00",
-                    "2026-06-25T00:00:00+02:00",
-                ]),
-            )
+    class Response:
+        text = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<Publication_MarketDocument xmlns=\"urn:iec62325.351:tc57wg16:451-3:publicationdocument:7:3\">
+  <TimeSeries><Period>
+    <timeInterval><start>2026-06-24T21:00Z</start></timeInterval>
+    <Point><position>1</position><price.amount>20.0</price.amount></Point>
+    <Point><position>2</position><price.amount>10.0</price.amount></Point>
+  </Period></TimeSeries>
+</Publication_MarketDocument>
+"""
+
+        def raise_for_status(self):
+            pass
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, *, params, timeout):
+            self.calls.append((url, params, timeout))
+            return Response()
+
+    session = Session()
+    client = collector.EntsoeXmlClient(api_key="token", session=session)
 
     prices = collector.fetch_day_ahead(
-        Client(),
+        client,
         collector.DayAheadSettings(),
         datetime(2026, 6, 25, 12, 0, tzinfo=collector.AMSTERDAM_TZ),
     )
@@ -55,6 +70,11 @@ def test_fetch_day_ahead_filters_entsoe_expanded_window_to_target_day():
     assert len(prices) == 1
     assert prices[0]["date"] == "2026-06-25"
     assert prices[0]["hour"] == "00"
+    assert prices[0]["price_eur_kwh"] == 0.01
+    assert session.calls[0][1]["securityToken"] == "token"
+    assert session.calls[0][1]["documentType"] == "A44"
+    assert session.calls[0][1]["periodStart"] == "202606242200"
+    assert session.calls[0][1]["periodEnd"] == "202606252200"
 
 
 def test_startup_falls_back_to_current_day_when_tomorrow_unavailable(monkeypatch):
