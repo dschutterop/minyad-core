@@ -98,6 +98,7 @@ class Config:
     poll_interval: int
     database_url: str | None
     max_charge_a: int
+    max_allowed_charge_a: int
     dry_run: bool
     log_level: str
     min_write_interval_s: float
@@ -125,7 +126,19 @@ class Config:
         if not goodwe_modbus_enabled and not goodwe_api_enabled:
             raise ValueError("At least one of GOODWE_MODBUS_LIMITS_ENABLED or GOODWE_API_ENABLED must be true")
 
-        max_charge_a = _get_env_int("MAX_CHARGE_A", 30)
+        requested_max_charge_a = _get_env_int("MAX_CHARGE_A", 30)
+        max_allowed_charge_a = _get_env_int("MAX_ALLOWED_CHARGE_A", _get_env_int("GOODWE_MAX_ALLOWED_CHARGE_A", 30))
+        max_charge_a = min(requested_max_charge_a, max_allowed_charge_a)
+        if requested_max_charge_a > max_allowed_charge_a:
+            logger.warning(
+                "GoodWe charge current request clamped requested_max_charge_a=%s bridge_max_allowed_charge_a=%s bridge_max_charge_a=%s clamp_reason=MAX_CHARGE_A_above_MAX_ALLOWED_CHARGE_A",
+                requested_max_charge_a, max_allowed_charge_a, max_charge_a,
+            )
+        else:
+            logger.info(
+                "GoodWe charge current configured requested_max_charge_a=%s bridge_max_allowed_charge_a=%s bridge_max_charge_a=%s clamp_reason=none",
+                requested_max_charge_a, max_allowed_charge_a, max_charge_a,
+            )
         return cls(
             goodwe_modbus_limits_enabled=goodwe_modbus_enabled,
             goodwe_api_enabled=goodwe_api_enabled,
@@ -144,7 +157,8 @@ class Config:
             mqtt_pass=os.getenv("MQTT_PASS"),
             poll_interval=_get_env_int("POLL_INTERVAL", DEFAULT_POLL_INTERVAL_SECONDS),
             database_url=os.getenv("DB_URL") or os.getenv("DATABASE_URL"),
-            max_charge_a=min(max_charge_a, 30),
+            max_charge_a=max_charge_a,
+            max_allowed_charge_a=max_allowed_charge_a,
             dry_run=os.getenv("GOODWE_DRY_RUN", os.getenv("DRY_RUN", "false")).lower() in {"1", "true", "yes", "on"},
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             min_write_interval_s=_get_env_float("GOODWE_LIMIT_WRITE_INTERVAL_SEC", _get_env_float("MIN_WRITE_INTERVAL_SEC", MIN_WRITE_INTERVAL_SEC)),
@@ -482,8 +496,8 @@ class GoodWeBridge:
     def _log_control_decision(self, charge: int, discharge: int, *, modbus_write_result: str, api_command: str, api_command_success: bool | None) -> None:
         target_power_w = charge if self.control_state == "CHARGING" else discharge if self.control_state == "DISCHARGING" else 0
         logger.info(
-            "[control] decision p1_grid_power_w=%s desired_state=%s target_power_w=%s api_command=%s api_command_success=%s modbus_charge_limit_w=%s modbus_discharge_limit_w=%s modbus_write_result=%s api_battery_power_w=%s api_grid_power_w=%s battery_soc=%s dry_run=%s note=modbus_limits_are_not_force_setpoints",
-            self._last_p1_grid_power_w, self.control_state, target_power_w, api_command, api_command_success, charge, discharge, modbus_write_result, self._last_api_battery_power_w, self._last_api_grid_power_w, self._last_api_battery_soc, self.config.dry_run,
+            "[control] decision p1_grid_power_w=%s desired_state=%s target_power_w=%s api_command=%s api_command_success=%s modbus_charge_limit_w=%s modbus_discharge_limit_w=%s modbus_write_result=%s api_battery_power_w=%s api_grid_power_w=%s battery_soc=%s bridge_max_charge_a=%s bridge_max_allowed_charge_a=%s dry_run=%s note=modbus_limits_are_not_force_setpoints",
+            self._last_p1_grid_power_w, self.control_state, target_power_w, api_command, api_command_success, charge, discharge, modbus_write_result, self._last_api_battery_power_w, self._last_api_grid_power_w, self._last_api_battery_soc, self.config.max_charge_a, self.config.max_allowed_charge_a, self.config.dry_run,
         )
 
     async def poll_once(self) -> None:
