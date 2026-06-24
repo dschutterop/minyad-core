@@ -34,8 +34,11 @@ class InverterBackend(Protocol):
         """Poll raw backend status, when supported."""
         ...
 
-    async def set_battery_limits(self, charge_limit_w: int, discharge_limit_w: int) -> None:
-        """Apply charge/discharge actuator limits in watts."""
+    async def set_battery_limits(self, charge_limit_w: int, discharge_limit_w: int, *, state_changed: bool = False) -> bool | None:
+        """Apply charge/discharge actuator limits in watts.
+
+        Return False when a backend intentionally skips the write, otherwise True/None.
+        """
         ...
 
     async def read_state(self) -> InverterState:

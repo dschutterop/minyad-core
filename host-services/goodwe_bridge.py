@@ -374,7 +374,7 @@ class GoodWeBridge:
             self._skip_actuator_write("write interval not elapsed")
             return
         try:
-            await self.backend.set_battery_limits(charge, discharge)
+            applied = await self.backend.set_battery_limits(charge, discharge, state_changed=state_changed)
         except (ConnectionError, TimeoutError):
             self._skip_actuator_write("modbus unavailable")
             self.modbus_errors_total += 1
@@ -385,6 +385,9 @@ class GoodWeBridge:
             self.modbus_errors_total += 1
             logger.exception("[modbus] Failed to apply charge_w=%s discharge_w=%s", charge, discharge)
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
+            return
+        if applied is False:
+            self._skip_actuator_write("backend skipped write")
             return
         self._last_charge_setpoint_w = charge
         self._last_discharge_setpoint_w = discharge
