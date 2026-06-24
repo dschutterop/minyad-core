@@ -46,31 +46,29 @@ def read(backend):
     return asyncio.run(backend.read_state())
 
 
-def test_modbus_and_api_both_available_prefers_field_specific_sources():
+def test_api_telemetry_success_is_source_of_truth_even_when_modbus_exists():
     backend = GoodWeCompositeBackend(
         FakeClient(state(battery_power_w=100, battery_voltage_v=52.1, battery_mode="charge", battery_soc=1)),
-        FakeClient(state(battery_soc=80, battery_soh=97, battery_temperature_c=24.5, battery_power_w=999)),
+        FakeClient(state(battery_soc=80, battery_soh=97, battery_temperature_c=24.5, battery_power_w=999, battery_voltage_v=51.0, battery_mode="idle")),
     )
 
     telemetry = read(backend)
 
-    assert telemetry.battery_voltage_v == 52.1
-    assert telemetry.battery_power_w == 100
-    assert telemetry.battery_mode == "charge"
+    assert telemetry.battery_voltage_v == 51.0
+    assert telemetry.battery_power_w == 999
+    assert telemetry.battery_mode == "idle"
     assert telemetry.battery_soc == 80
-    assert telemetry.battery_soh == 97
-    assert telemetry.battery_temperature_c == 24.5
-    assert telemetry.field_sources["battery_voltage_v"] == "modbus"
-    assert telemetry.field_sources["battery_soc"] == "api"
+    assert telemetry.field_sources["battery_power_w"] == "api"
+    assert telemetry.modbus_available is True
 
 
-def test_only_modbus_available_supports_partial_control_telemetry():
-    telemetry = read(GoodWeCompositeBackend(FakeClient(state(battery_power_w=-120, battery_voltage_v=51.9, battery_mode="discharge")), None))
+def test_api_telemetry_failure_returns_degraded_unknowns_without_modbus_fallback():
+    telemetry = read(GoodWeCompositeBackend(FakeClient(state(battery_power_w=-120, battery_voltage_v=51.9)), FakeClient(error=RuntimeError("api down"))))
 
-    assert telemetry.battery_power_w == -120
-    assert telemetry.battery_voltage_v == 51.9
-    assert telemetry.battery_soc is None
-    assert telemetry.api_error == "disabled"
+    assert telemetry.battery_power_w is None
+    assert telemetry.battery_voltage_v is None
+    assert telemetry.api_error == "api down"
+    assert telemetry.modbus_available is True
 
 
 def test_only_api_available_keeps_api_telemetry_but_marks_modbus_disabled():
@@ -81,42 +79,23 @@ def test_only_api_available_keeps_api_telemetry_but_marks_modbus_disabled():
     assert telemetry.modbus_error == "disabled"
 
 
-def test_api_fails_modbus_works():
-    telemetry = read(GoodWeCompositeBackend(FakeClient(state(battery_voltage_v=50.0, battery_power_w=40)), FakeClient(error=RuntimeError("api down"))))
+def test_both_api_and_modbus_disabled_returns_degraded_telemetry():
+    telemetry = read(GoodWeCompositeBackend(None, None))
 
-    assert telemetry.battery_voltage_v == 50.0
-    assert telemetry.api_error == "api down"
-    assert telemetry.modbus_available is True
-
-
-def test_modbus_fails_api_works_degraded():
-    telemetry = read(GoodWeCompositeBackend(FakeClient(error=ConnectionError("modbus down")), FakeClient(state(battery_soc=55, battery_temperature_c=21.0))))
-
-    assert telemetry.battery_soc == 55
-    assert telemetry.battery_voltage_v is None
-    assert telemetry.modbus_error == "modbus down"
-    assert telemetry.api_available is True
+    assert telemetry.battery_soc is None
+    assert telemetry.api_error == "disabled"
+    assert telemetry.modbus_error == "disabled"
 
 
-def test_both_fail_raises():
-    try:
-        read(GoodWeCompositeBackend(FakeClient(error=ConnectionError("modbus down")), FakeClient(error=RuntimeError("api down"))))
-    except RuntimeError as exc:
-        assert "GoodWe telemetry unavailable" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
-
-
-def test_partial_telemetry_merge_uses_fallback_only_when_preferred_missing():
+def test_merge_telemetry_never_uses_modbus_as_fallback():
     telemetry = GoodWeCompositeBackend.merge_telemetry(
-        state(battery_voltage_v=None, battery_power_w=12),
+        state(battery_power_w=12),
         state(battery_voltage_v=49.5, battery_soc=66),
     )
 
-    assert telemetry.battery_power_w == 12
-    assert telemetry.field_sources["battery_power_w"] == "modbus"
-    assert telemetry.battery_voltage_v is None
-    assert telemetry.field_sources["battery_voltage_v"] == "unavailable"
+    assert telemetry.battery_power_w is None
+    assert telemetry.field_sources["battery_power_w"] == "unavailable"
+    assert telemetry.battery_voltage_v == 49.5
     assert telemetry.battery_soc == 66
 
 
@@ -134,20 +113,14 @@ def test_set_limits_works_only_via_modbus():
         raise AssertionError("expected RuntimeError")
 
 
-def test_protocol_logs_include_source_prefixes(caplog):
-    backend = GoodWeCompositeBackend(
-        FakeClient(error=ConnectionError("modbus down")),
-        FakeClient(error=RuntimeError("api down")),
-    )
+def test_protocol_logs_include_api_source_prefix(caplog):
+    backend = GoodWeCompositeBackend(FakeClient(error=ConnectionError("modbus down")), FakeClient(error=RuntimeError("api down")))
 
-    try:
-        read(backend)
-    except RuntimeError:
-        pass
+    read(backend)
 
     messages = [record.getMessage() for record in caplog.records]
-    assert any(message.startswith("[modbus] GoodWe modbus read failed") for message in messages)
     assert any(message.startswith("[api] GoodWe api read failed") for message in messages)
+    assert any("API telemetry degraded" in message for message in messages)
 
 
 def test_set_battery_limits_returns_modbus_write_result_and_passes_state_changed():

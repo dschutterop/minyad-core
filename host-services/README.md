@@ -28,8 +28,39 @@ setpoint decision with a factor breakdown and the live/default thresholds read
 from the actual control implementation (`control/main.py`,
 `control/hysteresis.py`, and `minyad/strategy/charge_controller.py`).
 
-## GoodWe bridge dual-protocol mode
+## GoodWe bridge API telemetry + Modbus limit actuator mode
 
-`goodwe_bridge.py` now composes two GoodWe clients instead of choosing a single exclusive protocol.
-Modbus (`GOODWE_MODBUS_ENABLED`, default `true`) is the source of truth for RS485-reliable control fields: battery voltage (register 35180), battery power (35182), work mode (35187), and actuator writes to charge/discharge limit registers 45565/45566.
-The GoodWe API (`GOODWE_API_ENABLED`, default enabled when `GOODWE_API_HOST` is configured) is supplemental telemetry for fields that are not reliable over RS485, such as SOC, SOH, and battery temperature. API outages are logged but do not stop the control loop when Modbus remains available. Use `GOODWE_DRY_RUN=true` to suppress Modbus writes during tests.
+`goodwe_bridge.py` uses the GoodWe API as the primary telemetry source. It publishes
+SOC/SOH, battery power/voltage/temperature/mode, inverter temperature, and grid power
+from API runtime data when available. If the API is unavailable, telemetry is marked
+degraded/unknown instead of falling back to Modbus as source of truth.
+
+P1/DSMR grid power remains the primary decision input for import/export behavior.
+Modbus over RS485 is only used as the actuator for battery charge/discharge limit
+ceilings. Live tests proved only these writes are supported on this inverter:
+
+* `45565` — battery charge limit in watts
+* `45566` — battery discharge limit in watts
+
+The tested 475xx EMS force-control registers are not available on this inverter, so
+these Modbus limits are **not** active force-charge or force-discharge setpoints. A
+charge limit means the maximum the inverter may use if it independently decides to
+charge; a discharge limit means the maximum it may use if it independently decides to
+discharge. Use `GOODWE_DRY_RUN=true` to suppress Modbus writes during tests.
+
+Key environment variables:
+
+```text
+GOODWE_API_ENABLED=true
+GOODWE_MODBUS_LIMITS_ENABLED=true
+GOODWE_MODBUS_HOST=192.168.1.201
+GOODWE_MODBUS_PORT=502
+GOODWE_MODBUS_DEVICE_ID=247
+GOODWE_DRY_RUN=false
+GOODWE_LIMIT_WRITE_INTERVAL_SEC=10
+GOODWE_LIMIT_MIN_CHANGE_W=150
+GOODWE_DEFAULT_CHARGE_LIMIT_W=6000
+GOODWE_DEFAULT_DISCHARGE_LIMIT_W=6000
+GOODWE_CONSERVATIVE_CHARGE_LIMIT_W=1500
+GOODWE_CONSERVATIVE_DISCHARGE_LIMIT_W=1500
+```
