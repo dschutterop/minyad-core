@@ -437,7 +437,7 @@ def test_idle_import_while_battery_discharging_adopts_and_increases_setpoint(mon
     assert app.controller.ticked == [-472]
 
 
-def test_active_charging_sample_does_not_republish_setpoint(monkeypatch):
+def test_active_charging_sample_rebalances_persistent_export(monkeypatch):
     monkeypatch.setattr(control_main, "store_status", noop_store_status)
     app = make_available_app()
     app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
@@ -447,8 +447,7 @@ def test_active_charging_sample_does_not_republish_setpoint(monkeypatch):
 
     asyncio.run(app.handle_message("minyad/grid/net_power_w", b"-200"))
 
-    assert ("control", "charge_w", 600) not in app.mqtt.published
-    assert not any(measurement == "charge_w" for _, measurement, _ in app.mqtt.published)
+    assert ("control", "charge_w", 600) in app.mqtt.published
     assert app.controller.ticked == [200]
 
 
@@ -483,3 +482,156 @@ def test_control_service_publishes_two_actuator_values_without_modbus(monkeypatc
     assert ("control", "charge_w", 0) in app.mqtt.published
     assert ("control", "discharge_w", 600) in app.mqtt.published
     assert all(topic[1] != "modbus" for topic in app.mqtt.published)
+
+
+def force_balance_ready(app):
+    app._last_balance_at = -control_main.CONTROL_INTERVAL_SEC
+
+
+def test_slow_balance_charging_export_increases_target(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
+    app.setpoint_w = 500
+    app.latest_grid_power_w = -450
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.CHARGING))
+
+    assert app.setpoint_w == 650
+    assert ("control", "charge_w", 650) in app.mqtt.published
+
+
+def test_slow_balance_charging_import_decreases_target(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
+    app.setpoint_w = 600
+    app.latest_grid_power_w = 350
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.CHARGING))
+
+    assert app.setpoint_w == 500
+    assert ("control", "charge_w", 500) in app.mqtt.published
+
+
+def test_slow_balance_charging_deadband_does_not_write(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
+    app.setpoint_w = 600
+    app.latest_grid_power_w = -100
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.CHARGING))
+
+    assert app.setpoint_w == 600
+    assert not any(measurement == "charge_w" for _, measurement, _ in app.mqtt.published)
+
+
+def test_slow_balance_discharging_import_increases_target(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.DISCHARGING)
+    app.setpoint_w = 500
+    app.latest_grid_power_w = 450
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.DISCHARGING))
+
+    assert app.setpoint_w == 650
+    assert ("control", "discharge_w", 650) in app.mqtt.published
+
+
+def test_slow_balance_discharging_export_decreases_target(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.DISCHARGING)
+    app.setpoint_w = 600
+    app.latest_grid_power_w = -350
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.DISCHARGING))
+
+    assert app.setpoint_w == 500
+    assert ("control", "discharge_w", 500) in app.mqtt.published
+
+
+def test_slow_balance_soc_ceiling_stops_charging(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
+    app.setpoint_w = 600
+    app._last_published_charge_limit_w = 600
+    app._has_published_battery_limits = True
+    app.latest_grid_power_w = -600
+    app.latest_battery_soc = 90
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.CHARGING))
+
+    assert app.setpoint_w == 0
+    assert ("control", "charge_w", 0) in app.mqtt.published
+
+
+def test_slow_balance_soc_floor_stops_discharging(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.DISCHARGING)
+    app.setpoint_w = 600
+    app._last_published_discharge_limit_w = 600
+    app._has_published_battery_limits = True
+    app.latest_grid_power_w = 600
+    app.latest_battery_soc = 20
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.DISCHARGING))
+
+    assert app.setpoint_w == 0
+    assert ("control", "discharge_w", 0) in app.mqtt.published
+
+
+def test_slow_balance_clamps_target_at_max(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_charge_w": 700}
+    app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
+    app.setpoint_w = 500
+    app.latest_grid_power_w = -2000
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.CHARGING))
+
+    assert app.setpoint_w == 700
+    assert ("control", "charge_w", 700) in app.mqtt.published
+
+
+def test_slow_balance_below_threshold_is_not_written(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
+    app.setpoint_w = 500
+    app.latest_grid_power_w = -250  # residual=100, gain=50 => min step 100; threshold is 100, so make threshold larger
+    monkeypatch.setattr(control_main, "MIN_TARGET_CHANGE_W", 150)
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.CHARGING))
+
+    assert app.setpoint_w == 500
+    assert not any(measurement == "charge_w" for _, measurement, _ in app.mqtt.published)
+
+
+def test_slow_balance_no_oscillation_around_deadband(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
+    app.setpoint_w = 500
+
+    for grid_power_w in (-149, 149, -100, 100):
+        app.latest_grid_power_w = grid_power_w
+        force_balance_ready(app)
+        asyncio.run(app.apply_slow_balance(control_main.ControlState.CHARGING))
+
+    assert app.setpoint_w == 500
+    assert not any(measurement == "charge_w" for _, measurement, _ in app.mqtt.published)
