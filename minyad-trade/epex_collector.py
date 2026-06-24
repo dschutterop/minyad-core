@@ -5,20 +5,40 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import threading
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from config import AMSTERDAM_TZ, DAY_AHEAD_DEFAULTS, ENTSOE, MQTT_TOPICS
 from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _load_local_config() -> Any:
+    """Load this service's config module without colliding with other config.py files."""
+    spec = spec_from_file_location("minyad_trade_config", Path(__file__).with_name("config.py"))
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Unable to load minyad-trade config.py")
+    module = module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_CONFIG = _load_local_config()
+AMSTERDAM_TZ = _CONFIG.AMSTERDAM_TZ
+DAY_AHEAD_DEFAULTS = _CONFIG.DAY_AHEAD_DEFAULTS
+ENTSOE = _CONFIG.ENTSOE
+MQTT_TOPICS = _CONFIG.MQTT_TOPICS
 
 
 @dataclass(frozen=True)
