@@ -407,6 +407,8 @@ def test_export_charging_sends_api_charge_command_and_modbus_charge_limit(monkey
         await bridge.handle_charge_setpoint(1100)
         assert backend.battery_limits == [(1100, 0)]
         assert backend.api_commands == [("charge", 1100)]
+        assert (goodwe_bridge.MQTT_TOPIC_BATTERY_POWER_W, "-1100", True) in bridge.mqtt_client.published
+        assert (goodwe_bridge.MQTT_TOPIC_BATTERY_MODE, "charge", True) in bridge.mqtt_client.published
 
     asyncio.run(run())
 
@@ -422,6 +424,8 @@ def test_import_discharging_sends_api_discharge_command_and_modbus_discharge_lim
         await bridge.handle_discharge_setpoint(800)
         assert backend.battery_limits == [(0, 800)]
         assert backend.api_commands == [("discharge", 800)]
+        assert (goodwe_bridge.MQTT_TOPIC_BATTERY_POWER_W, "800", True) in bridge.mqtt_client.published
+        assert (goodwe_bridge.MQTT_TOPIC_BATTERY_MODE, "discharge", True) in bridge.mqtt_client.published
 
     asyncio.run(run())
 
@@ -436,6 +440,8 @@ def test_idle_stops_forced_mode(monkeypatch):
         bridge.control_state = "IDLE"
         await bridge.handle_charge_setpoint(0)
         assert backend.api_commands == [("stop_forced_mode", 0)]
+        assert (goodwe_bridge.MQTT_TOPIC_BATTERY_POWER_W, "0", True) in bridge.mqtt_client.published
+        assert (goodwe_bridge.MQTT_TOPIC_BATTERY_MODE, "idle", True) in bridge.mqtt_client.published
 
     asyncio.run(run())
 
@@ -467,6 +473,8 @@ def test_api_command_failure_is_not_masked_by_successful_modbus_write(monkeypatc
         await bridge.handle_discharge_setpoint(600)
         assert backend.battery_limits == [(0, 600)]
         assert bridge.modbus_writes_total == 1
+        assert (goodwe_bridge.MQTT_TOPIC_BATTERY_POWER_W, "600", True) not in bridge.mqtt_client.published
+        assert (goodwe_bridge.MQTT_TOPIC_BATTERY_MODE, "discharge", True) not in bridge.mqtt_client.published
 
     asyncio.run(run())
     assert "Active command failed" in caplog.text
