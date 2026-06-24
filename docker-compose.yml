@@ -197,6 +197,23 @@ services:
         condition: service_started
     networks: [minyad-internal, minyad-public]
 
+  minyad-trade:
+    build:
+      context: .
+      dockerfile: minyad-trade/Dockerfile
+    container_name: minyad-trade
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MQTT_HOST: minyad-mqtt
+      MQTT_PORT: 1883
+    depends_on:
+      minyad-mqtt:
+        condition: service_healthy
+      minyad-api:
+        condition: service_started
+    networks: [minyad-internal, minyad-public]
+
   minyad-reporting:
     build:
       context: .

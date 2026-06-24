@@ -82,6 +82,13 @@ MQTT_BATTERY_SETTINGS_PREFIX = "minyad/settings/battery"
 MQTT_BATTERY_SETTING_TOPICS = {
     "inverter_poll_interval_s": f"{MQTT_BATTERY_SETTINGS_PREFIX}/inverter_poll_interval_s",
 }
+MQTT_TRADE_SETTINGS_PREFIX = "minyad/settings/trade"
+MQTT_TRADE_SETTING_TOPICS = {
+    "bidding_zone": f"{MQTT_TRADE_SETTINGS_PREFIX}/bidding_zone",
+    "poll_time_local": f"{MQTT_TRADE_SETTINGS_PREFIX}/poll_time_local",
+    "retry_attempts": f"{MQTT_TRADE_SETTINGS_PREFIX}/retry_attempts",
+    "retry_interval_minutes": f"{MQTT_TRADE_SETTINGS_PREFIX}/retry_interval_minutes",
+}
 
 BATTERY_KEYS = {
     "start_w": (100, 5000),
@@ -107,6 +114,17 @@ STRATEGY_DEFAULTS = {
     "ramp_ceiling_w": "1000",
     "ramp_hold_seconds": "120",
 }
+TRADE_DEFAULTS = {
+    "bidding_zone": "10YNL----------L",
+    "poll_time_local": "13:30",
+    "retry_attempts": "3",
+    "retry_interval_minutes": "15",
+}
+TRADE_NUMERIC_LIMITS = {
+    "retry_attempts": (1, 24),
+    "retry_interval_minutes": (1, 240),
+}
+
 STRATEGY_NUMERIC_LIMITS = {
     "ghi_solar_rich_threshold": (0.0, 20.0),
     "ghi_solar_poor_threshold": (0.0, 20.0),
@@ -486,6 +504,24 @@ class BatteryOverrideRequest(BaseModel):
         return self
 
 
+class TradeSettingsUpdate(BaseModel):
+    bidding_zone: str | None = None
+    poll_time_local: str | None = None
+    retry_attempts: int | None = Field(default=None, ge=1, le=24)
+    retry_interval_minutes: int | None = Field(default=None, ge=1, le=240)
+
+    @field_validator("poll_time_local")
+    @classmethod
+    def validate_poll_time(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            datetime.strptime(value, "%H:%M")
+        except ValueError as exc:
+            raise ValueError("poll_time_local must use HH:MM format") from exc
+        return value
+
+
 class BatterySettingsUpdate(BaseModel):
     start_w: int | None = None
     stop_w: int | None = None
@@ -510,6 +546,15 @@ class BatterySettingsUpdate(BaseModel):
         return value
 
 
+async def publish_trade_mqtt_settings(settings: dict[str, Any] | None = None) -> None:
+    if settings is None:
+        async with AsyncSessionLocal() as session:
+            settings = await trade_settings(session)
+    for key, topic in MQTT_TRADE_SETTING_TOPICS.items():
+        if key in settings:
+            mqtt.client.publish(topic, str(settings[key]), qos=0, retain=True)
+
+
 async def publish_battery_mqtt_settings(settings: dict[str, Any] | None = None) -> None:
     if settings is None:
         async with AsyncSessionLocal() as session:
@@ -532,6 +577,7 @@ async def startup() -> None:
     mqtt.subscribe("minyad/inverter/+", handle_status_mqtt)
     mqtt.subscribe("minyad/solar/#", handle_status_mqtt)
     await publish_battery_mqtt_settings()
+    await publish_trade_mqtt_settings()
     asyncio.create_task(_refresh_debug_setting())
 
 
@@ -663,6 +709,49 @@ async def asset_steering_status(session: AsyncSession = Depends(get_session)) ->
         "latest_setpoint": dict(latest_setpoint) if latest_setpoint else None,
         "recent_setpoints": [dict(row) for row in recent_setpoints],
     }
+
+
+async def trade_settings(session: AsyncSession) -> dict[str, Any]:
+    result = await session.execute(text("select key, value from settings where key like 'trade.%'"))
+    values = {row.key.removeprefix("trade."): row.value for row in result}
+    merged = {**TRADE_DEFAULTS, **values}
+    return {
+        "bidding_zone": merged["bidding_zone"],
+        "poll_time_local": merged["poll_time_local"],
+        "retry_attempts": int(merged["retry_attempts"]),
+        "retry_interval_minutes": int(merged["retry_interval_minutes"]),
+    }
+
+
+@app.get("/trade/settings")
+async def get_trade_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    return await trade_settings(session)
+
+
+@app.put("/trade/settings")
+async def update_trade_settings(update: TradeSettingsUpdate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    data = update.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        if key in TRADE_NUMERIC_LIMITS:
+            lo, hi = TRADE_NUMERIC_LIMITS[key]
+            if not lo <= int(value) <= hi:
+                raise HTTPException(status_code=422, detail=f"{key} must be between {lo} and {hi}")
+        elif key == "bidding_zone":
+            if not str(value).strip():
+                raise HTTPException(status_code=422, detail="bidding_zone cannot be empty")
+        elif key != "poll_time_local":
+            raise HTTPException(status_code=422, detail=f"unknown setting {key}")
+        await session.execute(
+            text("""
+                insert into settings (key, value, encrypted, updated_at) values (:key, :value, false, now())
+                on conflict (key) do update set value=:value, encrypted=false, updated_at=now()
+            """),
+            {"key": f"trade.{key}", "value": str(value)},
+        )
+    await session.commit()
+    settings = await trade_settings(session)
+    await publish_trade_mqtt_settings(settings)
+    return settings
 
 
 @app.get("/settings")
