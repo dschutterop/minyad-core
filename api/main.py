@@ -852,6 +852,21 @@ def active_battery_setpoint_w(payload: dict[str, Any]) -> int | None:
     return None
 
 
+def battery_curve_power_w(payload: dict[str, Any]) -> int | None:
+    """Return the measured battery power for charts, falling back to setpoints.
+
+    The dashboard graph should reflect what the inverter reports the battery is
+    actually doing.  Setpoints are only useful when no measured power telemetry
+    is available; otherwise stale discharge/charge commands can make an idle
+    battery look active in the graph while the status card correctly shows
+    standby.
+    """
+    actual_power_w = _numeric_w(payload, "power_w")
+    if actual_power_w is not None:
+        return actual_power_w
+    return active_battery_setpoint_w(payload)
+
+
 
 def _numeric_w(payload: dict[str, Any], key: str) -> int | None:
     value = payload.get(key)
@@ -866,9 +881,7 @@ def _numeric_w(payload: dict[str, Any], key: str) -> int | None:
 
 def compute_household_load(payload: dict[str, Any]) -> dict[str, Any]:
     solar_w = max(0, _numeric_w(payload, "solar_power_w") or 0)
-    battery_power_w = _numeric_w(payload, "power_w")
-    if battery_power_w is None:
-        battery_power_w = active_battery_setpoint_w(payload) or 0
+    battery_power_w = battery_curve_power_w(payload) or 0
     battery_discharge_w = max(0, battery_power_w)
     battery_charge_w = max(0, -battery_power_w)
     grid_import_w = _numeric_w(payload, "grid_delivered_w")
@@ -963,10 +976,9 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
     if "available" in payload and payload["available"] is not None:
         payload["available"] = str(payload["available"]).lower() == "true"
     enrich_bridge_health(payload)
-    setpoint_power_w = active_battery_setpoint_w(payload)
-    if setpoint_power_w is not None or "power_w" in payload:
-        battery_power_w = setpoint_power_w if setpoint_power_w is not None else int(payload["power_w"])
-        await store_power_curve_point(session, "battery", battery_power_w, metadata={"soc": payload.get("soc"), "mode": payload.get("mode"), "setpoint_delta_w": battery_power_w})
+    battery_power_w = battery_curve_power_w(payload)
+    if battery_power_w is not None:
+        await store_power_curve_point(session, "battery", battery_power_w, metadata={"soc": payload.get("soc"), "mode": payload.get("mode"), "setpoint_delta_w": active_battery_setpoint_w(payload)})
         await session.commit()
     LOGGER.debug("battery_status: final keys=%s", sorted(payload.keys()))
     return payload
