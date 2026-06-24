@@ -33,6 +33,9 @@ class MinyadClient:
     def get_battery_settings(self) -> dict[str, Any]:
         return self._get("/api/battery/settings")
 
+    def get_claude_agent_settings(self) -> dict[str, Any]:
+        return self._get("/api/claude-agent/settings")
+
     def get_forecast(self, hours_ahead: int = 12) -> dict[str, Any]:
         return self._get("/api/forecast", params={"hours_ahead": hours_ahead})
 
