@@ -31,6 +31,8 @@ MQTT_TOPIC_DSMR_NET_POWER = "minyad/dsmr/net_power_w"
 MQTT_TOPIC_GRID_NET_POWER = "minyad/grid/net_power_w"
 MQTT_TOPIC_CONTROL_STATE = "minyad/control/state"
 MQTT_TOPIC_BATTERY_POLL_INTERVAL = "minyad/settings/battery/inverter_poll_interval_s"
+MQTT_TOPIC_BATTERY_POWER_W = "minyad/battery/power_w"
+MQTT_TOPIC_BATTERY_MODE = "minyad/battery/mode"
 BATTERY_POLL_INTERVAL_SETTING = "battery.inverter_poll_interval_s"
 POLL_INTERVAL_SEC = 2
 MIN_WRITE_INTERVAL_SEC = 10
@@ -390,6 +392,8 @@ class GoodWeBridge:
             return
         modbus_result = await self._apply_modbus_limits(charge, discharge, state_changed=state_changed)
         api_command, api_success = await self._apply_api_command(charge, discharge)
+        if api_success is True:
+            self.publish_commanded_battery_state(api_command)
         self.publish_metrics()
         self._log_control_decision(charge, discharge, modbus_write_result=modbus_result, api_command=api_command, api_command_success=api_success)
         if self.control_state == "CHARGING" and charge > 0:
@@ -451,6 +455,24 @@ class GoodWeBridge:
         self._last_api_command_monotonic = monotonic()
         return command, True
 
+    def publish_commanded_battery_state(self, api_command: str) -> None:
+        """Optimistically publish the commanded battery state after GoodWe accepts it.
+
+        GoodWe telemetry can lag behind an active charge/discharge command by a
+        full polling interval. Publishing the accepted setpoint immediately lets
+        downstream MQTT consumers display the active command without waiting for
+        the next inverter readback.
+        """
+        if api_command == "charge":
+            self.publish(MQTT_TOPIC_BATTERY_POWER_W, -self.target_charge_limit_w, retain=True)
+            self.publish(MQTT_TOPIC_BATTERY_MODE, "charge", retain=True)
+        elif api_command == "discharge":
+            self.publish(MQTT_TOPIC_BATTERY_POWER_W, self.target_discharge_limit_w, retain=True)
+            self.publish(MQTT_TOPIC_BATTERY_MODE, "discharge", retain=True)
+        elif api_command == "stop_forced_mode":
+            self.publish(MQTT_TOPIC_BATTERY_POWER_W, 0, retain=True)
+            self.publish(MQTT_TOPIC_BATTERY_MODE, "idle", retain=True)
+
     def _skip_actuator_write(self, reason: str) -> None:
         self.modbus_write_skipped_total += 1
         self.publish_metrics()
@@ -473,10 +495,10 @@ class GoodWeBridge:
         values = {
             "minyad/battery/soc": state.battery_soc,
             "minyad/battery/soh": state.battery_soh,
-            "minyad/battery/power_w": state.battery_power_w,
+            MQTT_TOPIC_BATTERY_POWER_W: state.battery_power_w,
             "minyad/battery/voltage_v": state.battery_voltage_v,
             "minyad/battery/temperature_c": state.battery_temperature_c,
-            "minyad/battery/mode": state.battery_mode,
+            MQTT_TOPIC_BATTERY_MODE: state.battery_mode,
             "minyad/inverter/temperature_c": state.inverter_temperature_c,
             "minyad/inverter/grid_power_w": state.grid_power_w,
             MQTT_TOPIC_INVERTER_STATUS: self._status_for_state(state),
