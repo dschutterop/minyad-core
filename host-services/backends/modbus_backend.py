@@ -92,7 +92,7 @@ class ModbusBackend:
             self.client = AsyncModbusTcpClient(self.host, port=self.port, timeout=self.timeout)
         if not self.client.connected:
             if not await self.client.connect():
-                logger.warning("Modbus connection failed to %s:%s", self.host, self.port)
+                logger.warning("[modbus] Modbus connection failed to %s:%s", self.host, self.port)
                 raise ConnectionError(f"Modbus gateway unreachable at {self.host}:{self.port}")
         return self.client
 
@@ -111,7 +111,7 @@ class ModbusBackend:
 
     async def _write_register(self, address: int, value: int) -> None:
         if self.dry_run:
-            logger.info("DRY-RUN Modbus write skipped register=%s value=%s", address, value)
+            logger.info("[modbus] DRY-RUN Modbus write skipped register=%s value=%s", address, value)
             return
         client = await self._connect()
         try:
@@ -172,7 +172,7 @@ class ModbusBackend:
             self.metrics.current_charge_limit_w = charge
             self.metrics.current_discharge_limit_w = discharge
             logger.info(
-                "Modbus battery limits applied charge_limit_w=%s discharge_limit_w=%s registers={%s:%s,%s:%s} dry_run=%s",
+                "[modbus] Modbus battery limits applied charge_limit_w=%s discharge_limit_w=%s registers={%s:%s,%s:%s} dry_run=%s",
                 charge, discharge, REG_BATTERY_CHARGE_LIMIT_W, charge, REG_BATTERY_DISCHARGE_LIMIT_W, discharge, self.dry_run,
             )
             if self.post_write_feedback_settle_s:
@@ -182,7 +182,7 @@ class ModbusBackend:
     def _skip_write(self, reason: str, charge: int, discharge: int) -> None:
         self.metrics.skip(reason)
         logger.info(
-            "Modbus write skipped reason=%s target_charge_limit_w=%s target_discharge_limit_w=%s current_charge_limit_w=%s current_discharge_limit_w=%s",
+            "[modbus] Modbus write skipped reason=%s target_charge_limit_w=%s target_discharge_limit_w=%s current_charge_limit_w=%s current_discharge_limit_w=%s",
             reason, charge, discharge, self.metrics.current_charge_limit_w, self.metrics.current_discharge_limit_w,
         )
 
