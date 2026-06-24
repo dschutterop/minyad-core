@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+import logging
 import os
 import sys
 import types
@@ -500,6 +501,44 @@ def test_slow_balance_charging_export_increases_target(monkeypatch):
 
     assert app.setpoint_w == 650
     assert ("control", "charge_w", 650) in app.mqtt.published
+
+
+def test_slow_balance_charging_export_increases_above_legacy_default_when_configured(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_charge_w": 5000}
+    app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
+    app.setpoint_w = 1440
+    app.latest_grid_power_w = -1980
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.CHARGING))
+
+    assert app.setpoint_w == 1940
+    assert ("control", "charge_w", 1940) in app.mqtt.published
+
+
+def test_slow_balance_charging_logs_explicit_1440_cap(monkeypatch, caplog):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_charge_w": 1440, "max_charge_a": 30, "nominal_v": 48}
+    app.controller = FakeHysteresisController(control_main.ControlState.CHARGING)
+    app.setpoint_w = 1440
+    app.latest_grid_power_w = -1980
+    force_balance_ready(app)
+
+    with caplog.at_level(logging.DEBUG, logger=control_main.LOGGER.name):
+        asyncio.run(app.apply_slow_balance(control_main.ControlState.CHARGING))
+
+    assert app.setpoint_w == 1440
+    assert not any(measurement == "charge_w" for _, measurement, _ in app.mqtt.published)
+    log_text = caplog.text
+    assert "raw_target_power_w=1940" in log_text
+    assert "new_target_power_w=1440" in log_text
+    assert "effective_charge_cap_w=1440" in log_text
+    assert "configured_max_charge_w': 1440" in log_text
+    assert "battery_hardware_charge_cap_w': 1440" in log_text
+    assert "clamp_reason=battery.max_charge_w+battery.max_charge_a*battery.nominal_v" in log_text
 
 
 def test_slow_balance_charging_import_decreases_target(monkeypatch):
