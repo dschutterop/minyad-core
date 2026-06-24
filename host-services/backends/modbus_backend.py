@@ -137,12 +137,12 @@ class ModbusBackend:
         status = await self.read_status()
         mode = {0: "idle", 1: "charge", 2: "discharge"}.get(status.work_mode, "idle")
         return InverterState(
-            battery_soc=0,
-            battery_soh=0,
+            battery_soc=None,
+            battery_soh=None,
             battery_power_w=status.battery_power_w,
             battery_voltage_v=status.battery_voltage_v,
-            battery_temperature_c=0.0,
+            battery_temperature_c=None,
             battery_mode=mode,
-            inverter_temperature_c=0.0,
-            grid_power_w=0,
+            inverter_temperature_c=None,
+            grid_power_w=None,
         )

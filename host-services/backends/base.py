@@ -8,14 +8,14 @@ from typing import Protocol
 
 @dataclass(frozen=True)
 class InverterState:
-    battery_soc: int
-    battery_soh: int
-    battery_power_w: int
-    battery_voltage_v: float
-    battery_temperature_c: float
-    battery_mode: str
-    inverter_temperature_c: float
-    grid_power_w: int
+    battery_soc: int | None
+    battery_soh: int | None
+    battery_power_w: int | None
+    battery_voltage_v: float | None
+    battery_temperature_c: float | None
+    battery_mode: str | None
+    inverter_temperature_c: float | None
+    grid_power_w: int | None
 
 
 class InverterBackend(Protocol):
