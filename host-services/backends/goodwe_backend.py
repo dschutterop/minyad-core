@@ -38,7 +38,7 @@ class GoodWeBackend:
         elapsed = monotonic() - self._last_request_at
         wait_for = self.min_request_interval_s - elapsed
         if wait_for > 0:
-            logger.debug("Throttling GoodWe inverter request for %.2fs", wait_for)
+            logger.debug("[api] Throttling GoodWe inverter request for %.2fs", wait_for)
             await asyncio.sleep(wait_for)
         self._last_request_at = monotonic()
 
@@ -50,7 +50,7 @@ class GoodWeBackend:
                 self._inverter = await goodwe.connect(self.inverter_ip, family="ES")
                 return self._inverter
             except goodwe.exceptions.InverterError as exc:
-                logger.warning("Connect attempt %s/%s failed: %s", attempt + 1, self.retries, exc)
+                logger.warning("[api] Connect attempt %s/%s failed: %s", attempt + 1, self.retries, exc)
                 if attempt < self.retries - 1:
                     await asyncio.sleep(self.delay)
         raise RuntimeError(f"Inverter unreachable after {self.retries} attempts")
@@ -79,7 +79,7 @@ class GoodWeBackend:
             await self._send_command(inv, f"032c050000173b{charge_pct:02x}", "03AC")
             await self._send_command(inv, f"032d050000173b{discharge_pct:02x}", "03AD")
         logger.info(
-            "GoodWe limits applied charge_limit_w=%s (%s%%) discharge_limit_w=%s (%s%%)",
+            "[api] GoodWe limits applied charge_limit_w=%s (%s%%) discharge_limit_w=%s (%s%%)",
             max(0, min(self.max_w, int(charge_limit_w))),
             charge_pct,
             max(0, min(self.max_w, int(discharge_limit_w))),

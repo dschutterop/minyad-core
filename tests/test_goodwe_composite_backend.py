@@ -130,3 +130,19 @@ def test_set_limits_works_only_via_modbus():
         assert "Modbus actuator disabled" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
+
+
+def test_protocol_logs_include_source_prefixes(caplog):
+    backend = GoodWeCompositeBackend(
+        FakeClient(error=ConnectionError("modbus down")),
+        FakeClient(error=RuntimeError("api down")),
+    )
+
+    try:
+        read(backend)
+    except RuntimeError:
+        pass
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(message.startswith("[modbus] GoodWe modbus read failed") for message in messages)
+    assert any(message.startswith("[api] GoodWe api read failed") for message in messages)

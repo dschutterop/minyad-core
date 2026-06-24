@@ -25,7 +25,7 @@ class GoodWeCompositeBackend:
             raise RuntimeError(f"GoodWe telemetry unavailable: modbus={modbus_error}; api={api_error}")
         telemetry = self.merge_telemetry(modbus_state, api_state, modbus_error=modbus_error, api_error=api_error)
         logger.info(
-            "GoodWe telemetry merged sources=%s modbus_available=%s api_available=%s modbus_error=%s api_error=%s",
+            "[modbus|api] GoodWe telemetry merged sources=%s modbus_available=%s api_available=%s modbus_error=%s api_error=%s",
             telemetry.field_sources,
             telemetry.modbus_available,
             telemetry.api_available,
@@ -33,9 +33,9 @@ class GoodWeCompositeBackend:
             telemetry.api_error,
         )
         if modbus_error:
-            logger.warning("GoodWe Modbus telemetry degraded: %s", modbus_error)
+            logger.warning("[modbus] GoodWe Modbus telemetry degraded: %s", modbus_error)
         if api_error:
-            logger.info("GoodWe API telemetry unavailable; continuing with Modbus/control data: %s", api_error)
+            logger.info("[api] GoodWe API telemetry unavailable; continuing with Modbus/control data: %s", api_error)
         return telemetry
 
     async def _read_optional(self, name: str, client: InverterBackend | None) -> tuple[InverterState | None, str | None]:
@@ -44,7 +44,7 @@ class GoodWeCompositeBackend:
         try:
             return await client.read_state(), None
         except Exception as exc:
-            logger.warning("GoodWe %s read failed: %s", name, exc, exc_info=True)
+            logger.warning("[%s] GoodWe %s read failed: %s", name, name, exc, exc_info=True)
             return None, str(exc)
 
     @staticmethod
