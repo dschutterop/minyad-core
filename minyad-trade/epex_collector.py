@@ -12,8 +12,6 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
-from entsoe import EntsoePandasClient
-
 from config import AMSTERDAM_TZ, DAY_AHEAD_DEFAULTS, ENTSOE, MQTT_TOPICS
 from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
@@ -85,14 +83,16 @@ def normalize_prices(series: pd.Series) -> list[dict[str, Any]]:
     return prices
 
 
-def fetch_day_ahead(client: EntsoePandasClient, settings: DayAheadSettings, target_day: datetime) -> list[dict[str, Any]]:
+def fetch_day_ahead(client: Any, settings: DayAheadSettings, target_day: datetime) -> list[dict[str, Any]]:
     start = pd.Timestamp(target_day.date(), tz=ENTSOE.timezone_name)
-    end = start + pd.Timedelta(days=1)
+    end = start + pd.DateOffset(days=1)
     LOGGER.info("Fetching day-ahead prices zone=%s day=%s", settings.bidding_zone, start.date())
     series = client.query_day_ahead_prices(settings.bidding_zone, start=start, end=end)
     if series is None or series.empty:
         return []
-    return normalize_prices(series)
+    prices = normalize_prices(series)
+    target_date = start.date().isoformat()
+    return [point for point in prices if point["date"] == target_date]
 
 
 def publish_prices(mqtt: MinyadMqttClient, prices: list[dict[str, Any]]) -> None:
@@ -107,24 +107,40 @@ def publish_prices(mqtt: MinyadMqttClient, prices: list[dict[str, Any]]) -> None
     LOGGER.info("Published %d day-ahead price points for %s", len(prices), day)
 
 
-def collect_with_retries(client: EntsoePandasClient, mqtt: MinyadMqttClient, settings: DayAheadSettings, target_day: datetime) -> None:
+def collect_with_retries(client: Any, mqtt: MinyadMqttClient, settings: DayAheadSettings, target_day: datetime) -> bool:
     for attempt in range(1, settings.retry_attempts + 1):
         try:
             prices = fetch_day_ahead(client, settings, target_day)
             publish_prices(mqtt, prices)
-            return
+            return True
         except Exception as exc:  # ENTSO-E uses several exception types for unavailable data.
             if attempt >= settings.retry_attempts:
-                LOGGER.exception("Day-ahead price collection failed after %d attempts: %s", attempt, exc)
-                return
+                LOGGER.exception("Day-ahead price collection failed after %d attempts: %r", attempt, exc)
+                return False
             LOGGER.warning(
-                "Day-ahead prices unavailable attempt %d/%d; retrying in %d minutes: %s",
+                "Day-ahead prices unavailable attempt %d/%d; retrying in %d minutes: %r",
                 attempt,
                 settings.retry_attempts,
                 settings.retry_interval_minutes,
                 exc,
             )
             time.sleep(settings.retry_interval_minutes * 60)
+    return False
+
+
+def collect_startup_prices(client: Any, mqtt: MinyadMqttClient, settings: DayAheadSettings, now: datetime) -> None:
+    target = _target_day(now)
+    LOGGER.info("Running startup ENTSO-E day-ahead poll for %s", target.date())
+    if collect_with_retries(client, mqtt, settings, target):
+        return
+
+    current_day = now.astimezone(AMSTERDAM_TZ)
+    LOGGER.warning(
+        "Startup day-ahead prices for %s are unavailable; fetching current-day prices for %s so the dashboard is populated",
+        target.date(),
+        current_day.date(),
+    )
+    collect_with_retries(client, mqtt, settings, current_day)
 
 
 def _target_day(now: datetime) -> datetime:
@@ -142,6 +158,8 @@ def main() -> None:
     mqtt = MinyadMqttClient("minyad-trade")
     mqtt.start()
     mqtt.subscribe(f"{MQTT_TOPICS.settings_prefix}/#", store.apply_mqtt)
+    from entsoe import EntsoePandasClient
+
     client = EntsoePandasClient(api_key=api_key)
     LOGGER.info(
         "minyad-trade started with settings: %s (ENTSOE_API_KEY configured length=%d)",
@@ -150,8 +168,7 @@ def main() -> None:
     )
 
     startup_now = datetime.now(AMSTERDAM_TZ)
-    LOGGER.info("Running startup ENTSO-E day-ahead poll for %s", _target_day(startup_now).date())
-    collect_with_retries(client, mqtt, store.get(), _target_day(startup_now))
+    collect_startup_prices(client, mqtt, store.get(), startup_now)
 
     while True:
         settings = store.get()
