@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from threading import Event, Lock
 from typing import Any, Literal
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 
@@ -92,6 +93,7 @@ MQTT_TRADE_SETTING_TOPICS = {
     "poll_time_local": f"{MQTT_TRADE_SETTINGS_PREFIX}/poll_time_local",
     "retry_attempts": f"{MQTT_TRADE_SETTINGS_PREFIX}/retry_attempts",
     "retry_interval_minutes": f"{MQTT_TRADE_SETTINGS_PREFIX}/retry_interval_minutes",
+    "entsoe_api_url": f"{MQTT_TRADE_SETTINGS_PREFIX}/entsoe_api_url",
 }
 
 BATTERY_KEYS = {
@@ -126,6 +128,7 @@ TRADE_DEFAULTS = {
     "poll_time_local": "13:30",
     "retry_attempts": "3",
     "retry_interval_minutes": "15",
+    "entsoe_api_url": "https://web-api.tp.entsoe.eu/api",
 }
 TRADE_NUMERIC_LIMITS = {
     "retry_attempts": (1, 24),
@@ -658,6 +661,7 @@ class TradeSettingsUpdate(BaseModel):
     poll_time_local: str | None = None
     retry_attempts: int | None = Field(default=None, ge=1, le=24)
     retry_interval_minutes: int | None = Field(default=None, ge=1, le=240)
+    entsoe_api_url: str | None = None
 
     @field_validator("poll_time_local")
     @classmethod
@@ -669,6 +673,17 @@ class TradeSettingsUpdate(BaseModel):
         except ValueError as exc:
             raise ValueError("poll_time_local must use HH:MM format") from exc
         return value
+
+    @field_validator("entsoe_api_url")
+    @classmethod
+    def validate_entsoe_api_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        url = value.strip()
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("entsoe_api_url must be an absolute HTTP(S) URL")
+        return url
 
 
 class BatterySettingsUpdate(BaseModel):
@@ -888,6 +903,7 @@ async def trade_settings(session: AsyncSession) -> dict[str, Any]:
         "poll_time_local": merged["poll_time_local"],
         "retry_attempts": int(merged["retry_attempts"]),
         "retry_interval_minutes": int(merged["retry_interval_minutes"]),
+        "entsoe_api_url": merged["entsoe_api_url"],
     }
 
 
@@ -918,6 +934,9 @@ async def update_trade_settings(update: TradeSettingsUpdate, session: AsyncSessi
         elif key == "bidding_zone":
             if not str(value).strip():
                 raise HTTPException(status_code=422, detail="bidding_zone cannot be empty")
+        elif key == "entsoe_api_url":
+            if not str(value).strip():
+                raise HTTPException(status_code=422, detail="entsoe_api_url cannot be empty")
         elif key != "poll_time_local":
             raise HTTPException(status_code=422, detail=f"unknown setting {key}")
         await session.execute(
