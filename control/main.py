@@ -200,11 +200,12 @@ class ControlApp:
                 return
             previous_state = self.controller.state
             surplus_w = self._apply_soc_guard(surplus_w)
-            # _apply_soc_guard may force the controller idle; publish the stop now.
+            # _apply_soc_guard may force the controller idle; publish the stop now,
+            # but keep evaluating this sample.  A below-floor battery must still be
+            # able to start charging immediately when there is solar surplus.
             if previous_state is not ControlState.IDLE and self.controller.state is ControlState.IDLE:
                 await self.stop_charging()
                 await self.publish_state(ControlState.IDLE)
-                return
             rebalanced_idle_discharge = await self._rebalance_untracked_idle_discharge(grid_power_w)
             state = self.controller.tick(surplus_w)
             LOGGER.info(
@@ -403,6 +404,8 @@ class ControlApp:
         """
         if self.controller is None or self.controller.state is not ControlState.IDLE:
             return False
+        if not self._soc_allows_discharge():
+            return False
         battery_power_w = int(self.latest_battery_power_w)
         if battery_power_w <= 0:
             return False
@@ -433,14 +436,12 @@ class ControlApp:
     async def start_charging(self) -> None:
         await self.publish_setpoint(self.charge_target_w())
 
-    async def enforce_soc_guard_now(self) -> None:
-        if self.controller is None or self.latest_battery_soc is None:
-            return
-        previous_state = self.controller.state
-        self._apply_soc_guard(self.latest_grid_power_w)
-        if previous_state is not ControlState.IDLE and self.controller.state is ControlState.IDLE:
-            await self.stop_charging()
-            await self.publish_state(ControlState.IDLE)
+    def _soc_allows_discharge(self) -> bool:
+        soc = self.latest_battery_soc
+        if soc is None:
+            return True
+        soc_floor = int(self.settings.get("soc_floor", SOC_FLOOR_DEFAULT))
+        return soc > soc_floor
 
     def _apply_soc_guard(self, surplus_w: int) -> int:
         """Block discharge below soc_floor and charge above soc_ceiling.
