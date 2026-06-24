@@ -127,10 +127,15 @@ def collect_with_retries(client: EntsoePandasClient, mqtt: MinyadMqttClient, set
             time.sleep(settings.retry_interval_minutes * 60)
 
 
+def _target_day(now: datetime) -> datetime:
+    return now.astimezone(AMSTERDAM_TZ) + timedelta(days=1)
+
+
 def main() -> None:
     configure_container_logging(format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
     api_key = os.getenv("ENTSOE_API_KEY")
     if not api_key:
+        LOGGER.critical("ENTSOE_API_KEY is required; minyad-trade cannot fetch ENTSO-E prices without it")
         raise RuntimeError("ENTSOE_API_KEY is required")
 
     store = SettingsStore()
@@ -138,7 +143,15 @@ def main() -> None:
     mqtt.start()
     mqtt.subscribe(f"{MQTT_TOPICS.settings_prefix}/#", store.apply_mqtt)
     client = EntsoePandasClient(api_key=api_key)
-    LOGGER.info("minyad-trade started with settings: %s", store.get())
+    LOGGER.info(
+        "minyad-trade started with settings: %s (ENTSOE_API_KEY configured length=%d)",
+        store.get(),
+        len(api_key),
+    )
+
+    startup_now = datetime.now(AMSTERDAM_TZ)
+    LOGGER.info("Running startup ENTSO-E day-ahead poll for %s", _target_day(startup_now).date())
+    collect_with_retries(client, mqtt, store.get(), _target_day(startup_now))
 
     while True:
         settings = store.get()
@@ -147,8 +160,12 @@ def main() -> None:
         sleep_seconds = max(1.0, (poll_at - now).total_seconds())
         LOGGER.info("Next EPEX day-ahead poll scheduled at %s", poll_at.isoformat())
         time.sleep(sleep_seconds)
-        collect_with_retries(client, mqtt, store.get(), datetime.now(AMSTERDAM_TZ) + timedelta(days=1))
+        collect_with_retries(client, mqtt, store.get(), _target_day(datetime.now(AMSTERDAM_TZ)))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        LOGGER.exception("minyad-trade stopped after an unhandled error")
+        raise
