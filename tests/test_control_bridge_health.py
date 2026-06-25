@@ -354,6 +354,38 @@ def test_soc_guard_masks_charge_trigger_at_ceiling(monkeypatch):
     assert surplus < app.controller.start_w
 
 
+def test_soc_update_stops_active_charge_at_ceiling(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_app_with_soc(soc=89, controller_state=control_main.ControlState.CHARGING)
+    app.setpoint_w = 600
+    app._last_published_charge_limit_w = 600
+    app._has_published_battery_limits = True
+
+    asyncio.run(app.handle_battery_topic("minyad/battery/soc", "96"))
+
+    assert app.latest_battery_soc == 96
+    assert app.controller.state is control_main.ControlState.IDLE
+    assert app.setpoint_w == 0
+    assert ("control", "command", "stop") in app.mqtt.published
+    assert ("control", "charge_w", 0) in app.mqtt.published
+
+
+def test_charge_setpoint_is_suppressed_at_soc_ceiling(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_app_with_soc(soc=96, controller_state=control_main.ControlState.CHARGING)
+    app.setpoint_w = 600
+    app._last_published_charge_limit_w = 600
+    app._has_published_battery_limits = True
+
+    asyncio.run(app.publish_setpoint(700))
+
+    assert app.controller.state is control_main.ControlState.IDLE
+    assert app.setpoint_w == 0
+    assert ("control", "command", "stop") in app.mqtt.published
+    assert ("control", "charge_w", 0) in app.mqtt.published
+    assert ("control", "charge_w", 700) not in app.mqtt.published
+
+
 def test_soc_guard_forces_idle_when_discharging_at_floor(monkeypatch):
     monkeypatch.setattr(control_main, "store_status", noop_store_status)
     app = make_app_with_soc(soc=15, controller_state=control_main.ControlState.DISCHARGING)
