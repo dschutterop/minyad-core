@@ -13,6 +13,8 @@ def install_import_stubs() -> None:
 
         class FakeClient:
             def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
                 self.subscriptions = []
                 self.published = []
                 self.on_connect = None
@@ -66,6 +68,8 @@ spec.loader.exec_module(goodwe_bridge)
 
 class FakeClient:
     def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
         self.subscriptions = []
         self.published = []
         self.on_connect = None
@@ -155,9 +159,10 @@ def test_subscribes_to_control_state_topic(monkeypatch):
     monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
     bridge = goodwe_bridge.GoodWeBridge(make_config(), Backend())
 
-    bridge.on_connect(bridge.mqtt_client, None, {}, 0)
+    bridge.on_connect(bridge.mqtt_client, None, {}, types.SimpleNamespace(is_failure=False), None)
 
     assert (goodwe_bridge.MQTT_TOPIC_CONTROL_STATE, 1) in bridge.mqtt_client.subscriptions
+    assert bridge.mqtt_client.args[0] == goodwe_bridge.mqtt.CallbackAPIVersion.VERSION2
 
 
 def test_idle_to_active_state_triggers_immediate_battery_status_poll(monkeypatch):
@@ -225,7 +230,7 @@ def test_subscribes_to_battery_poll_interval_setting_topic(monkeypatch):
     monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
     bridge = goodwe_bridge.GoodWeBridge(make_config(), Backend())
 
-    bridge.on_connect(bridge.mqtt_client, None, {}, 0)
+    bridge.on_connect(bridge.mqtt_client, None, {}, types.SimpleNamespace(is_failure=False), None)
 
     assert (goodwe_bridge.MQTT_TOPIC_BATTERY_POLL_INTERVAL, 1) in bridge.mqtt_client.subscriptions
 
@@ -262,7 +267,7 @@ def test_subscribes_to_grid_power_topics_for_actuator_logging(monkeypatch):
     monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
     bridge = goodwe_bridge.GoodWeBridge(make_config(), Backend())
 
-    bridge.on_connect(bridge.mqtt_client, None, {}, 0)
+    bridge.on_connect(bridge.mqtt_client, None, {}, types.SimpleNamespace(is_failure=False), None)
 
     assert (goodwe_bridge.MQTT_TOPIC_DSMR_NET_POWER, 1) in bridge.mqtt_client.subscriptions
     assert (goodwe_bridge.MQTT_TOPIC_GRID_NET_POWER, 1) in bridge.mqtt_client.subscriptions
