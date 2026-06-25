@@ -88,7 +88,8 @@ BRAND_CSS += """
 .severity-dot.high{background:var(--import-d)}.severity-dot.normal{background:var(--store-d)}.severity-dot.low{background:var(--steel)}
 .message-detail{margin-top:10px;border-top:1px solid var(--p-line);padding-top:10px;color:var(--p-ink)}
 .message-detail p{white-space:pre-wrap;color:var(--p-mut);line-height:1.45}
-.reply-box textarea{width:100%;min-height:82px;margin-top:8px;border:1px solid var(--p-line);border-radius:8px;background:#0A1016;color:var(--p-ink);padding:10px;font:inherit}
+.reply-box input,.reply-box textarea{width:100%;margin-top:8px;border:1px solid var(--p-line);border-radius:8px;background:#0A1016;color:var(--p-ink);padding:10px;font:inherit}
+.reply-box textarea{min-height:82px}
 .reply-box button,.mailbox-head button{border:1px solid var(--p-line);background:#0A1016;color:var(--p-ink);border-radius:8px;padding:8px 10px;cursor:pointer}
 """
 
@@ -109,7 +110,7 @@ html[data-theme=light] .dashboard-nav .wordmark strong,html[data-theme=light] .d
 html[data-theme=light] .dashboard-nav .brand-nav a,html[data-theme=light] .dashboard-nav .wordmark span,html[data-theme=light] .dash-meta,html[data-theme=light] .tile-name,html[data-theme=light] .scale-label,html[data-theme=light] .chart-legend{color:#4A6276}
 html[data-theme=light] .dashboard-nav .mark circle,html[data-theme=light] .dash-title .mark circle{fill:#EDF1F4}
 html[data-theme=light] .tile,html[data-theme=light] .chart-card,html[data-theme=light] .flow-node{background:#fff;border-color:rgba(74,98,118,.18)}
-html[data-theme=light] .window-tab,html[data-theme=light] .layout-toggle,html[data-theme=light] .layout-toggle button.active,html[data-theme=light] .bar,html[data-theme=light] .thin,html[data-theme=light] .cells i,html[data-theme=light] .chart-tooltip,html[data-theme=light] .mailbox-button,html[data-theme=light] .mailbox-item,html[data-theme=light] .reply-box textarea,html[data-theme=light] .reply-box button,html[data-theme=light] .mailbox-head button{background:#fff;color:#15202A;border-color:rgba(74,98,118,.18)}
+html[data-theme=light] .window-tab,html[data-theme=light] .layout-toggle,html[data-theme=light] .layout-toggle button.active,html[data-theme=light] .bar,html[data-theme=light] .thin,html[data-theme=light] .cells i,html[data-theme=light] .chart-tooltip,html[data-theme=light] .mailbox-button,html[data-theme=light] .mailbox-item,html[data-theme=light] .reply-box input,html[data-theme=light] .reply-box textarea,html[data-theme=light] .reply-box button,html[data-theme=light] .mailbox-head button{background:#fff;color:#15202A;border-color:rgba(74,98,118,.18)}
 html[data-theme=light] .mailbox-panel{background:#fff;border-color:rgba(74,98,118,.18)}
 .theme-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}.theme-option{border:1px solid rgba(74,98,118,.22);border-radius:12px;padding:14px;background:rgba(255,255,255,.5)}.theme-option input{width:auto;margin:0 8px 0 0}.theme-option b{display:block}.theme-option span{display:block;color:var(--steel);font-size:13px;margin-top:4px}@media(max-width:700px){.theme-options{grid-template-columns:1fr}}
 
@@ -754,6 +755,12 @@ def energy_dashboard_body() -> str:
       </div>
       <div id="mailbox-panel" class="mailbox-panel" hidden>
         <div class="mailbox-head"><span class="tile-name">Agent mailbox</span><button type="button" onclick="toggleMailbox(false)">Close</button></div>
+        <form id="mailbox-compose" class="reply-box" onsubmit="sendAgentMessage(event)">
+          <input id="mailbox-compose-subject" maxlength="160" placeholder="Subject" required>
+          <textarea id="mailbox-compose-body" placeholder="Message or task for the agent…" required></textarea>
+          <button type="submit">Send to agent</button>
+          <small id="mailbox-compose-status" class="scale-label"></small>
+        </form>
         <div id="mailbox-list" class="mailbox-list"><span class="scale-label">Loading…</span></div>
         <div id="message-detail" class="message-detail" hidden></div>
       </div>
@@ -803,6 +810,7 @@ def energy_dashboard_body() -> str:
       function toggleMailbox(open){const panel=$('mailbox-panel'); const shouldOpen=open===undefined?panel.hidden:open; panel.hidden=!shouldOpen; if(shouldOpen){loadMailbox(); refreshMailboxCount();}}
       function escapeHtml(value){return String(value||'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
       async function openMessage(id){const detail=$('message-detail'); let payload=null; try{const res=await fetch(`/api/messages/${id}`); if(res.ok)payload=await res.json();}catch(e){} if(!payload)return; const m=payload.message; detail.hidden=false; detail.innerHTML=`<small class="tile-name"><span class="severity-dot ${m.severity}"></span>${m.category} · ${m.severity}</small><h3>${escapeHtml(m.subject)}</h3><p>${escapeHtml(m.body)}</p>${m.related_decision_id?`<p><span class="scale-label">Related decision #${m.related_decision_id}</span></p>`:''}<div class="reply-box"><textarea id="reply-body" placeholder="Reply to the agent…"></textarea><button type="button" onclick="sendReply(${m.thread_id||m.id})">Send reply</button></div>`; if(!m.read_at){await fetch(`/api/messages/${id}/read`,{method:'PATCH'}); refreshMailboxCount(); loadMailbox();}}
+      async function sendAgentMessage(event){event.preventDefault();const subject=$('mailbox-compose-subject').value.trim();const body=$('mailbox-compose-body').value.trim();const status=$('mailbox-compose-status');if(!subject||!body)return;status.textContent='Sending…';try{const res=await fetch('/api/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sender:'operator',category:'info',subject,body,severity:'normal'})});if(!res.ok)throw new Error('Unable to send message');$('mailbox-compose-subject').value='';$('mailbox-compose-body').value='';status.textContent='Sent. The agent will pick it up in the next cycle.';}catch(e){status.textContent=e.message||'Unable to send message';}}
       async function sendReply(threadId){const body=$('reply-body').value.trim(); if(!body)return; await fetch('/api/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sender:'operator',category:'reply',subject:'Operator reply',body,thread_id:threadId,severity:'normal'})}); $('reply-body').value='';}
       function setLayout(name){$('cluster-view').classList.toggle('active',name==='cluster');$('flow-view').classList.toggle('active',name==='flow');$('cluster-toggle').classList.toggle('active',name==='cluster');$('flow-toggle').classList.toggle('active',name==='flow')}
       function toggleChartSeries(series){chartSeriesVisible[series]=!chartSeriesVisible[series]; document.querySelectorAll(`[data-chart-series="${series}"]`).forEach(el=>el.setAttribute('aria-pressed', chartSeriesVisible[series]?'true':'false')); hideChartTooltip(); drawChart();}
