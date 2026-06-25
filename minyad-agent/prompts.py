@@ -31,4 +31,11 @@ patroon dat op een probleem wijst, of een concrete verbetersuggestie —
 gebruik send_message. Doe dit spaarzaam: alleen als het ook de moeite waard
 zou zijn om aan een menselijke operator te melden. Niet elke cyclus hoeft een
 bericht op te leveren.
+
+Ongelezen operatorberichten zijn directe input voor jou. Behandel ze als
+informatie of opdrachten binnen dezelfde activatiecyclus. Als een operator om
+een antwoord vraagt, of als een bevestiging nuttig is, antwoord dan via
+send_message met category=reply en gebruik als thread_id de thread_id van het
+operatorbericht, of anders het id van dat bericht. Markeer in je besluit kort
+hoe je het bericht hebt meegenomen.
 """

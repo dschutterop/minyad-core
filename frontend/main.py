@@ -211,7 +211,15 @@ def agent_body() -> str:
         <div id='agent-decisions' class='agent-list'><div class='agent-empty'>Loading decisions…</div></div>
       </section>
       <aside class='panel'>
-        <h2>Recent messages</h2>
+        <h2>Message the agent</h2>
+        <p class='page-copy'>Send operational context or a task for the next agent activation cycle. The agent can reply in this same mailbox thread.</p>
+        <form id='agent-compose' class='grid'>
+          <input id='agent-compose-subject' maxlength='160' placeholder='Subject' required>
+          <textarea id='agent-compose-body' placeholder='Message or task for the agent…' required></textarea>
+          <button type='submit'>Send to agent</button>
+          <span id='agent-compose-status' class='agent-meta'></span>
+        </form>
+        <h2 style='margin-top:18px'>Recent messages</h2>
         <div id='agent-messages' class='agent-list'><div class='agent-empty'>Loading messages…</div></div>
       </aside>
     </div>
@@ -238,13 +246,14 @@ def agent_body() -> str:
       }
       async function loadAgentDashboard(){
         try{
-          const [decisionsRes,messagesRes,unreadRes]=await Promise.all([fetch(`/api/agent/decisions?limit=${agentLimit}`),fetch('/api/messages?sender=agent&limit=10'),fetch('/api/messages/unread-count')]);
+          const [decisionsRes,messagesRes,unreadRes]=await Promise.all([fetch(`/api/agent/decisions?limit=${agentLimit}`),fetch('/api/messages?limit=10'),fetch('/api/messages/unread-count')]);
           renderDecisions(decisionsRes.ok?await decisionsRes.json():[]);
           renderMessages(messagesRes.ok?await messagesRes.json():[]);
           const unread=unreadRes.ok?await unreadRes.json():{unread_count:0}; agentEl('agent-unread').textContent=String(unread.unread_count||0);
         }catch(err){agentEl('agent-decisions').innerHTML=`<div class='agent-empty error'>${agentEsc(err.message||'Unable to load agent activity')}</div>`;}
       }
       document.querySelectorAll('[data-limit]').forEach(btn=>btn.addEventListener('click',()=>{agentLimit=Number(btn.dataset.limit);document.querySelectorAll('[data-limit]').forEach(b=>b.classList.toggle('active',b===btn));loadAgentDashboard();}));
+      agentEl('agent-compose').addEventListener('submit',async event=>{event.preventDefault();const subject=agentEl('agent-compose-subject').value.trim();const body=agentEl('agent-compose-body').value.trim();const status=agentEl('agent-compose-status');if(!subject||!body)return;status.textContent='Sending…';try{const res=await fetch('/api/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sender:'operator',category:'info',subject,body,severity:'normal'})});if(!res.ok)throw new Error('Unable to send message');agentEl('agent-compose-subject').value='';agentEl('agent-compose-body').value='';status.textContent='Sent. The agent will pick it up in the next cycle.';loadAgentDashboard();}catch(err){status.textContent=err.message||'Unable to send message';}});
       loadAgentDashboard(); setInterval(loadAgentDashboard,15000);
     </script>
     """
