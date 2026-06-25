@@ -717,3 +717,42 @@ def test_charge_cap_uses_configured_watts_when_amp_limit_is_higher(monkeypatch):
 
     assert app._max_charge_power_w() == 3500
     assert app._charge_cap_inputs()["battery_hardware_charge_cap_w"] == 3840
+
+
+def test_slow_balance_republishes_capped_discharge_when_battery_is_not_discharging(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_discharge_w": 5000}
+    app.controller = FakeHysteresisController(control_main.ControlState.DISCHARGING)
+    app.setpoint_w = 5000
+    app.latest_grid_power_w = 957
+    app.latest_battery_power_w = 0
+    app._last_api_command_target_w = 5000
+    app._last_api_command_direction = control_main.ControlState.DISCHARGING
+    app._last_api_command_at = -control_main.ACTIVE_COMMAND_RETRY_INTERVAL_SEC
+    app._has_published_battery_limits = True
+    app._last_published_charge_limit_w = 0
+    app._last_published_discharge_limit_w = 5000
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.DISCHARGING))
+
+    assert ("control", "discharge_w", 5000) in app.mqtt.published
+
+
+def test_slow_balance_does_not_republish_ineffective_discharge_before_retry_interval(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_available_app()
+    app.settings = {"max_discharge_w": 5000}
+    app.controller = FakeHysteresisController(control_main.ControlState.DISCHARGING)
+    app.setpoint_w = 5000
+    app.latest_grid_power_w = 957
+    app.latest_battery_power_w = 0
+    app._last_api_command_target_w = 5000
+    app._last_api_command_direction = control_main.ControlState.DISCHARGING
+    app._last_api_command_at = control_main.monotonic()
+    force_balance_ready(app)
+
+    asyncio.run(app.apply_slow_balance(control_main.ControlState.DISCHARGING))
+
+    assert ("control", "discharge_w", 5000) not in app.mqtt.published
