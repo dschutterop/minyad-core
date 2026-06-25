@@ -21,6 +21,8 @@ class MqttConfig:
     host: str = os.getenv("MQTT_HOST", "minyad-mqtt")
     port: int = int(os.getenv("MQTT_PORT", "1883"))
     keepalive: int = 30
+    username: str | None = os.getenv("MQTT_USER") or None
+    password: str | None = os.getenv("MQTT_PASS") or None
 
 
 class MinyadMqttClient:
@@ -34,6 +36,8 @@ class MinyadMqttClient:
         self.client.on_message = self._on_message
         self.client.on_subscribe = self._on_subscribe
         self.client.reconnect_delay_set(min_delay=1, max_delay=60)
+        if self.config.username:
+            self.client.username_pw_set(self.config.username, self.config.password)
         self._subscriptions: dict[str, Callable[[str, bytes], None]] = {}
         self._subscriptions_lock = Lock()
         self._client_id = client_id

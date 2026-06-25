@@ -16,12 +16,14 @@ class MinyadClient:
     def __init__(
         self,
         base_url: str,
+        api_secret: str = "",
         timeout: float = 10.0,
         retries: int = 3,
         backoff_seconds: float = 2.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.api_secret = api_secret
         self.timeout = timeout
         self.retries = retries
         self.backoff_seconds = backoff_seconds
@@ -63,6 +65,10 @@ class MinyadClient:
         for attempt in range(1, attempts + 1):
             try:
                 with httpx.Client(base_url=self.base_url, timeout=self.timeout) as client:
+                    headers = dict(kwargs.pop("headers", {}))
+                    if self.api_secret:
+                        headers["X-API-Key"] = self.api_secret
+                    kwargs["headers"] = headers
                     response = client.request(method, path, **kwargs)
                     response.raise_for_status()
                     return response.json()

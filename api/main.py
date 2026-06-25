@@ -7,6 +7,7 @@ import json
 import math
 import logging
 import os
+import secrets
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from threading import Event, Lock
@@ -15,7 +16,8 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Security
+from fastapi.security import APIKeyHeader
 import httpx
 import paho.mqtt.client as paho_mqtt
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -28,6 +30,16 @@ from shared.mqtt_client import MinyadMqttClient
 app = FastAPI(title="Minyad API")
 mqtt = MinyadMqttClient("minyad-api")
 LOGGER = logging.getLogger(__name__)
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def require_api_key(key: str | None = Security(API_KEY_HEADER)) -> None:
+    expected = os.getenv("MINYAD_API_SECRET", "")
+    if not expected or not key or not secrets.compare_digest(key, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+MUTATION_AUTH = [Depends(require_api_key)]
 
 STARTUP_AT = datetime.now(timezone.utc)
 MQTT_EVENTS: deque[dict[str, str]] = deque(maxlen=100)
@@ -299,6 +311,8 @@ def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOU
         paho_mqtt.CallbackAPIVersion.VERSION2,
         client_id=f"minyad-api-retained-{uuid4()}",
     )
+    if mqtt.config.username:
+        client.username_pw_set(mqtt.config.username, mqtt.config.password)
     client.on_message = on_message
     try:
         client.connect(mqtt.config.host, mqtt.config.port, mqtt.config.keepalive)
@@ -815,7 +829,7 @@ async def get_system_settings(session: AsyncSession = Depends(get_session)) -> d
     }
 
 
-@app.put("/system-settings")
+@app.put("/system-settings", dependencies=MUTATION_AUTH)
 async def update_system_settings(update: SystemSettingsUpdate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     if update.debug_logging is not None:
         val = "true" if update.debug_logging else "false"
@@ -862,10 +876,10 @@ async def get_claude_agent_settings(session: AsyncSession = Depends(get_session)
     return await claude_agent_settings(session)
 
 
-@app.patch("/api/claude-agent/settings")
-@app.patch("/claude-agent/settings")
-@app.put("/api/claude-agent/settings")
-@app.put("/claude-agent/settings")
+@app.patch("/api/claude-agent/settings", dependencies=MUTATION_AUTH)
+@app.patch("/claude-agent/settings", dependencies=MUTATION_AUTH)
+@app.put("/api/claude-agent/settings", dependencies=MUTATION_AUTH)
+@app.put("/claude-agent/settings", dependencies=MUTATION_AUTH)
 async def update_claude_agent_settings(
     update: ClaudeAgentSettingsUpdate,
     session: AsyncSession = Depends(get_session),
@@ -905,7 +919,7 @@ async def get_asset_steering_settings(session: AsyncSession = Depends(get_sessio
     return await asset_steering_settings(session)
 
 
-@app.put("/asset-steering/settings")
+@app.put("/asset-steering/settings", dependencies=MUTATION_AUTH)
 async def update_asset_steering_settings(
     update: AssetSteeringSettingsUpdate,
     session: AsyncSession = Depends(get_session),
@@ -981,7 +995,7 @@ async def get_trade_settings(session: AsyncSession = Depends(get_session)) -> di
     return await trade_settings(session)
 
 
-@app.put("/trade/settings")
+@app.put("/trade/settings", dependencies=MUTATION_AUTH)
 async def update_trade_settings(update: TradeSettingsUpdate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     data = update.model_dump(exclude_unset=True)
     for key, value in data.items():
@@ -1016,7 +1030,7 @@ async def list_settings(session: AsyncSession = Depends(get_session)) -> list[di
     return [{"key": row.key, "encrypted": row.encrypted, "updated_at": row.updated_at} for row in result]
 
 
-@app.post("/api-keys", status_code=202)
+@app.post("/api-keys", status_code=202, dependencies=MUTATION_AUTH)
 async def scaffold_api_key(request: ApiKeyCreate, session: AsyncSession = Depends(get_session)) -> dict[str, str]:
     await session.execute(text("select id from api_keys where name = :name"), {"name": request.name})
     return {"status": "scaffolded", "message": "API key generation is intentionally not implemented yet"}
@@ -1558,7 +1572,7 @@ async def api_forecast(hours_ahead: int = 12, session: AsyncSession = Depends(ge
     return {"hours_ahead": hours, "points": interpolate_points(points, 60)}
 
 
-@app.post("/api/control/battery")
+@app.post("/api/control/battery", dependencies=MUTATION_AUTH)
 async def api_control_battery(request: AgentBatteryControlRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     if request.setpoint_w > 0:
         override = BatteryOverrideRequest(mode="force_on", watts=request.setpoint_w, duration_seconds=request.duration_minutes * 60)
@@ -1573,7 +1587,7 @@ async def api_control_battery(request: AgentBatteryControlRequest, session: Asyn
     return {"status": "ok", "action": action, "setpoint_w": request.setpoint_w, "duration_minutes": request.duration_minutes, "override": result}
 
 
-@app.post("/api/agent/decisions", status_code=201)
+@app.post("/api/agent/decisions", status_code=201, dependencies=MUTATION_AUTH)
 async def create_agent_decision(request: AgentDecisionRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     row = (await session.execute(text("""
         insert into agent_decisions (action_taken, setpoint_w, reasoning, confidence, input_snapshot, dry_run, model)
@@ -1698,7 +1712,7 @@ async def get_agent_message(message_id: int, session: AsyncSession = Depends(get
     return {"message": serialize_agent_message(row), "thread": [serialize_agent_message(thread_row) for thread_row in thread_rows]}
 
 
-@app.post("/api/messages", status_code=201)
+@app.post("/api/messages", status_code=201, dependencies=MUTATION_AUTH)
 async def create_agent_message(request: AgentMessageCreate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     row = (await session.execute(text("""
         insert into agent_messages (sender, category, subject, body, related_decision_id, thread_id, severity, operator_ack_at, agent_ack_at)
@@ -1709,7 +1723,7 @@ async def create_agent_message(request: AgentMessageCreate, session: AsyncSessio
     return {"status": "ok", "id": row["id"], "created_at": row["created_at"].replace(tzinfo=timezone.utc).isoformat()}
 
 
-@app.patch("/api/messages/{message_id}/read")
+@app.patch("/api/messages/{message_id}/read", dependencies=MUTATION_AUTH)
 async def mark_agent_message_read(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     row = (await session.execute(text("""
         update agent_messages
@@ -1724,7 +1738,7 @@ async def mark_agent_message_read(message_id: int, session: AsyncSession = Depen
     return {"status": "ok", "id": row["id"], "read_at": row["read_at"].replace(tzinfo=timezone.utc).isoformat()}
 
 
-@app.patch("/api/messages/{message_id}/archive")
+@app.patch("/api/messages/{message_id}/archive", dependencies=MUTATION_AUTH)
 async def archive_agent_message(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     row = (await session.execute(text("""
         update agent_messages
@@ -1738,7 +1752,7 @@ async def archive_agent_message(message_id: int, session: AsyncSession = Depends
     return {"status": "ok", "id": row["id"], "archived_at": row["archived_at"].replace(tzinfo=timezone.utc).isoformat()}
 
 
-@app.patch("/api/messages/{message_id}/ack")
+@app.patch("/api/messages/{message_id}/ack", dependencies=MUTATION_AUTH)
 async def acknowledge_agent_message(message_id: int, actor: Literal["operator", "agent"] = "operator", session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     column = "operator_ack_at" if actor == "operator" else "agent_ack_at"
     row = (await session.execute(text(f"""
@@ -1753,7 +1767,7 @@ async def acknowledge_agent_message(message_id: int, actor: Literal["operator", 
     return {"status": "ok", **serialize_agent_message(row)}
 
 
-@app.delete("/api/messages/{message_id}")
+@app.delete("/api/messages/{message_id}", dependencies=MUTATION_AUTH)
 async def delete_agent_message(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     row = (await session.execute(text("delete from agent_messages where id = :id returning id"), {"id": message_id})).mappings().first()
     if row is None:
@@ -1762,7 +1776,7 @@ async def delete_agent_message(message_id: int, session: AsyncSession = Depends(
     return {"status": "ok", "id": row["id"]}
 
 
-@app.post("/battery/override")
+@app.post("/battery/override", dependencies=MUTATION_AUTH)
 async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     settings = await battery_settings(session)
     soc_floor = int(settings.get("soc_floor", 20))
@@ -1803,7 +1817,7 @@ async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSe
     return {"status": "ok", **payload}
 
 
-@app.delete("/battery/override")
+@app.delete("/battery/override", dependencies=MUTATION_AUTH)
 async def clear_battery_override(session: AsyncSession = Depends(get_session)) -> dict[str, str]:
     await session.execute(text("update battery_override set mode='none', watts=null, duration_seconds=null, expires_at=null, updated_at=now() where id=1"))
     await session.commit()
@@ -1817,8 +1831,8 @@ async def get_battery_settings(session: AsyncSession = Depends(get_session)) -> 
     return await battery_settings(session)
 
 
-@app.put("/api/battery/settings")
-@app.put("/battery/settings")
+@app.put("/api/battery/settings", dependencies=MUTATION_AUTH)
+@app.put("/battery/settings", dependencies=MUTATION_AUTH)
 async def update_battery_settings(update: BatterySettingsUpdate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     data = update.model_dump(exclude_unset=True)
     current = await battery_settings(session)

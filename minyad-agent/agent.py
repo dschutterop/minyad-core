@@ -175,6 +175,7 @@ def select_model(
 def run_cycle() -> None:
     client = MinyadClient(
         config.MINYAD_API_URL,
+        api_secret=config.MINYAD_API_SECRET,
         retries=config.MINYAD_API_RETRIES,
         backoff_seconds=config.MINYAD_API_RETRY_BACKOFF_SECONDS,
     )

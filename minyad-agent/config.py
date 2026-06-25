@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 MINYAD_API_URL = os.getenv("MINYAD_API_URL", "http://minyad-api:8000").rstrip("/")
+MINYAD_API_SECRET = os.getenv("MINYAD_API_SECRET", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() in {"1", "true", "yes", "on"}
 CYCLE_MINUTES = int(os.getenv("CYCLE_MINUTES", "15"))

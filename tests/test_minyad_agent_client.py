@@ -50,3 +50,14 @@ def test_client_does_not_retry_client_errors(monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(httpx.HTTPStatusError):
         client.get_state()
     assert len(transport.requests) == 1
+
+
+def test_client_sends_api_secret_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = SequenceTransport([httpx.Response(200, json={"ok": True})])
+    original_client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
+
+    client = MinyadClient("http://minyad-api:8000", api_secret="agent-secret")
+
+    assert client.get_state() == {"ok": True}
+    assert transport.requests[0].headers["X-API-Key"] == "agent-secret"
