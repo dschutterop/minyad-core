@@ -1005,13 +1005,22 @@ async def api_proxy(path: str, request: Request) -> Response:
     }
     try:
         async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=10.0) as client:
+            body = await request.body()
             response = await client.request(
                 request.method,
                 f"/api/{path}",
                 params=request.query_params,
-                content=await request.body(),
+                content=body,
                 headers=headers,
             )
+            if response.status_code == 404:
+                response = await client.request(
+                    request.method,
+                    f"/{path}",
+                    params=request.query_params,
+                    content=body,
+                    headers=headers,
+                )
     except httpx.RequestError as exc:
         return JSONResponse(
             status_code=502,
