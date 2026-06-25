@@ -1622,7 +1622,7 @@ async def list_agent_decisions(
 
 def serialize_agent_message(row: Any) -> dict[str, Any]:
     data = dict(row)
-    for key in ("created_at", "read_at"):
+    for key in ("created_at", "read_at", "archived_at", "operator_ack_at", "agent_ack_at"):
         value = data.get(key)
         if value is not None:
             data[key] = value.replace(tzinfo=timezone.utc).isoformat()
@@ -1635,6 +1635,7 @@ async def list_agent_messages(
     category: Literal["anomaly", "suggestion", "info", "reply"] | None = None,
     sender: Literal["agent", "operator"] | None = None,
     limit: int = Query(default=50, ge=1, le=200),
+    archived: bool | None = False,
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
     clauses = []
@@ -1649,9 +1650,13 @@ async def list_agent_messages(
     if sender is not None:
         clauses.append("sender = :sender")
         params["sender"] = sender
+    if archived is True:
+        clauses.append("archived_at is not null")
+    elif archived is False:
+        clauses.append("archived_at is null")
     where = " where " + " and ".join(clauses) if clauses else ""
     rows = (await session.execute(text(f"""
-        select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity
+        select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity, archived_at, operator_ack_at, agent_ack_at
         from agent_messages
         {where}
         order by created_at desc
@@ -1665,7 +1670,7 @@ async def agent_messages_unread_count(
     sender: Literal["agent", "operator"] | None = "agent",
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, int]:
-    clause = "read_at is null"
+    clause = "read_at is null and archived_at is null"
     params: dict[str, Any] = {}
     if sender is not None:
         clause += " and sender = :sender"
@@ -1677,7 +1682,7 @@ async def agent_messages_unread_count(
 @app.get("/api/messages/{message_id}")
 async def get_agent_message(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     row = (await session.execute(text("""
-        select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity
+        select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity, archived_at, operator_ack_at, agent_ack_at
         from agent_messages
         where id = :id
     """), {"id": message_id})).mappings().first()
@@ -1685,7 +1690,7 @@ async def get_agent_message(message_id: int, session: AsyncSession = Depends(get
         raise HTTPException(status_code=404, detail="message not found")
     root_id = row["thread_id"] or row["id"]
     thread_rows = (await session.execute(text("""
-        select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity
+        select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity, archived_at, operator_ack_at, agent_ack_at
         from agent_messages
         where id = :root_id or thread_id = :root_id
         order by created_at asc
@@ -1696,8 +1701,8 @@ async def get_agent_message(message_id: int, session: AsyncSession = Depends(get
 @app.post("/api/messages", status_code=201)
 async def create_agent_message(request: AgentMessageCreate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     row = (await session.execute(text("""
-        insert into agent_messages (sender, category, subject, body, related_decision_id, thread_id, severity)
-        values (:sender, :category, :subject, :body, :related_decision_id, :thread_id, :severity)
+        insert into agent_messages (sender, category, subject, body, related_decision_id, thread_id, severity, operator_ack_at, agent_ack_at)
+        values (:sender, :category, :subject, :body, :related_decision_id, :thread_id, :severity, case when :sender = 'operator' then now() else null end, case when :sender = 'agent' then now() else null end)
         returning id, created_at
     """), request.model_dump())).mappings().one()
     await session.commit()
@@ -1708,7 +1713,8 @@ async def create_agent_message(request: AgentMessageCreate, session: AsyncSessio
 async def mark_agent_message_read(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     row = (await session.execute(text("""
         update agent_messages
-        set read_at = coalesce(read_at, now())
+        set read_at = coalesce(read_at, now()),
+            agent_ack_at = case when sender = 'operator' then coalesce(agent_ack_at, now()) else agent_ack_at end
         where id = :id
         returning id, read_at
     """), {"id": message_id})).mappings().first()
@@ -1716,6 +1722,44 @@ async def mark_agent_message_read(message_id: int, session: AsyncSession = Depen
         raise HTTPException(status_code=404, detail="message not found")
     await session.commit()
     return {"status": "ok", "id": row["id"], "read_at": row["read_at"].replace(tzinfo=timezone.utc).isoformat()}
+
+
+@app.patch("/api/messages/{message_id}/archive")
+async def archive_agent_message(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    row = (await session.execute(text("""
+        update agent_messages
+        set archived_at = coalesce(archived_at, now())
+        where id = :id
+        returning id, archived_at
+    """), {"id": message_id})).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="message not found")
+    await session.commit()
+    return {"status": "ok", "id": row["id"], "archived_at": row["archived_at"].replace(tzinfo=timezone.utc).isoformat()}
+
+
+@app.patch("/api/messages/{message_id}/ack")
+async def acknowledge_agent_message(message_id: int, actor: Literal["operator", "agent"] = "operator", session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    column = "operator_ack_at" if actor == "operator" else "agent_ack_at"
+    row = (await session.execute(text(f"""
+        update agent_messages
+        set {column} = coalesce({column}, now())
+        where id = :id
+        returning id, operator_ack_at, agent_ack_at
+    """), {"id": message_id})).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="message not found")
+    await session.commit()
+    return {"status": "ok", **serialize_agent_message(row)}
+
+
+@app.delete("/api/messages/{message_id}")
+async def delete_agent_message(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    row = (await session.execute(text("delete from agent_messages where id = :id returning id"), {"id": message_id})).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="message not found")
+    await session.commit()
+    return {"status": "ok", "id": row["id"]}
 
 
 @app.post("/battery/override")
