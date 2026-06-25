@@ -144,7 +144,12 @@ class DsmrBridge:
         self.status_thread: threading.Thread | None = None
         self.status_stop_event = threading.Event()
 
-        self.source_client = mqtt.Client(client_id=SOURCE_CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
+        self.source_client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=SOURCE_CLIENT_ID,
+            clean_session=False,
+            protocol=mqtt.MQTTv311,
+        )
         if config.dsmr_mqtt_user:
             self.source_client.username_pw_set(config.dsmr_mqtt_user, config.dsmr_mqtt_pass)
         self.source_client.on_connect = self.on_source_connect
@@ -152,7 +157,12 @@ class DsmrBridge:
         self.source_client.on_message = self.on_message
         self.source_client.reconnect_delay_set(min_delay=1, max_delay=60)
 
-        self.target_client = mqtt.Client(client_id=TARGET_CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
+        self.target_client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=TARGET_CLIENT_ID,
+            clean_session=False,
+            protocol=mqtt.MQTTv311,
+        )
         self.target_client.will_set(self.minyad_topic("status"), STATUS_DISCONNECTED, retain=True)
         if config.minyad_mqtt_user:
             self.target_client.username_pw_set(config.minyad_mqtt_user, config.minyad_mqtt_pass)
@@ -174,10 +184,17 @@ class DsmrBridge:
             return
         logger.debug("Published %s=%s", topic, payload)
 
-    def on_source_connect(self, client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
-        if rc != 0:
+    def on_source_connect(
+        self,
+        client: mqtt.Client,
+        _userdata: Any,
+        _flags: mqtt.ConnectFlags,
+        reason_code: mqtt.ReasonCode,
+        _properties: mqtt.Properties | None,
+    ) -> None:
+        if reason_code.is_failure:
             self.source_connected = False
-            logger.warning("DSMR source MQTT connection failed with rc=%s", rc)
+            logger.warning("DSMR source MQTT connection failed with reason=%s", reason_code)
             return
 
         self.source_connected = True
@@ -189,15 +206,29 @@ class DsmrBridge:
         subscriptions = [(self.dsmr_topic(field), 1) for field in sorted(SUBSCRIBED_FIELDS)]
         client.subscribe(subscriptions)
 
-    def on_source_disconnect(self, _client: mqtt.Client, _userdata: Any, rc: int) -> None:
+    def on_source_disconnect(
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+        _disconnect_flags: mqtt.DisconnectFlags,
+        reason_code: mqtt.ReasonCode,
+        _properties: mqtt.Properties | None,
+    ) -> None:
         self.source_connected = False
-        logger.warning("DSMR source MQTT disconnected with rc=%s", rc)
+        logger.warning("DSMR source MQTT disconnected with reason=%s", reason_code)
         self.publish("status", STATUS_DISCONNECTED)
 
-    def on_target_connect(self, _client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
-        if rc != 0:
+    def on_target_connect(
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+        _flags: mqtt.ConnectFlags,
+        reason_code: mqtt.ReasonCode,
+        _properties: mqtt.Properties | None,
+    ) -> None:
+        if reason_code.is_failure:
             self.target_connected = False
-            logger.warning("Minyad target MQTT connection failed with rc=%s", rc)
+            logger.warning("Minyad target MQTT connection failed with reason=%s", reason_code)
             return
 
         self.target_connected = True
@@ -207,9 +238,16 @@ class DsmrBridge:
             self.config.minyad_mqtt_port,
         )
 
-    def on_target_disconnect(self, _client: mqtt.Client, _userdata: Any, rc: int) -> None:
+    def on_target_disconnect(
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+        _disconnect_flags: mqtt.DisconnectFlags,
+        reason_code: mqtt.ReasonCode,
+        _properties: mqtt.Properties | None,
+    ) -> None:
         self.target_connected = False
-        logger.warning("Minyad target MQTT disconnected with rc=%s", rc)
+        logger.warning("Minyad target MQTT disconnected with reason=%s", reason_code)
 
     def on_message(self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         try:

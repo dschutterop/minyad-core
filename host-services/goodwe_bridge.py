@@ -217,7 +217,12 @@ class GoodWeBridge:
         self.backend = backend
         self.loop: asyncio.AbstractEventLoop | None = None
         self.shutdown_event = asyncio.Event()
-        self.mqtt_client = mqtt.Client(client_id=CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
+        self.mqtt_client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=CLIENT_ID,
+            clean_session=False,
+            protocol=mqtt.MQTTv311,
+        )
         self.mqtt_client.will_set(MQTT_TOPIC_BRIDGE_STATUS, BRIDGE_STATUS_OFFLINE, retain=True)
         if config.mqtt_user:
             self.mqtt_client.username_pw_set(config.mqtt_user, config.mqtt_pass)
@@ -287,16 +292,30 @@ class GoodWeBridge:
     def publish(self, topic: str, payload: object, retain: bool = True) -> None:
         self.mqtt_client.publish(topic, str(payload), retain=retain)
 
-    def on_connect(self, client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
-        if rc == 0:
-            logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
-            client.subscribe([(MQTT_TOPIC_CHARGE_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1), (MQTT_TOPIC_CONTROL_STATE, 1), (MQTT_TOPIC_BATTERY_POLL_INTERVAL, 1), (MQTT_TOPIC_DSMR_NET_POWER, 1), (MQTT_TOPIC_GRID_NET_POWER, 1)])
-            self.publish_bridge_alive()
-        else:
-            logger.error("MQTT connection failed with rc=%s", rc)
+    def on_connect(
+        self,
+        client: mqtt.Client,
+        _userdata: Any,
+        _flags: mqtt.ConnectFlags,
+        reason_code: mqtt.ReasonCode,
+        _properties: mqtt.Properties | None,
+    ) -> None:
+        if reason_code.is_failure:
+            logger.error("MQTT connection failed with reason=%s", reason_code)
+            return
+        logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
+        client.subscribe([(MQTT_TOPIC_CHARGE_W, 1), (MQTT_TOPIC_DISCHARGE_W, 1), (MQTT_TOPIC_CONTROL_STATE, 1), (MQTT_TOPIC_BATTERY_POLL_INTERVAL, 1), (MQTT_TOPIC_DSMR_NET_POWER, 1), (MQTT_TOPIC_GRID_NET_POWER, 1)])
+        self.publish_bridge_alive()
 
-    def on_disconnect(self, _client: mqtt.Client, _userdata: Any, rc: int) -> None:
-        logger.warning("MQTT disconnected with rc=%s", rc)
+    def on_disconnect(
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+        _disconnect_flags: mqtt.DisconnectFlags,
+        reason_code: mqtt.ReasonCode,
+        _properties: mqtt.Properties | None,
+    ) -> None:
+        logger.warning("MQTT disconnected with reason=%s", reason_code)
 
     def publish_bridge_alive(self) -> None:
         timestamp = utc_now_iso()

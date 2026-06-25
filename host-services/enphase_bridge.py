@@ -218,7 +218,12 @@ class EnphaseBridge:
         self.envoy = envoy
         self.shutdown_event = asyncio.Event()
         self.last_production_w: int | None = None
-        self.mqtt_client = mqtt.Client(client_id=CLIENT_ID, clean_session=False, protocol=mqtt.MQTTv311)
+        self.mqtt_client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=CLIENT_ID,
+            clean_session=False,
+            protocol=mqtt.MQTTv311,
+        )
         self.mqtt_client.will_set(MQTT_TOPIC_BRIDGE_STATUS, BRIDGE_STATUS_ERROR, retain=True)
         if config.mqtt_user:
             self.mqtt_client.username_pw_set(config.mqtt_user, config.mqtt_pass)
@@ -231,15 +236,29 @@ class EnphaseBridge:
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
             logger.warning("MQTT publish failed for %s with rc=%s", topic, result.rc)
 
-    def on_connect(self, _client: mqtt.Client, _userdata: Any, _flags: dict[str, Any], rc: int) -> None:
-        if rc == 0:
-            logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
-            self.publish_bridge_alive()
-        else:
-            logger.error("MQTT connection failed with rc=%s", rc)
+    def on_connect(
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+        _flags: mqtt.ConnectFlags,
+        reason_code: mqtt.ReasonCode,
+        _properties: mqtt.Properties | None,
+    ) -> None:
+        if reason_code.is_failure:
+            logger.error("MQTT connection failed with reason=%s", reason_code)
+            return
+        logger.info("MQTT connected to %s:%s", self.config.mqtt_host, self.config.mqtt_port)
+        self.publish_bridge_alive()
 
-    def on_disconnect(self, _client: mqtt.Client, _userdata: Any, rc: int) -> None:
-        logger.warning("MQTT disconnected with rc=%s", rc)
+    def on_disconnect(
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+        _disconnect_flags: mqtt.DisconnectFlags,
+        reason_code: mqtt.ReasonCode,
+        _properties: mqtt.Properties | None,
+    ) -> None:
+        logger.warning("MQTT disconnected with reason=%s", reason_code)
 
     def publish_bridge_alive(self) -> None:
         self.publish(MQTT_TOPIC_BRIDGE_STATUS, BRIDGE_STATUS_ONLINE)
