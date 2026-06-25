@@ -52,14 +52,15 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "send_message",
-        "description": "Send a message to the operator via the local mailbox. Use this sparingly for anomalies, improvement suggestions, or relevant observations that do not belong in the standard decision log.",
+        "description": "Send a message to the operator via the local mailbox. Use this for sparse notifications or to reply to operator messages. When replying to an operator message, set category=reply and thread_id to the original message's thread_id or id.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "category": {"type": "string", "enum": ["anomaly", "suggestion", "info"]},
+                "category": {"type": "string", "enum": ["anomaly", "suggestion", "info", "reply"]},
                 "subject": {"type": "string", "description": "Short title, about 60 characters max"},
                 "body": {"type": "string", "description": "Concrete explanation, with numbers where relevant"},
                 "severity": {"type": "string", "enum": ["low", "normal", "high"]},
+                "thread_id": {"type": "integer", "description": "Thread root id when replying to an operator message"},
             },
             "required": ["category", "subject", "body", "severity"],
         },
