@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 app = FastAPI(title="Minyad Frontend")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://minyad-api:8000")
+MINYAD_API_SECRET = os.getenv("MINYAD_API_SECRET", "")
 
 MENU = ["Dashboard", "Agent", "Health", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
 
@@ -1037,8 +1038,10 @@ async def api_proxy(path: str, request: Request) -> Response:
     headers = {
         k: v
         for k, v in request.headers.items()
-        if k.lower() not in {"host", "content-length"}
+        if k.lower() not in {"host", "content-length", "x-api-key"}
     }
+    if MINYAD_API_SECRET:
+        headers["X-API-Key"] = MINYAD_API_SECRET
     try:
         async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=10.0) as client:
             body = await request.body()

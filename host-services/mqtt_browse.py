@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timezone
 
@@ -15,6 +16,8 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=11883)
     parser.add_argument("--topic", default="#", help="Topic filter (default: #)")
+    parser.add_argument("--username", default=os.getenv("MQTT_USER"))
+    parser.add_argument("--password", default=os.getenv("MQTT_PASS"))
     args = parser.parse_args()
 
     seen_topics: set[str] = set()
@@ -37,6 +40,8 @@ def main() -> None:
         print(f"         {payload}")
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="mqtt-browse")
+    if args.username:
+        client.username_pw_set(args.username, args.password)
     client.on_connect = on_connect
     client.on_message = on_message
 

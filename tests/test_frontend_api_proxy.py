@@ -5,16 +5,20 @@ os.environ.setdefault("API_BASE_URL", "http://minyad-api:8000")
 import httpx
 from fastapi.testclient import TestClient
 
-from frontend.main import app
+import frontend.main as frontend_main
+
+app = frontend_main.app
 
 
 def test_api_proxy_preserves_api_prefix(monkeypatch):
     captured = {}
+    monkeypatch.setattr(frontend_main, "MINYAD_API_SECRET", "proxy-secret")
 
     async def fake_request(self, method, url, **kwargs):
         captured["method"] = method
         captured["url"] = url
         captured["params"] = kwargs.get("params")
+        captured["headers"] = kwargs.get("headers")
         return httpx.Response(201, json={"status": "ok"})
 
     monkeypatch.setattr(httpx.AsyncClient, "request", fake_request)
@@ -25,6 +29,28 @@ def test_api_proxy_preserves_api_prefix(monkeypatch):
     assert response.status_code == 201
     assert captured["method"] == "POST"
     assert captured["url"] == "/api/messages"
+    assert captured["headers"]["X-API-Key"] == "proxy-secret"
+
+
+def test_api_proxy_replaces_browser_supplied_api_key(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(frontend_main, "MINYAD_API_SECRET", "trusted-proxy-secret")
+
+    async def fake_request(self, method, url, **kwargs):
+        captured["headers"] = kwargs.get("headers")
+        return httpx.Response(200, json={"status": "ok"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", fake_request)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/system-settings",
+            headers={"X-API-Key": "browser-controlled-secret"},
+            json={"theme": "dark"},
+        )
+
+    assert response.status_code == 200
+    assert captured["headers"]["X-API-Key"] == "trusted-proxy-secret"
 
 
 def test_api_proxy_falls_back_to_legacy_unprefixed_route(monkeypatch):

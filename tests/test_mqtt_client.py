@@ -72,3 +72,19 @@ def test_publish_forwards_topic_payload_qos_and_retain():
         "qos": 1,
         "retain": True,
     }]
+
+
+def test_client_configures_mqtt_credentials():
+    client = MinyadMqttClient(
+        "minyad-control",
+        MqttConfig(
+            host="broker",
+            port=1883,
+            keepalive=30,
+            username="minyad",
+            password="secret",
+        ),
+    )
+
+    assert client.client._username == b"minyad"
+    assert client.client._password == b"secret"
