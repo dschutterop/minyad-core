@@ -65,3 +65,26 @@ def test_extended_forecast_tool_caps_horizon_to_api_limit() -> None:
 
     assert executor.execute("get_extended_forecast", {"hours_ahead": 72}) == {"hours_ahead": 48, "points": []}
     assert client.forecast_hours == [48]
+
+
+def test_send_message_can_reply_to_operator_thread() -> None:
+    client = FakeClient()
+    executor = ToolExecutor(client, {}, {}, dry_run=True, model="test-model")
+
+    result = executor.execute("send_message", {
+        "category": "reply",
+        "subject": "Re: washer",
+        "body": "I will account for the washer load in this cycle.",
+        "severity": "normal",
+        "thread_id": 7,
+    })
+
+    assert result == {"id": 2}
+    assert client.messages == [{
+        "category": "reply",
+        "subject": "Re: washer",
+        "body": "I will account for the washer load in this cycle.",
+        "severity": "normal",
+        "thread_id": 7,
+        "sender": "agent",
+    }]
