@@ -117,6 +117,7 @@ html[data-theme=light] .window-tab,html[data-theme=light] .layout-toggle,html[da
 html[data-theme=light] .cells i.on{background:var(--store-d);border-color:rgba(216,155,42,.55)}
 html[data-theme=light] .mailbox-panel{background:#fff;border-color:rgba(74,98,118,.18)}
 .theme-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}.theme-option{border:1px solid rgba(74,98,118,.22);border-radius:12px;padding:14px;background:rgba(255,255,255,.5)}.theme-option input{width:auto;margin:0 8px 0 0}.theme-option b{display:block}.theme-option span{display:block;color:var(--steel);font-size:13px;margin-top:4px}@media(max-width:700px){.theme-options{grid-template-columns:1fr}}
+.settings-layout{display:grid;grid-template-columns:minmax(210px,260px) minmax(0,1fr);gap:18px;align-items:start}.settings-nav{position:sticky;top:18px;display:grid;gap:8px}.settings-nav button{width:100%;display:grid;gap:4px;text-align:left;border:1px solid rgba(74,98,118,.2);border-radius:12px;background:rgba(255,255,255,.48);color:var(--ink);padding:14px 16px;cursor:pointer}.settings-nav button strong{font:700 13px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase}.settings-nav button span{color:var(--steel);font-size:12px;line-height:1.35}.settings-nav button.active{background:var(--panel);color:var(--p-ink);border-color:var(--panel)}.settings-nav button.active span{color:var(--p-mut)}.settings-section{display:none}.settings-section.active{display:block}.settings-section h2{margin-top:0}.settings-section pre:empty{display:none}html[data-theme=dark] .settings-nav button{background:rgba(16,27,36,.92);color:var(--ink);border-color:rgba(184,210,228,.14)}html[data-theme=dark] .settings-nav button.active{background:#E6EDF2;color:#071017;border-color:#E6EDF2}html[data-theme=dark] .settings-nav button.active span{color:#4A6276}@media(max-width:800px){.settings-layout{grid-template-columns:1fr}.settings-nav{position:static;display:flex;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}.settings-nav button{min-width:190px}.settings-section{scroll-margin-top:12px}}
 
 .agent-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.agent-stat{background:#fff;border:1px solid rgba(74,98,118,.18);border-radius:12px;padding:16px}.agent-stat b{display:block;font-family:var(--mono);font-size:26px}.agent-layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);gap:16px}.agent-list{display:grid;gap:10px}.agent-decision,.agent-message-card{background:#fff;border:1px solid rgba(74,98,118,.18);border-left:4px solid var(--steel);border-radius:12px;padding:14px}.agent-decision.charge{border-left-color:var(--store)}.agent-decision.discharge{border-left-color:var(--produce)}.agent-decision.hold{border-left-color:var(--steel)}.agent-decision header,.agent-message-card header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.agent-meta{font-family:var(--mono);font-size:11px;color:var(--steel);letter-spacing:.08em;text-transform:uppercase}.agent-reason{white-space:pre-wrap;line-height:1.45}.agent-controls{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.agent-controls button{border:1px solid rgba(74,98,118,.25);background:#fff;border-radius:999px;padding:10px 14px;cursor:pointer}.agent-controls button.active{background:var(--panel);color:var(--p-ink)}.agent-compose-toggle{width:100%;border:1px solid rgba(74,98,118,.25);background:var(--panel);color:var(--p-ink);border-radius:12px;padding:13px 16px;cursor:pointer;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:12px}.agent-compose-toggle:after{content:"+";font-size:18px}.agent-compose-toggle[aria-expanded="true"]:after{content:"–"}.agent-compose-panel[hidden]{display:none}.agent-compose-panel{margin-top:12px}.agent-compose{display:grid;grid-template-columns:1fr;gap:10px}.agent-compose textarea{width:100%;min-height:120px;margin-top:8px;border:1px solid rgba(74,98,118,.25);background:#fff;padding:11px 12px;font:inherit;color:var(--ink)}.agent-compose button[type=submit]{border:1px solid rgba(74,98,118,.25);background:#fff;border-radius:999px;padding:10px 14px;cursor:pointer}.agent-snapshot{max-height:260px}.agent-empty{border:1px dashed rgba(74,98,118,.28);border-radius:12px;padding:24px;text-align:center;color:var(--steel);font-family:var(--mono)}html[data-theme=dark] .agent-stat,html[data-theme=dark] .agent-decision,html[data-theme=dark] .agent-message-card,html[data-theme=dark] .agent-controls button,html[data-theme=dark] .agent-compose textarea,html[data-theme=dark] .agent-compose button[type=submit]{background:#101b24;color:var(--ink);border-color:rgba(184,210,228,.14)}html[data-theme=dark] .agent-controls button.active{background:#E6EDF2;color:#071017}@media(max-width:900px){.agent-hero{grid-template-columns:repeat(2,1fr)}.agent-layout{grid-template-columns:1fr}}
 """
@@ -400,7 +401,16 @@ def health_body() -> str:
 
 def battery_settings_body() -> str:
     return """
-    <div class='card'><h2>Battery control</h2><p>Effective values from /battery/settings.</p>
+    <div class='settings-layout'>
+      <nav class='settings-nav' role='tablist' aria-label='Settings sections'>
+        <button type='button' role='tab' class='active' data-settings-section='battery' aria-controls='settings-battery' aria-selected='true'><strong>Battery</strong><span>Charging, discharge and inverter limits</span></button>
+        <button type='button' role='tab' tabindex='-1' data-settings-section='trade' aria-controls='settings-trade' aria-selected='false'><strong>Energy trade</strong><span>ENTSO-E collection and retry behavior</span></button>
+        <button type='button' role='tab' tabindex='-1' data-settings-section='agent' aria-controls='settings-agent' aria-selected='false'><strong>Agent</strong><span>Runtime access and token guard</span></button>
+        <button type='button' role='tab' tabindex='-1' data-settings-section='appearance' aria-controls='settings-appearance' aria-selected='false'><strong>Appearance</strong><span>Light, dark or system theme</span></button>
+        <button type='button' role='tab' tabindex='-1' data-settings-section='system' aria-controls='settings-system' aria-selected='false'><strong>System</strong><span>Debug logging and diagnostics</span></button>
+      </nav>
+      <div class='settings-panels'>
+    <section id='settings-battery' role='tabpanel' class='card settings-section active' data-settings-panel='battery'><h2>Battery control</h2><p>Effective values from /battery/settings.</p>
       <form id='battery-settings' class='grid'>
         <label>Start surplus W <input name='start_w' type='number' min='100' max='5000'></label>
         <label>Stop surplus W <input name='stop_w' type='number' min='0'></label>
@@ -419,9 +429,9 @@ def battery_settings_body() -> str:
         <label>GoodWe poll interval s <input name='inverter_poll_interval_s' type='number' min='1' max='3600'></label>
         <p style='grid-column:1/-1;color:var(--steel);font-size:14px;margin:0'>Effective charge cap = min(max_charge_w, max_charge_a × nominal_v): <strong id='effective-charge-cap'>-- W</strong></p>
         <button type='submit'>Save battery settings</button>
-      </form><pre id='settings-result'></pre></div>
+      </form><pre id='settings-result'></pre></section>
 
-    <div class='card'><h2>Energy trade</h2><p>EPEX day-ahead collection settings. Changes are published to MQTT and picked up without restarting <code>minyad-trade</code>.</p>
+    <section id='settings-trade' role='tabpanel' class='card settings-section' data-settings-panel='trade' hidden><h2>Energy trade</h2><p>EPEX day-ahead collection settings. Changes are published to MQTT and picked up without restarting <code>minyad-trade</code>.</p>
       <form id='trade-settings' class='grid'>
         <label>Bidding zone <input name='bidding_zone' type='text'></label>
         <label>Poll time Europe/Amsterdam <input name='poll_time_local' type='time'></label>
@@ -429,10 +439,10 @@ def battery_settings_body() -> str:
         <label>Retry interval minutes <input name='retry_interval_minutes' type='number' min='1' max='240'></label>
         <label>ENTSO-E API URL <input name='entsoe_api_url' type='url' placeholder='https://web-api.tp.entsoe.eu/api'></label>
         <button type='submit'>Save trade settings</button>
-      </form><pre id='trade-result'></pre></div>
+      </form><pre id='trade-result'></pre></section>
 
 
-    <div class='card'>
+    <section id='settings-agent' role='tabpanel' class='card settings-section' data-settings-panel='agent' hidden>
       <h2>Claude agent</h2>
       <p style='color:var(--steel);font-size:14px;margin:0 0 12px'>Laat de Claude-agentcontainer normaal draaien, maar beheer runtime of de agent Claude.ai/API-aanroepen mag doen. Wijzigingen vereisen geen containerrestart.</p>
       <p>Huidige status: <strong id='claude-agent-status' class='badge'>...</strong></p>
@@ -443,9 +453,9 @@ def battery_settings_body() -> str:
         <button type='submit'>Save Claude agent settings</button>
       </form>
       <pre id='claude-agent-result'></pre>
-    </div>
+    </section>
 
-    <div class='card'>
+    <section id='settings-appearance' role='tabpanel' class='card settings-section' data-settings-panel='appearance' hidden>
       <h2>Appearance</h2>
       <p style='color:var(--steel);font-size:14px;margin:0 0 12px'>Choose how Minyad should render every web interface. The preference is saved server-side and cached locally for instant page loads.</p>
       <div class='theme-options' role='radiogroup' aria-label='Theme preference'>
@@ -454,9 +464,9 @@ def battery_settings_body() -> str:
         <label class='theme-option'><input type='radio' name='theme' value='dark'><b>Dark</b><span>Low-light interface</span></label>
       </div>
       <pre id='theme-result'></pre>
-    </div>
+    </section>
 
-    <div class='card'>
+    <section id='settings-system' role='tabpanel' class='card settings-section' data-settings-panel='system' hidden>
       <h2>System</h2>
       <div class='toggle-row'>
         <span class='status-dot' id='debug-dot'></span>
@@ -474,9 +484,42 @@ def battery_settings_body() -> str:
         </div>
         <pre class='debug' id='debug-output'>Loading...</pre>
       </div>
+    </section>
+      </div>
     </div>
 
     <script>
+      function showSettingsSection(name, updateHash = true) {
+        const fallback = 'battery';
+        const target = document.querySelector(`[data-settings-panel="${name}"]`) ? name : fallback;
+        document.querySelectorAll('[data-settings-panel]').forEach((panel) => {
+          const active = panel.dataset.settingsPanel === target;
+          panel.classList.toggle('active', active);
+          panel.hidden = !active;
+        });
+        document.querySelectorAll('[data-settings-section]').forEach((button) => {
+          const active = button.dataset.settingsSection === target;
+          button.classList.toggle('active', active);
+          button.setAttribute('aria-selected', active ? 'true' : 'false');
+          button.tabIndex = active ? 0 : -1;
+        });
+        if (updateHash) history.replaceState(null, '', `#${target}`);
+      }
+      const settingsTabs = [...document.querySelectorAll('[data-settings-section]')];
+      settingsTabs.forEach((button) => {
+        button.addEventListener('click', () => showSettingsSection(button.dataset.settingsSection));
+        button.addEventListener('keydown', (event) => {
+          const current = settingsTabs.indexOf(button);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? settingsTabs.length - 1 : event.key === 'ArrowDown' || event.key === 'ArrowRight' ? (current + 1) % settingsTabs.length : event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? (current - 1 + settingsTabs.length) % settingsTabs.length : -1;
+          if (next < 0) return;
+          event.preventDefault();
+          settingsTabs[next].focus();
+          showSettingsSection(settingsTabs[next].dataset.settingsSection);
+        });
+      });
+      window.addEventListener('hashchange', () => showSettingsSection(location.hash.slice(1), false));
+      showSettingsSection(location.hash.slice(1), false);
+
       function updateEffectiveChargeCap(){
         const form = document.getElementById('battery-settings');
         const maxW = Number(form.elements.max_charge_w?.value || 0);
