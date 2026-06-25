@@ -45,6 +45,8 @@ services:
       - |
         test -n "$$MQTT_USER" && test -n "$$MQTT_PASS"
         mosquitto_passwd -c -b /tmp/minyad-mosquitto.passwd "$$MQTT_USER" "$$MQTT_PASS"
+        chown mosquitto:mosquitto /tmp/minyad-mosquitto.passwd
+        chmod 600 /tmp/minyad-mosquitto.passwd
         exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
