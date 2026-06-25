@@ -37,6 +37,7 @@ BALANCE_GAIN = float(os.getenv("BALANCE_GAIN", "0.5"))
 MAX_CHARGE_POWER_W = int(os.getenv("MAX_CHARGE_POWER_W", "6000"))
 MAX_DISCHARGE_POWER_W = int(os.getenv("MAX_DISCHARGE_POWER_W", "6000"))
 CONTROL_REFRESH_INTERVAL_SEC = int(os.getenv("CONTROL_REFRESH_INTERVAL_SEC", "300"))
+ACTIVE_COMMAND_RETRY_INTERVAL_SEC = int(os.getenv("ACTIVE_COMMAND_RETRY_INTERVAL_SEC", "60"))
 BATTERY_TOPIC_TYPES = {
     "soc": int,
     "soh": int,
@@ -659,17 +660,44 @@ class ControlApp:
             self._last_api_command_target_w is not None
             and (self._last_api_command_direction is not desired_state or now - self._last_api_command_at >= CONTROL_REFRESH_INTERVAL_SEC)
         )
-        should_write = delta >= MIN_TARGET_CHANGE_W or refresh_due or reason in {"slow_balance_soc_floor", "slow_balance_soc_ceiling"}
+        command_age = None if self._last_api_command_target_w is None else now - self._last_api_command_at
+        same_active_command = (
+            self._last_api_command_target_w == new_target
+            and self._last_api_command_direction is desired_state
+        )
+        ineffective_active_command = same_active_command and self._active_command_looks_ineffective(desired_state, new_target)
+        retry_due = ineffective_active_command and (command_age is None or command_age >= ACTIVE_COMMAND_RETRY_INTERVAL_SEC)
+        should_write = delta >= MIN_TARGET_CHANGE_W or refresh_due or retry_due or reason in {"slow_balance_soc_floor", "slow_balance_soc_ceiling"}
         if not should_write:
             return False, False
+        if retry_due:
+            LOGGER.warning(
+                "Active %s command appears ineffective; republishing unchanged target target_power_w=%s battery_power_w=%s grid_power_w=%s retry_interval_s=%s",
+                desired_state.value.lower(),
+                new_target,
+                self.latest_battery_power_w,
+                self.latest_grid_power_w,
+                ACTIVE_COMMAND_RETRY_INTERVAL_SEC,
+            )
         if desired_state is ControlState.CHARGING:
-            await self.publish_setpoint(new_target)
+            await self.publish_setpoint(new_target, state_changed=retry_due)
         else:
-            await self.publish_discharge_setpoint(new_target)
+            await self.publish_discharge_setpoint(new_target, state_changed=retry_due)
         self._last_api_command_at = now
         self._last_api_command_target_w = new_target
         self._last_api_command_direction = desired_state
         return True, True
+
+    def _active_command_looks_ineffective(self, desired_state: ControlState, target_w: int) -> bool:
+        if target_w <= 0:
+            return False
+        battery_power_w = int(self.latest_battery_power_w)
+        grid_power_w = int(self.latest_grid_power_w)
+        if desired_state is ControlState.DISCHARGING:
+            return grid_power_w > GRID_DEADBAND_W and battery_power_w <= GRID_DEADBAND_W
+        if desired_state is ControlState.CHARGING:
+            return grid_power_w < -GRID_DEADBAND_W and battery_power_w >= -GRID_DEADBAND_W
+        return False
 
     def charge_target_w(self) -> int:
         """Return the charge setpoint needed to absorb current grid export.
@@ -721,7 +749,12 @@ class ControlApp:
         charge_limit_w = max(0, int(charge_limit_w))
         discharge_limit_w = max(0, int(discharge_limit_w))
         delta = max(abs(charge_limit_w - self._last_published_charge_limit_w), abs(discharge_limit_w - self._last_published_discharge_limit_w))
-        if self._has_published_battery_limits and charge_limit_w == self._last_published_charge_limit_w and discharge_limit_w == self._last_published_discharge_limit_w:
+        if (
+            self._has_published_battery_limits
+            and charge_limit_w == self._last_published_charge_limit_w
+            and discharge_limit_w == self._last_published_discharge_limit_w
+            and not state_changed
+        ):
             LOGGER.info("Control actuator publish skipped reason=unchanged target target_charge_limit_w=%s target_discharge_limit_w=%s", charge_limit_w, discharge_limit_w)
             return
         if not state_changed and delta < MIN_TARGET_CHANGE_W:
