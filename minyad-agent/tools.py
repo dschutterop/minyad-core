@@ -63,6 +63,8 @@ TOOLS: list[dict[str, Any]] = [
             },
             "required": ["category", "subject", "body", "severity"],
         },
+        # Cache the tool definitions as a stable prefix; they never change between cycles.
+        "cache_control": {"type": "ephemeral", "ttl": "1h"},
     },
 ]
 
