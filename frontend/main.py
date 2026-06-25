@@ -106,6 +106,7 @@ html[data-theme=dark] input,html[data-theme=dark] select{background:#0A1016;bord
 html[data-theme=dark] .grid:not(.flow-node)>*{background:var(--paper)}
 html[data-theme=dark] .history-tab,html[data-theme=dark] .history-chart-card,html[data-theme=dark] .history-tooltip{background:#101b24;color:var(--ink);border-color:rgba(184,210,228,.14)}
 html[data-theme=dark] .history-stat{background:#0A1016;border-color:rgba(184,210,228,.14)}
+html[data-theme=dark] form button,html[data-theme=dark] .secondary{background:#E6EDF2;color:#071017;border:1px solid rgba(230,237,242,.3)}
 html[data-theme=light] .dashboard-page,html[data-theme=light] .dashboard-full,html[data-theme=light] .dashboard-nav{background:#EDF1F4;color:#15202A}
 html[data-theme=light] .dashboard-full,html[data-theme=light] .dashboard-nav,html[data-theme=light] .window-bar{border-color:rgba(74,98,118,.22)}
 html[data-theme=light] .dashboard-nav .wordmark strong,html[data-theme=light] .dashboard-nav .brand-nav a.active,html[data-theme=light] .dash-title strong,html[data-theme=light] .phrase{color:#15202A}
@@ -113,6 +114,7 @@ html[data-theme=light] .dashboard-nav .brand-nav a,html[data-theme=light] .dashb
 html[data-theme=light] .dashboard-nav .mark circle,html[data-theme=light] .dash-title .mark circle{fill:#EDF1F4}
 html[data-theme=light] .tile,html[data-theme=light] .chart-card,html[data-theme=light] .flow-node{background:#fff;border-color:rgba(74,98,118,.18)}
 html[data-theme=light] .window-tab,html[data-theme=light] .layout-toggle,html[data-theme=light] .layout-toggle button.active,html[data-theme=light] .bar,html[data-theme=light] .thin,html[data-theme=light] .cells i,html[data-theme=light] .chart-tooltip,html[data-theme=light] .mailbox-button,html[data-theme=light] .mailbox-item,html[data-theme=light] .reply-box input,html[data-theme=light] .reply-box textarea,html[data-theme=light] .reply-box button,html[data-theme=light] .mailbox-head button{background:#fff;color:#15202A;border-color:rgba(74,98,118,.18)}
+html[data-theme=light] .cells i.on{background:var(--store-d);border-color:rgba(216,155,42,.55)}
 html[data-theme=light] .mailbox-panel{background:#fff;border-color:rgba(74,98,118,.18)}
 .theme-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}.theme-option{border:1px solid rgba(74,98,118,.22);border-radius:12px;padding:14px;background:rgba(255,255,255,.5)}.theme-option input{width:auto;margin:0 8px 0 0}.theme-option b{display:block}.theme-option span{display:block;color:var(--steel);font-size:13px;margin-top:4px}@media(max-width:700px){.theme-options{grid-template-columns:1fr}}
 
@@ -159,7 +161,7 @@ def render_page(active: str, body: str) -> str:
           <header class="brand-header">
             <a class="brand-lockup" href="/" aria-label="Minyad dashboard">
               {brand_mark()}
-              <span class="wordmark"><strong>Minyad</strong><span>Brand Interface</span></span>
+              <span class="wordmark"><strong>Minyad</strong><span>Virtual Power Plant</span></span>
             </a>
             <nav class="brand-nav" aria-label="Primary navigation">{links}</nav>
           </header>
@@ -192,9 +194,6 @@ def render_dashboard_page() -> str:
 def agent_body() -> str:
     return """
     <div class='card'>
-      <span class='kicker'>Operator agent</span>
-      <h1 class='page-title'>Agent dashboard</h1>
-      <p class='page-copy'>Track agent activity, decisions, setpoints, confidence, dry-run state, and recent mailbox messages from one dedicated page.</p>
       <div class='agent-hero'>
         <div class='agent-stat'><span class='agent-meta'>Last decision</span><b id='agent-last-action'>--</b></div>
         <div class='agent-stat'><span class='agent-meta'>Setpoint</span><b id='agent-last-setpoint'>--</b></div>
@@ -210,12 +209,9 @@ def agent_body() -> str:
     </div>
     <div class='agent-layout' style='margin-top:16px'>
       <section class='panel'>
-        <h2>Decision activity</h2>
         <div id='agent-decisions' class='agent-list'><div class='agent-empty'>Loading decisions…</div></div>
       </section>
       <aside class='panel'>
-        <h2>Operator messages</h2>
-        <p class='page-copy'>Recent mailbox activity stays in view. The send controls are tucked away until you need to add operational context or a task for the next agent cycle.</p>
         <button type='button' id='agent-compose-toggle' class='agent-compose-toggle' aria-expanded='false' aria-controls='agent-compose-panel'>Send a message to the agent</button>
         <div id='agent-compose-panel' class='agent-compose-panel' hidden>
           <form id='agent-compose' class='agent-compose'>
@@ -225,7 +221,6 @@ def agent_body() -> str:
             <span id='agent-compose-status' class='agent-meta'></span>
           </form>
         </div>
-        <h2 style='margin-top:18px'>Recent messages</h2>
         <div id='agent-messages' class='agent-list'><div class='agent-empty'>Loading messages…</div></div>
       </aside>
     </div>
@@ -371,10 +366,7 @@ def solar_body() -> str:
 def health_body() -> str:
     return """
     <section class='card'>
-      <span class='kicker'>Health</span>
-      <h1 class='page-title'>Minyad VPP health</h1>
-      <p class='page-copy'>Live status for the API, database, MQTT broker, telemetry bridges, and the endpoints that power the virtual power plant.</p>
-      <div style='display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:18px'>
+      <div style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>
         <span class='status-pill' id='overall-pill'><i></i><span id='overall-status'>Loading</span></span>
         <span class='scale-label'>Last checked <span id='health-checked'>--</span></span>
         <button class='secondary' onclick='loadHealth()'>Refresh now</button>
@@ -391,7 +383,7 @@ def health_body() -> str:
       function setOverall(status){const pill=document.getElementById('overall-pill'); pill.className='status-pill '+statusClass(status); document.getElementById('overall-status').textContent=status.toUpperCase();}
       function componentCard(item){
         const facts=Object.entries(item).filter(([k])=>!['name','status','detail'].includes(k)).map(([k,v])=>`<div><span class='scale-label'>${esc(k.replaceAll('_',' '))}</span><br><strong>${esc(typeof v==='object'?JSON.stringify(v):v)}</strong></div>`).join('');
-        return `<article class='card' style='background:#fff'><div class='tile-head'><span class='tile-name'>${esc(item.name)}</span><span class='status-pill ${statusClass(item.status)}'><i></i>${esc(item.status)}</span></div><p>${esc(item.detail)}</p><div class='grid' style='margin-top:12px'>${facts}</div></article>`;
+        return `<article class='card'><div class='tile-head'><span class='tile-name'>${esc(item.name)}</span><span class='status-pill ${statusClass(item.status)}'><i></i>${esc(item.status)}</span></div><p>${esc(item.detail)}</p><div class='grid' style='margin-top:12px'>${facts}</div></article>`;
       }
       async function loadHealth(){
         try{
@@ -745,7 +737,7 @@ def dsmr_body() -> str:
 def energy_dashboard_body() -> str:
     return """
     <section class="instrument dashboard-full" aria-label="Minyad live dashboard">
-      <div class="dashboard-nav"><a class="brand-lockup" href="/" aria-label="Minyad dashboard">__MARK__<span class="wordmark"><strong>Minyad</strong><span>Brand Interface</span></span></a><nav class="brand-nav" aria-label="Primary navigation">__NAV__</nav></div>
+      <div class="dashboard-nav"><a class="brand-lockup" href="/" aria-label="Minyad dashboard">__MARK__<span class="wordmark"><strong>Minyad</strong><span>Virtual Power Plant</span></span></a><nav class="brand-nav" aria-label="Primary navigation">__NAV__</nav></div>
       <div class="window-bar">
         <div class="window-actions">
           <div class="layout-toggle" role="tablist" aria-label="Power unit">
@@ -894,9 +886,6 @@ def energy_dashboard_body() -> str:
 def history_body() -> str:
     return """
     <section class='card'>
-      <span class='kicker'>History</span>
-      <h1 class='page-title'>Historische energie grafieken</h1>
-      <p class='page-copy'>Bekijk dezelfde gecombineerde energiestromen als op het dashboard met historische granulariteit per dag, maand en jaar. Sleep in de mini-grafiek om in te zoomen; dubbelklik op een grafiek om de volledige periode te herstellen.</p>
       <div class='history-tabs' role='tablist' aria-label='History granularity'>
         <button class='history-tab active' type='button' role='tab' aria-selected='true' data-history-window='day'>Dag</button>
         <button class='history-tab' type='button' role='tab' aria-selected='false' data-history-window='month'>Maand</button>
