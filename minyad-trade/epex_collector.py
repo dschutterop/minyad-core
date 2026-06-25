@@ -39,6 +39,7 @@ AMSTERDAM_TZ = _CONFIG.AMSTERDAM_TZ
 DAY_AHEAD_DEFAULTS = _CONFIG.DAY_AHEAD_DEFAULTS
 ENTSOE = _CONFIG.ENTSOE
 MQTT_TOPICS = _CONFIG.MQTT_TOPICS
+ALLOWED_ENTSOE_HOST = "web-api.tp.entsoe.eu"
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,8 @@ def normalize_entsoe_api_url(value: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("entsoe_api_url must be an absolute HTTP(S) URL")
+    if parsed.hostname != ALLOWED_ENTSOE_HOST or parsed.username or parsed.password or parsed.port is not None:
+        raise ValueError(f"entsoe_api_url must point to {ALLOWED_ENTSOE_HOST}")
     return url
 
 

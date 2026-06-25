@@ -148,6 +148,7 @@ TRADE_DEFAULTS = {
     "retry_interval_minutes": "15",
     "entsoe_api_url": "https://web-api.tp.entsoe.eu/api",
 }
+ALLOWED_ENTSOE_HOST = "web-api.tp.entsoe.eu"
 TRADE_NUMERIC_LIMITS = {
     "retry_attempts": (1, 24),
     "retry_interval_minutes": (1, 240),
@@ -709,6 +710,8 @@ class TradeSettingsUpdate(BaseModel):
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("entsoe_api_url must be an absolute HTTP(S) URL")
+        if parsed.hostname != ALLOWED_ENTSOE_HOST or parsed.username or parsed.password or parsed.port is not None:
+            raise ValueError(f"entsoe_api_url must point to {ALLOWED_ENTSOE_HOST}")
         return url
 
 

@@ -3,6 +3,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 
 def _load_collector():
     module_dir = Path(__file__).resolve().parents[1] / "minyad-trade"
@@ -115,11 +117,11 @@ def test_trade_settings_apply_entsoe_api_url_from_mqtt(monkeypatch):
 
     store.apply_mqtt(
         f"{collector.MQTT_TOPICS.settings_prefix}/entsoe_api_url",
-        b"https://example.test/entsoe/api",
+        b"https://web-api.tp.entsoe.eu/api",
     )
 
-    assert store.get().entsoe_api_url == "https://example.test/entsoe/api"
-    assert applied == ["https://example.test/entsoe/api"]
+    assert store.get().entsoe_api_url == "https://web-api.tp.entsoe.eu/api"
+    assert applied == ["https://web-api.tp.entsoe.eu/api"]
 
 
 def test_trade_settings_reject_invalid_entsoe_api_url_from_mqtt():
@@ -127,5 +129,22 @@ def test_trade_settings_reject_invalid_entsoe_api_url_from_mqtt():
     store = collector.SettingsStore()
 
     store.apply_mqtt(f"{collector.MQTT_TOPICS.settings_prefix}/entsoe_api_url", b"not-a-url")
+
+    assert store.get().entsoe_api_url == collector.DAY_AHEAD_DEFAULTS.entsoe_api_url
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        b"http://169.254.169.254/latest/meta-data",
+        b"http://minyad-db:5432/",
+        b"https://web-api.tp.entsoe.eu@127.0.0.1/api",
+    ],
+)
+def test_trade_settings_reject_non_entsoe_hosts_from_mqtt(value):
+    collector = _load_collector()
+    store = collector.SettingsStore()
+
+    store.apply_mqtt(f"{collector.MQTT_TOPICS.settings_prefix}/entsoe_api_url", value)
 
     assert store.get().entsoe_api_url == collector.DAY_AHEAD_DEFAULTS.entsoe_api_url
