@@ -998,7 +998,7 @@ async def api_proxy(path: str, request: Request) -> Response:
         async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=10.0) as client:
             response = await client.request(
                 request.method,
-                f"/{path}",
+                f"/api/{path}",
                 params=request.query_params,
                 content=await request.body(),
                 headers=headers,
