@@ -285,6 +285,7 @@ class ControlApp:
             return
         if measurement == "soc":
             self.latest_battery_soc = int(value)
+            await self.enforce_soc_guard_now()
         elif measurement == "power_w":
             self.latest_battery_power_w = int(value)
         await store_status(**{measurement: value})
@@ -778,6 +779,14 @@ class ControlApp:
             LOGGER.warning("GoodWe bridge is %s; charge setpoint %sW not published", self.bridge_status, watts)
             self.setpoint_w = 0
             return
+        soc = self.latest_battery_soc
+        soc_ceiling = int(self.settings.get("soc_ceiling", SOC_CEILING_DEFAULT))
+        if watts > 0 and soc is not None and soc >= soc_ceiling:
+            LOGGER.warning("SoC %s%% at or above ceiling %s%%; suppressing charge setpoint %sW", soc, soc_ceiling, watts)
+            if self.controller and self.controller.state is ControlState.CHARGING:
+                self._force_controller_idle()
+            await self.stop_charging()
+            return
         self.setpoint_w = max(0, min(watts, self._max_charge_power_w()))
         self.mqtt.publish_measurement("control", "command", "resume" if self.setpoint_w else "stop")
         self.publish_battery_limits(self.setpoint_w, 0, state_changed=state_changed)
@@ -790,6 +799,14 @@ class ControlApp:
         if not self.bridge_is_available:
             LOGGER.warning("GoodWe bridge is %s; discharge setpoint %sW not published", self.bridge_status, watts)
             self.setpoint_w = 0
+            return
+        soc = self.latest_battery_soc
+        soc_floor = int(self.settings.get("soc_floor", SOC_FLOOR_DEFAULT))
+        if watts > 0 and soc is not None and soc <= soc_floor:
+            LOGGER.warning("SoC %s%% at or below floor %s%%; suppressing discharge setpoint %sW", soc, soc_floor, watts)
+            if self.controller and self.controller.state is ControlState.DISCHARGING:
+                self._force_controller_idle()
+            await self.stop_charging()
             return
         self.setpoint_w = max(0, min(watts, self._max_discharge_power_w()))
         self.mqtt.publish_measurement("control", "command", "discharge" if self.setpoint_w else "stop")
