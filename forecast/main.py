@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -16,9 +17,9 @@ from shared.mqtt_client import MinyadMqttClient
 
 LOGGER = logging.getLogger(__name__)
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-LATITUDE = 51.9788
-LONGITUDE = 4.3158
-PEAK_W = 5000
+LATITUDE = float(os.getenv("FORECAST_LATITUDE", "51.9788"))
+LONGITUDE = float(os.getenv("FORECAST_LONGITUDE", "4.3158"))
+PEAK_W = int(os.getenv("SOLAR_PEAK_W", "5000"))
 EFFICIENCY = 0.80
 REFRESH_SECONDS = 15 * 60
 FETCH_RETRY_ATTEMPTS = 3

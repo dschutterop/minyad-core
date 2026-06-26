@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Security
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 import httpx
 import paho.mqtt.client as paho_mqtt
@@ -28,6 +29,19 @@ from shared.db import AsyncSessionLocal, get_session
 from shared.mqtt_client import MinyadMqttClient
 
 app = FastAPI(title="Minyad API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv(
+            "MINYAD_CORS_ORIGINS",
+            "http://localhost:8084,http://localhost:8085",
+        ).split(",")
+        if origin.strip()
+    ],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["X-API-Key", "Content-Type"],
+)
 mqtt = MinyadMqttClient("minyad-api")
 LOGGER = logging.getLogger(__name__)
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -163,9 +177,9 @@ STRATEGY_NUMERIC_LIMITS = {
     "ramp_hold_seconds": (0, 3600),
 }
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-FORECAST_LATITUDE = 51.9788
-FORECAST_LONGITUDE = 4.3158
-SOLAR_PEAK_W = 5000
+FORECAST_LATITUDE = float(os.getenv("FORECAST_LATITUDE", "51.9788"))
+FORECAST_LONGITUDE = float(os.getenv("FORECAST_LONGITUDE", "4.3158"))
+SOLAR_PEAK_W = int(os.getenv("SOLAR_PEAK_W", "5000"))
 SOLAR_FORECAST_EFFICIENCY = 0.80
 OPEN_METEO_RETRY_ATTEMPTS = max(1, int(os.getenv("OPEN_METEO_RETRY_ATTEMPTS", "3")))
 OPEN_METEO_RETRY_BASE_DELAY_SECONDS = float(os.getenv("OPEN_METEO_RETRY_BASE_DELAY_SECONDS", "2"))
