@@ -167,6 +167,7 @@ def test_subscribes_to_control_state_topic(monkeypatch):
 
 def test_psycopg2_database_url_normalizes_asyncpg_url():
     assert goodwe_bridge.psycopg2_database_url("postgresql+asyncpg://user:pass@db/minyad") == "postgresql://user:pass@db/minyad"
+    assert goodwe_bridge.psycopg2_database_url("postgresql+psycopg://user:pass@db/minyad") == "postgresql://user:pass@db/minyad"
 
 
 def test_idle_to_active_state_triggers_immediate_battery_status_poll(monkeypatch):

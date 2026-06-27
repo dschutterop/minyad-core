@@ -183,8 +183,8 @@ def utc_now_iso() -> str:
 
 
 def psycopg2_database_url(url: str) -> str:
-    if url.startswith("postgresql+asyncpg://"):
-        return "postgresql://" + url.removeprefix("postgresql+asyncpg://")
+    if url.startswith("postgresql+") and "://" in url:
+        return "postgresql://" + url.split("://", 1)[1]
     return url
 
 
@@ -274,7 +274,7 @@ class GoodWeBridge:
         if not self.config.database_url:
             return configured
         try:
-            with closing(psycopg2.connect(self.config.database_url)) as conn:
+            with closing(psycopg2.connect(psycopg2_database_url(self.config.database_url))) as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "select value from settings where key = %s and encrypted = false",
