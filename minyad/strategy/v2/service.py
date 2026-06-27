@@ -166,18 +166,18 @@ class StrategyService:
             await session.execute(
                 text("""
                     insert into setpoint_log (
-                        source, soc_floor, soc_ceiling, charge_rate_w, discharge_allowed,
+                        source, soc_floor, soc_ceiling, setpoint_w, discharge_allowed,
                         battery_soc_at_time, grid_power_at_time, battery_power_at_time,
                         setpoint_delta, trigger_reason, ack_received
                     ) values (
-                        'strategy_v2', :floor, :ceiling, :charge_rate, :discharge_allowed,
+                        'strategy_v2', :floor, :ceiling, :setpoint, :discharge_allowed,
                         :soc, :grid, :battery_power, :delta, :reason, true
                     )
                 """),
                 {
                     "floor": self.plan.effective_soc_floor if self.plan else 0,
                     "ceiling": self.plan.effective_soc_ceiling if self.plan else 100,
-                    "charge_rate": max(0, decision.setpoint_w),
+                    "setpoint": decision.setpoint_w,
                     "discharge_allowed": decision.setpoint_w < 0,
                     "soc": decision.soc,
                     "grid": decision.net_grid_w,

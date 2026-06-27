@@ -983,6 +983,51 @@ async def asset_steering_status(session: AsyncSession = Depends(get_session)) ->
     }
 
 
+def serialize_control_decision(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    timestamp = data.get("timestamp")
+    if timestamp is not None:
+        data["timestamp"] = timestamp.replace(tzinfo=timezone.utc).isoformat()
+    setpoint = data.get("setpoint_w") or 0
+    source = data.get("source") or ""
+    discharge_allowed = bool(data.get("discharge_allowed"))
+    if setpoint == 0:
+        action = "discharge" if discharge_allowed else "hold"
+    elif source == "strategy_v2":
+        action = "charge" if setpoint > 0 else "discharge"
+    else:
+        action = "discharge" if setpoint > 0 else "charge"
+    data["action"] = action
+    return data
+
+
+@app.get("/reporting/decisions")
+async def reporting_decisions(
+    limit: int = Query(default=50, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    total = (await session.execute(text("select count(*) from setpoint_log"))).scalar_one()
+    rows = (await session.execute(
+        text("""
+            select id, timestamp, source, soc_floor, soc_ceiling, setpoint_w, discharge_allowed,
+                   battery_soc_at_time, grid_power_at_time, battery_power_at_time,
+                   apparent_load_at_time, setpoint_delta, trigger_reason,
+                   ack_received, ack_latency_ms
+            from setpoint_log
+            order by timestamp desc, id desc
+            limit :limit offset :offset
+        """),
+        {"limit": limit, "offset": offset},
+    )).mappings().all()
+    return {
+        "limit": limit,
+        "offset": offset,
+        "total": int(total),
+        "items": [serialize_control_decision(row) for row in rows],
+    }
+
+
 async def trade_settings(session: AsyncSession) -> dict[str, Any]:
     result = await session.execute(text("select key, value from settings where key like 'trade.%'"))
     values = {row.key.removeprefix("trade."): row.value for row in result}
