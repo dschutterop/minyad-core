@@ -629,6 +629,7 @@ class ApiKeyCreate(BaseModel):
 class SystemSettingsUpdate(BaseModel):
     debug_logging: bool | None = None
     theme: Literal["system", "light", "dark"] | None = None
+    language: Literal["en", "nl"] | None = None
 
 
 class ClaudeAgentSettingsUpdate(BaseModel):
@@ -838,11 +839,12 @@ async def debug_status(session: AsyncSession = Depends(get_session)) -> dict[str
 
 @app.get("/system-settings")
 async def get_system_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
-    result = await session.execute(text("select key, value from settings where key in ('system.debug_logging', 'system.theme')"))
+    result = await session.execute(text("select key, value from settings where key in ('system.debug_logging', 'system.theme', 'system.language')"))
     settings = {row.key: row.value for row in result}
     return {
         "debug_logging": settings.get("system.debug_logging", "false") == "true",
         "theme": settings.get("system.theme", "system"),
+        "language": settings.get("system.language", "en"),
     }
 
 
@@ -866,7 +868,15 @@ async def update_system_settings(update: SystemSettingsUpdate, session: AsyncSes
             """),
             {"val": update.theme},
         )
-    if update.debug_logging is not None or update.theme is not None:
+    if update.language is not None:
+        await session.execute(
+            text("""
+                insert into settings (key, value, encrypted, updated_at) values ('system.language', :val, false, now())
+                on conflict (key) do update set value=:val, updated_at=now()
+            """),
+            {"val": update.language},
+        )
+    if update.debug_logging is not None or update.theme is not None or update.language is not None:
         await session.commit()
     return await get_system_settings(session)
 

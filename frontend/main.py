@@ -75,6 +75,304 @@ THEME_BOOT_SCRIPT = """
 </script>
 """
 
+LANGUAGE_BOOT_SCRIPT = """
+<script>
+(() => {
+  const KEY = 'minyad.language';
+  const supported = new Set(['en', 'nl']);
+  const dictionaries = {
+    en: {
+      'Zelfvoorziening vandaag': 'Self-sufficiency today',
+      'laden...': 'loading...',
+      'vandaag': 'today',
+      'Batterij': 'Battery',
+      'laden': 'charge',
+      'ontladen': 'discharge',
+      'Net': 'Grid',
+      'Huis': 'Home',
+      'Dagoverzicht': 'Day overview',
+      'Batterijstatus': 'Battery status',
+      'Netstatus': 'Grid status',
+      'Zelfvoorziening': 'Self-sufficiency',
+      'Vandaag': 'Today',
+      'Dag': 'Day',
+      'Maand': 'Month',
+      'Jaar': 'Year',
+      'Laden...': 'Loading...',
+      'Geen historische punten beschikbaar voor deze periode.': 'No historical points available for this period.',
+      'sleep onderaan om te zoomen': 'drag below to zoom',
+      'Laat de Claude-agentcontainer normaal draaien, maar beheer runtime of de agent Claude.ai/API-aanroepen mag doen. Wijzigingen vereisen geen containerrestart.': 'Keep the Claude agent container running normally, but control at runtime whether the agent may make Claude.ai/API calls. Changes do not require a container restart.',
+      'Claude agent inschakelen': 'Enable Claude agent',
+      'Token guard inschakelen': 'Enable token guard',
+      'Minimum tokens overhouden': 'Minimum tokens to keep',
+      'geschat': 'estimated',
+      'Kan dashboarddata niet laden:': 'Unable to load dashboard data:',
+      'Nog geen dagpunten beschikbaar.': 'No day points available yet.',
+      'Tip: sleep over de onderste mini-grafiek om een periode te selecteren. Dubbelklik boven of onder om terug uit te zoomen.': 'Tip: drag over the lower mini graph to select a period. Double-click above or below to zoom back out.',
+    },
+    nl: {
+      'Dashboard': 'Dashboard',
+      'Agent': 'Agent',
+      'Health': 'Status',
+      'History': 'Historie',
+      'Trade': 'Handel',
+      'Solar': 'Zon',
+      'Battery': 'Batterij',
+      'Asset Steering': 'Assetsturing',
+      'Reporting': 'Rapportage',
+      'Settings': 'Instellingen',
+      'Virtual Power Plant': 'Virtuele energiecentrale',
+      'Primary navigation': 'Hoofdnavigatie',
+      'Power unit': 'Vermogenseenheid',
+      'Watts': 'Watt',
+      'Kilowatts': 'Kilowatt',
+      'Dashboard layout': 'Dashboardweergave',
+      'Cluster': 'Cluster',
+      'Flow': 'Flow',
+      'Agent mailbox': 'Agentpostvak',
+      'Close': 'Sluiten',
+      'Subject': 'Onderwerp',
+      'Message or task for the agent...': 'Bericht of taak voor de agent...',
+      'Send to agent': 'Naar agent sturen',
+      'Messages': 'Berichten',
+      'Archive': 'Archief',
+      'Loading...': 'Laden...',
+      'Select a message.': 'Selecteer een bericht.',
+      'Reply': 'Antwoorden',
+      'Delete': 'Verwijderen',
+      'Ack': 'Bevestigen',
+      'Self-sufficiency today': 'Zelfvoorziening vandaag',
+      'Solar - now': 'Zon - nu',
+      'Solar': 'Zon',
+      'Producing': 'Produceert',
+      'Standby': 'Stand-by',
+      'Battery': 'Batterij',
+      'Grid': 'Net',
+      'Importing': 'Importeert',
+      'Exporting': 'Exporteert',
+      'Home Consumption': 'Thuisverbruik',
+      'Live': 'Live',
+      'Approx': 'Geschat',
+      'mismatch': 'afwijking',
+      'Combined day graph - kW / EUR/kWh': 'Gecombineerde daggrafiek - kW / EUR/kWh',
+      'Forecast': 'Prognose',
+      'Production': 'Productie',
+      'Home': 'Thuis',
+      'ENTSO-E prices': 'ENTSO-E-prijzen',
+      'kWh produced': 'kWh geproduceerd',
+      'kWh self used': 'kWh zelf verbruikt',
+      'kWh exported': 'kWh geexporteerd',
+      'kWh imported': 'kWh geimporteerd',
+      'charge': 'laden',
+      'discharge': 'ontladen',
+      'import': 'import',
+      'export': 'export',
+      'kWh today': 'kWh vandaag',
+      'kWh imported today': 'kWh vandaag geimporteerd',
+      'exported': 'geexporteerd',
+      'Settings sections': 'Instellingensecties',
+      'Battery control': 'Batterijregeling',
+      'Charging, discharge and inverter limits': 'Laad-, ontlaad- en omvormerlimieten',
+      'Energy trade': 'Energiehandel',
+      'ENTSO-E collection and retry behavior': 'ENTSO-E ophalen en retrygedrag',
+      'Runtime access and token guard': 'Runtime-toegang en tokenbewaking',
+      'Appearance': 'Weergave',
+      'Light, dark or system theme': 'Licht, donker of systeemthema',
+      'System': 'Systeem',
+      'Debug logging and diagnostics': 'Debuglogging en diagnostiek',
+      'Effective values from /battery/settings.': 'Effectieve waarden uit /battery/settings.',
+      'Start surplus W': 'Startoverschot W',
+      'Stop surplus W': 'Stopoverschot W',
+      'Start duration s': 'Startduur s',
+      'Stop duration s': 'Stopduur s',
+      'Cooldown s': 'Afkoeling s',
+      'Max charge W': 'Max laden W',
+      'Max charge A': 'Max laden A',
+      'Nominal battery V': 'Nominale batterijspanning V',
+      'Max discharge W': 'Max ontladen W',
+      'Minimum SoC %': 'Minimale SoC %',
+      'Maximum SoC %': 'Maximale SoC %',
+      'Inverter IP': 'Omvormer-IP',
+      'Retries': 'Pogingen',
+      'Retry delay s': 'Retryvertraging s',
+      'GoodWe poll interval s': 'GoodWe pollinterval s',
+      'Save battery settings': 'Batterijinstellingen opslaan',
+      'EPEX day-ahead collection settings. Changes are published to MQTT and picked up without restarting minyad-trade.': 'EPEX day-ahead verzamelinstellingen. Wijzigingen worden naar MQTT gepubliceerd en opgepakt zonder minyad-trade te herstarten.',
+      'Bidding zone': 'Biedzone',
+      'Poll time Europe/Amsterdam': 'Ophaaltijd Europa/Amsterdam',
+      'Retry attempts': 'Aantal pogingen',
+      'Retry interval minutes': 'Retry-interval minuten',
+      'ENTSO-E API URL': 'ENTSO-E API-URL',
+      'Save trade settings': 'Handelsinstellingen opslaan',
+      'Claude agent': 'Claude-agent',
+      'Current status:': 'Huidige status:',
+      'Enable Claude agent': 'Claude-agent inschakelen',
+      'Enable token guard': 'Tokenbewaking inschakelen',
+      'Minimum tokens to keep': 'Minimum tokens overhouden',
+      'Save Claude agent settings': 'Claude-agentinstellingen opslaan',
+      'Choose how Minyad should render every web interface. The preference is saved server-side and cached locally for instant page loads.': 'Kies hoe Minyad elke webinterface weergeeft. De voorkeur wordt server-side opgeslagen en lokaal gecachet voor snelle paginaladingen.',
+      'Theme preference': 'Themakeuze',
+      'System default': 'Systeemstandaard',
+      'Follow this device': 'Volg dit apparaat',
+      'Light': 'Licht',
+      'Bright interface': 'Lichte interface',
+      'Dark': 'Donker',
+      'Low-light interface': 'Donkere interface',
+      'Language': 'Taal',
+      'Choose the display language for Minyad.': 'Kies de weergavetaal voor Minyad.',
+      'English': 'Engels',
+      'Dutch': 'Nederlands',
+      'Debug logging': 'Debuglogging',
+      'Debug status': 'Debugstatus',
+      'Refresh now': 'Nu vernieuwen',
+      'Battery status': 'Batterijstatus',
+      'State:': 'Status:',
+      'Power flow:': 'Vermogen:',
+      'Voltage:': 'Spanning:',
+      'Charge current:': 'Laadstroom:',
+      'Battery mode:': 'Batterijmodus:',
+      'Charge setpoint:': 'Laadsetpoint:',
+      'Discharge setpoint:': 'Ontlaadsetpoint:',
+      'Bridge status:': 'Bridgestatus:',
+      'Bridge last seen:': 'Bridge laatst gezien:',
+      'Override:': 'Override:',
+      'Battery override': 'Batterij-override',
+      'Force charge': 'Forceer laden',
+      'Force stop': 'Forceer stop',
+      'Force discharge': 'Forceer ontladen',
+      'Pause (1h)': 'Pauze (1u)',
+      'Resume normal': 'Normaal hervatten',
+      'DSMR grid status': 'DSMR-netstatus',
+      'Live data from the minyad/grid MQTT topic.': 'Live data uit het minyad/grid MQTT-topic.',
+      'Status:': 'Status:',
+      'Timestamp:': 'Tijdstempel:',
+      'Net power:': 'Netvermogen:',
+      'Delivered:': 'Geleverd:',
+      'Returned:': 'Teruggeleverd:',
+      'Micro-inverter overview': 'Micro-omvormeroverzicht',
+      'Live Enphase micro-inverter production. Each panel is represented by its micro-inverter and shows the currently reported wattage.': 'Live Enphase micro-omvormerproductie. Elk paneel wordt weergegeven door zijn micro-omvormer en toont het actuele wattage.',
+      'Updated': 'Bijgewerkt',
+      'Total now': 'Totaal nu',
+      'Panels / micro-inverters': 'Panelen / micro-omvormers',
+      'reporting': 'rapporteren',
+      'Control decisions': 'Regelbesluiten',
+      'A paginated audit trail of battery control decisions and setpoint writes.': 'Een gepagineerd auditlog van batterijbesluiten en setpoint-wijzigingen.',
+      'Previous 50': 'Vorige 50',
+      'Next 50': 'Volgende 50',
+      'Refresh': 'Vernieuwen',
+      'Time': 'Tijd',
+      'Source': 'Bron',
+      'Action': 'Actie',
+      'Setpoint': 'Setpoint',
+      'Delta': 'Delta',
+      'Limits': 'Limieten',
+      'Reason': 'Reden',
+      'Loading decisions...': 'Besluiten laden...',
+      'ENTSO-E day-ahead prices': 'ENTSO-E day-ahead prijzen',
+      'Live dashboard for the minyad-trade collector. It reads the retained ENTSO-E/EPEX day-ahead price payload and graphs hourly EUR/kWh values.': 'Live dashboard voor de minyad-trade collector. Het leest de retained ENTSO-E/EPEX day-ahead prijzen en tekent uurlijkse EUR/kWh waarden.',
+      'lowest EUR/kWh': 'laagste EUR/kWh',
+      'average EUR/kWh': 'gemiddelde EUR/kWh',
+      'highest EUR/kWh': 'hoogste EUR/kWh',
+      'hourly points': 'uurpunten',
+      'Health': 'Status',
+      'Last checked': 'Laatst gecontroleerd',
+      'Raw health payload': 'Ruwe statuspayload',
+      'Last decision': 'Laatste besluit',
+      'Setpoint': 'Setpoint',
+      'Confidence': 'Vertrouwen',
+      'Unread messages': 'Ongelezen berichten',
+      'Latest 25': 'Laatste 25',
+      'Latest 50': 'Laatste 50',
+      'Latest 100': 'Laatste 100',
+      'Send a message to the agent': 'Stuur een bericht naar de agent',
+      'Message or task for the agent...': 'Bericht of taak voor de agent...',
+      'Asset steering': 'Assetsturing',
+      'Manage the strategy thresholds that steer battery charging and discharging. Values are stored as strategy.* settings and consumed by the strategy/control services.': 'Beheer de strategiedrempels die laden en ontladen sturen. Waarden worden opgeslagen als strategy.* instellingen en gebruikt door de strategie-/controlservices.',
+      'Save asset steering': 'Assetsturing opslaan',
+      'Recent steering activity': 'Recente stuuractiviteit',
+      'Refresh activity': 'Activiteit vernieuwen',
+      'Latest decision:': 'Laatste besluit:',
+      'Latest setpoint:': 'Laatste setpoint:',
+    }
+  };
+  const normalize = (text) => text.replace(/[\\u2013\\u2014]/g, '-').replace(/\\u2026/g, '...').replace(/\\s+/g, ' ').trim();
+  const translateText = (text, language) => dictionaries[language]?.[normalize(text)];
+  const translateAttributes = (root, language) => {
+    root.querySelectorAll('[placeholder],[aria-label],[title]').forEach((el) => {
+      for (const attr of ['placeholder', 'aria-label', 'title']) {
+        const value = el.getAttribute(attr);
+        const translated = value && translateText(value, language);
+        if (translated) el.setAttribute(attr, translated);
+      }
+    });
+  };
+  const walk = (root, language) => {
+    const skip = new Set(['SCRIPT', 'STYLE', 'CODE', 'PRE', 'TEXTAREA']);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+        return node.parentElement && skip.has(node.parentElement.tagName) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const translated = translateText(node.nodeValue, language);
+      if (translated) node.nodeValue = node.nodeValue.replace(node.nodeValue.trim(), translated);
+    }
+  };
+  const apply = (language) => {
+    const next = supported.has(language) ? language : 'en';
+    document.documentElement.lang = next;
+    document.documentElement.dataset.language = next;
+    localStorage.setItem(KEY, next);
+    if (document.body) {
+      walk(document.body, next);
+      translateAttributes(document.body, next);
+    }
+  };
+  window.minyadI18n = {
+    key: KEY,
+    apply,
+    t(text) {
+      return translateText(text, localStorage.getItem(KEY) || 'en') || text;
+    },
+    async load() {
+      try {
+        const res = await fetch('/api/system-settings');
+        if (!res.ok) throw new Error('language settings unavailable');
+        const data = await res.json();
+        apply(data.language || 'en');
+        return data.language || 'en';
+      } catch (_) {
+        apply(localStorage.getItem(KEY) || 'en');
+        return localStorage.getItem(KEY) || 'en';
+      }
+    },
+    async save(language) {
+      apply(language);
+      const res = await fetch('/api/system-settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({language})
+      });
+      if (!res.ok) throw new Error('Unable to save language');
+      return res.json();
+    }
+  };
+  document.addEventListener('DOMContentLoaded', () => {
+    apply(localStorage.getItem(KEY) || 'en');
+    window.minyadI18n.load();
+    let timer = null;
+    new MutationObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => apply(localStorage.getItem(KEY) || 'en'), 50);
+    }).observe(document.body, {childList: true, subtree: true});
+  });
+})();
+</script>
+"""
+
 BRAND_CSS += """
 .mailbox-button{position:relative;border:1px solid var(--p-line);background:#0A1016;color:var(--p-ink);border-radius:9px;padding:9px 12px;cursor:pointer;font:600 16px/1 var(--mono)}
 .mailbox-button .badge{position:absolute;right:-7px;top:-7px;min-width:18px;height:18px;border-radius:999px;background:var(--import-d);color:#fff;border:1px solid rgba(255,255,255,.25);font:700 10px/17px var(--mono);text-align:center;padding:0 4px}
@@ -158,6 +456,7 @@ def render_page(active: str, body: str) -> str:
         <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230E151C'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Arial,sans-serif' font-size='20' font-weight='700' fill='%23E6EDF2'%3EM%3C/text%3E%3C/svg%3E">
         <style>{BRAND_CSS}</style>
         {THEME_BOOT_SCRIPT}
+        {LANGUAGE_BOOT_SCRIPT}
       </head>
       <body>
         <div class="brand-shell">
@@ -186,6 +485,7 @@ def render_dashboard_page() -> str:
         <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230E151C'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Arial,sans-serif' font-size='20' font-weight='700' fill='%23E6EDF2'%3EM%3C/text%3E%3C/svg%3E">
         <style>{BRAND_CSS}</style>
         {THEME_BOOT_SCRIPT}
+        {LANGUAGE_BOOT_SCRIPT}
       </head>
       <body class="dashboard-page">
         {energy_dashboard_body()}
@@ -461,11 +761,18 @@ def battery_settings_body() -> str:
       <h2>Appearance</h2>
       <p style='color:var(--steel);font-size:14px;margin:0 0 12px'>Choose how Minyad should render every web interface. The preference is saved server-side and cached locally for instant page loads.</p>
       <div class='theme-options' role='radiogroup' aria-label='Theme preference'>
-        <label class='theme-option'><input type='radio' name='theme' value='system'><b>System</b><span>Follow this device</span></label>
+        <label class='theme-option'><input type='radio' name='theme' value='system'><b>System default</b><span>Follow this device</span></label>
         <label class='theme-option'><input type='radio' name='theme' value='light'><b>Light</b><span>Bright interface</span></label>
         <label class='theme-option'><input type='radio' name='theme' value='dark'><b>Dark</b><span>Low-light interface</span></label>
       </div>
       <pre id='theme-result'></pre>
+      <h3>Language</h3>
+      <p style='color:var(--steel);font-size:14px;margin:0 0 12px'>Choose the display language for Minyad.</p>
+      <div class='theme-options' role='radiogroup' aria-label='Language'>
+        <label class='theme-option'><input type='radio' name='language' value='en'><b>English</b><span>EN</span></label>
+        <label class='theme-option'><input type='radio' name='language' value='nl'><b>Dutch</b><span>NL</span></label>
+      </div>
+      <pre id='language-result'></pre>
     </section>
 
     <section id='settings-system' role='tabpanel' class='card settings-section' data-settings-panel='system' hidden>
@@ -623,6 +930,19 @@ def battery_settings_body() -> str:
         });
       });
 
+      document.querySelectorAll('input[name="language"]').forEach((input) => {
+        input.addEventListener('change', async (e) => {
+          if (!e.target.checked) return;
+          try {
+            const settings = await window.minyadI18n.save(e.target.value);
+            document.getElementById('language-result').textContent = JSON.stringify({language: settings.language}, null, 2);
+            window.location.reload();
+          } catch (err) {
+            document.getElementById('language-result').textContent = 'Error: ' + err.message;
+          }
+        });
+      });
+
       document.getElementById('debug-toggle').addEventListener('change', async (e) => {
         const enabled = e.target.checked;
         await fetch('/api/system-settings', {
@@ -643,6 +963,12 @@ def battery_settings_body() -> str:
         const themeInput = document.querySelector(`input[name="theme"][value="${theme}"]`);
         if (themeInput) themeInput.checked = true;
         document.getElementById('theme-result').textContent = JSON.stringify({theme}, null, 2);
+        const language = data.language || 'en';
+        localStorage.setItem(window.minyadI18n.key, language);
+        window.minyadI18n.apply(language);
+        const languageInput = document.querySelector(`input[name="language"][value="${language}"]`);
+        if (languageInput) languageInput.checked = true;
+        document.getElementById('language-result').textContent = JSON.stringify({language}, null, 2);
         applyDebugState(data.debug_logging);
       }
 
