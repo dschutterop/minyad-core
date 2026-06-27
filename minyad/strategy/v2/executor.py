@@ -44,7 +44,7 @@ class StrategyExecutor:
                 delta = _clamp(int(error_w * self.settings.balance_gain), -self.settings.ramp_ceiling_w, self.settings.ramp_ceiling_w)
                 bias = -self.settings.price_discharge_bias_w if in_price_discharge else 0
                 candidate = current - delta + bias
-                reason = f"balancing grid error {error_w}W"
+                reason = f"balancing grid to target; grid offset {error_w}W"
                 if in_price_discharge:
                     reason += "; price discharge bias applied"
                 candidate = _clamp(candidate, -self.settings.max_discharge_w, self.settings.effective_max_charge_w)
