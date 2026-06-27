@@ -5,7 +5,7 @@ import os
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from api.main import serialize_agent_decision, serialize_control_decision
+from api.main import serialize_agent_decision, serialize_control_decision, setpoint_log_select_list
 
 
 def test_serialize_agent_decision_formats_timestamp_and_json_snapshot() -> None:
@@ -54,3 +54,10 @@ def test_serialize_control_decision_labels_legacy_signs() -> None:
     )
 
     assert result["action"] == "charge"
+
+
+def test_setpoint_log_select_list_supports_legacy_column_names() -> None:
+    select_list = setpoint_log_select_list({"charge_rate_w", "home_load_at_time"})
+
+    assert "charge_rate_w as setpoint_w" in select_list
+    assert "home_load_at_time as apparent_load_at_time" in select_list
