@@ -1169,6 +1169,11 @@ async def dashboard() -> str:
     return render_dashboard_page()
 
 
+@app.get("/reporting", response_class=HTMLResponse)
+async def reporting() -> str:
+    return render_page("Reporting", reporting_body())
+
+
 @app.get("/{section}", response_class=HTMLResponse)
 async def section(section: str) -> str:
     title = "DSMR" if section.lower() == "dsmr" else section.replace("-", " ").title()
