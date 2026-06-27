@@ -39,6 +39,7 @@ MIN_WRITE_INTERVAL_SEC = 10
 MIN_TARGET_CHANGE_W = 150
 WRITE_REFRESH_INTERVAL_SEC = 600
 DEFAULT_POLL_INTERVAL_SECONDS = POLL_INTERVAL_SEC
+OPPOSITE_DIRECTION_SETTLE_POWER_W = 100
 
 MQTT_TOPIC_INVERTER_STATUS = "minyad/inverter/status"
 MQTT_TOPIC_BRIDGE_STATUS = "minyad/bridge/status"
@@ -256,6 +257,7 @@ class GoodWeBridge:
         self._last_api_command_monotonic: float | None = None
         self._last_api_battery_power_w: int | None = None
         self._last_api_grid_power_w: int | None = None
+        self._last_api_telemetry_monotonic: float | None = None
         self._last_api_battery_soc: int | None = None
         self._last_logged_signed_setpoint_w = 0
         self._pending_charge_check: tuple[float, int, int | None] | None = None
@@ -406,7 +408,10 @@ class GoodWeBridge:
 
     async def handle_charge_setpoint(self, watts: int) -> None:
         previous_charge = self.target_charge_limit_w
-        self.target_charge_limit_w = max(0, int(watts))
+        requested_charge = max(0, int(watts))
+        if self._opposite_direction_settling("charge", requested_charge):
+            return
+        self.target_charge_limit_w = requested_charge
         clears_discharge = self.target_charge_limit_w > 0 and self.target_discharge_limit_w > 0
         if self.target_charge_limit_w > 0:
             self.target_discharge_limit_w = 0
@@ -416,7 +421,10 @@ class GoodWeBridge:
 
     async def handle_discharge_setpoint(self, watts: int) -> None:
         previous_discharge = self.target_discharge_limit_w
-        self.target_discharge_limit_w = max(0, int(watts))
+        requested_discharge = max(0, int(watts))
+        if self._opposite_direction_settling("discharge", requested_discharge):
+            return
+        self.target_discharge_limit_w = requested_discharge
         clears_charge = self.target_discharge_limit_w > 0 and self.target_charge_limit_w > 0
         if self.target_discharge_limit_w > 0:
             self.target_charge_limit_w = 0
@@ -538,6 +546,35 @@ class GoodWeBridge:
         logger.info("[modbus] Limit write skipped reason=%s p1_grid_power_w=%s target_charge_limit_w=%s target_discharge_limit_w=%s current_charge_limit_w=%s current_discharge_limit_w=%s", reason, self._last_p1_grid_power_w, self.target_charge_limit_w, self.target_discharge_limit_w, self._last_charge_setpoint_w, self._last_discharge_setpoint_w)
         return f"skipped_{reason.replace(' ', '_')}"
 
+    def _opposite_direction_settling(self, command: str, target_w: int) -> bool:
+        if target_w <= 0 or self._last_api_telemetry_monotonic is None or self.config.min_write_interval_s <= 0:
+            return False
+        battery_power_w = self._last_api_battery_power_w
+        if battery_power_w is None:
+            return False
+        age = monotonic() - self._last_api_telemetry_monotonic
+        if age >= self.config.min_write_interval_s:
+            return False
+        opposite = (
+            command == "charge" and battery_power_w > OPPOSITE_DIRECTION_SETTLE_POWER_W
+        ) or (
+            command == "discharge" and battery_power_w < -OPPOSITE_DIRECTION_SETTLE_POWER_W
+        )
+        if not opposite:
+            return False
+        self.modbus_write_skipped_total += 1
+        self.publish_metrics()
+        logger.warning(
+            "[modbus|api] Actuator decision skipped reason=opposite direction settling requested_api_command=%s target_power_w=%s api_battery_power_w=%s telemetry_age_s=%.1f settle_window_s=%.1f p1_grid_power_w=%s",
+            command,
+            target_w,
+            battery_power_w,
+            age,
+            self.config.min_write_interval_s,
+            self._last_p1_grid_power_w,
+        )
+        return True
+
     def _skip_actuator_write(self, reason: str) -> None:
         self.modbus_write_skipped_total += 1
         self.publish_metrics()
@@ -602,6 +639,7 @@ class GoodWeBridge:
         state = await self.backend.read_state()
         self._last_api_battery_power_w = state.battery_power_w
         self._last_api_grid_power_w = state.grid_power_w
+        self._last_api_telemetry_monotonic = monotonic()
         self._last_api_battery_soc = state.battery_soc
         self._check_charge_limit_effect(state)
         values = {

@@ -594,6 +594,49 @@ def test_import_discharging_sends_api_discharge_command_and_modbus_discharge_lim
     asyncio.run(run())
 
 
+def test_recent_charging_readback_delays_opposite_discharge_command(monkeypatch, caplog):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        config = goodwe_bridge.Config(**{**make_config().__dict__, "min_write_interval_s": 10.0})
+        bridge = goodwe_bridge.GoodWeBridge(config, backend)
+        bridge.handle_grid_power("2838")
+        bridge._last_api_battery_power_w = -2554
+        bridge._last_api_telemetry_monotonic = goodwe_bridge.monotonic()
+        bridge.control_state = "DISCHARGING"
+
+        await bridge.handle_discharge_setpoint(1000)
+
+        assert bridge.target_discharge_limit_w == 0
+        assert backend.battery_limits == []
+        assert backend.api_commands == []
+
+    asyncio.run(run())
+    assert "opposite direction settling" in caplog.text
+    assert "requested_api_command=discharge" in caplog.text
+    assert "api_battery_power_w=-2554" in caplog.text
+
+
+def test_stale_charging_readback_allows_discharge_command(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        config = goodwe_bridge.Config(**{**make_config().__dict__, "min_write_interval_s": 10.0})
+        bridge = goodwe_bridge.GoodWeBridge(config, backend)
+        bridge._last_api_battery_power_w = -2554
+        bridge._last_api_telemetry_monotonic = goodwe_bridge.monotonic() - 11.0
+        bridge.control_state = "DISCHARGING"
+
+        await bridge.handle_discharge_setpoint(1000)
+
+        assert backend.battery_limits == [(0, 1000)]
+        assert backend.api_commands == [("discharge", 1000)]
+
+    asyncio.run(run())
+
+
 def test_idle_stops_forced_mode(monkeypatch):
     monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
 
