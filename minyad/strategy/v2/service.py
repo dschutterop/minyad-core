@@ -25,6 +25,7 @@ from .executor import StrategyExecutor
 from .models import DayPlan, ExecutorState, StrategyDecision
 from .override import OverrideManager
 from .planner import AMSTERDAM, StrategyPlanner, default_day_plan
+from .setpoint_log import build_setpoint_log_insert
 from .soc_guard import SoCGuard
 
 configure_container_logging(getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
@@ -170,18 +171,8 @@ class StrategyService:
                     where table_name = 'setpoint_log'
                 """)
             )).scalars().all()
-            setpoint_column = "setpoint_w" if "setpoint_w" in columns else "charge_rate_w"
             await session.execute(
-                text(f"""
-                    insert into setpoint_log (
-                        source, soc_floor, soc_ceiling, {setpoint_column}, discharge_allowed,
-                        battery_soc_at_time, grid_power_at_time, battery_power_at_time,
-                        setpoint_delta, trigger_reason, ack_received
-                    ) values (
-                        'strategy_v2', :floor, :ceiling, :setpoint, :discharge_allowed,
-                        :soc, :grid, :battery_power, :delta, :reason, true
-                    )
-                """),
+                text(build_setpoint_log_insert(set(columns))),
                 {
                     "floor": self.plan.effective_soc_floor if self.plan else 0,
                     "ceiling": self.plan.effective_soc_ceiling if self.plan else 100,
