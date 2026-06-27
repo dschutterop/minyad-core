@@ -121,6 +121,7 @@ html[data-theme=light] .mailbox-panel{background:#fff;border-color:rgba(74,98,11
 .settings-layout{display:grid;grid-template-columns:minmax(210px,260px) minmax(0,1fr);gap:18px;align-items:start}.settings-nav{position:sticky;top:18px;display:grid;gap:8px}.settings-nav button{width:100%;display:grid;gap:4px;text-align:left;border:1px solid rgba(74,98,118,.2);border-radius:12px;background:rgba(255,255,255,.48);color:var(--ink);padding:14px 16px;cursor:pointer}.settings-nav button strong{font:700 13px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase}.settings-nav button span{color:var(--steel);font-size:12px;line-height:1.35}.settings-nav button.active{background:var(--panel);color:var(--p-ink);border-color:var(--panel)}.settings-nav button.active span{color:var(--p-mut)}.settings-section{display:none}.settings-section.active{display:block}.settings-section h2{margin-top:0}.settings-section pre:empty{display:none}html[data-theme=dark] .settings-nav button{background:rgba(16,27,36,.92);color:var(--ink);border-color:rgba(184,210,228,.14)}html[data-theme=dark] .settings-nav button.active{background:#E6EDF2;color:#071017;border-color:#E6EDF2}html[data-theme=dark] .settings-nav button.active span{color:#4A6276}@media(max-width:800px){.settings-layout{grid-template-columns:1fr}.settings-nav{position:static;display:flex;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}.settings-nav button{min-width:190px}.settings-section{scroll-margin-top:12px}}
 
 .agent-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.agent-stat{background:#fff;border:1px solid rgba(74,98,118,.18);border-radius:12px;padding:16px}.agent-stat b{display:block;font-family:var(--mono);font-size:26px}.agent-layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);gap:16px}.agent-list{display:grid;gap:10px}.agent-decision,.agent-message-card{background:#fff;border:1px solid rgba(74,98,118,.18);border-left:4px solid var(--steel);border-radius:12px;padding:14px}.agent-decision.charge{border-left-color:var(--store)}.agent-decision.discharge{border-left-color:var(--produce)}.agent-decision.hold{border-left-color:var(--steel)}.agent-decision header,.agent-message-card header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.agent-meta{font-family:var(--mono);font-size:11px;color:var(--steel);letter-spacing:.08em;text-transform:uppercase}.agent-reason{white-space:pre-wrap;line-height:1.45}.agent-controls{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.agent-controls button{border:1px solid rgba(74,98,118,.25);background:#fff;border-radius:999px;padding:10px 14px;cursor:pointer}.agent-controls button.active{background:var(--panel);color:var(--p-ink)}.agent-compose-toggle{width:100%;border:1px solid rgba(74,98,118,.25);background:var(--panel);color:var(--p-ink);border-radius:12px;padding:13px 16px;cursor:pointer;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:12px}.agent-compose-toggle:after{content:"+";font-size:18px}.agent-compose-toggle[aria-expanded="true"]:after{content:"–"}.agent-compose-panel[hidden]{display:none}.agent-compose-panel{margin-top:12px}.agent-compose{display:grid;grid-template-columns:1fr;gap:10px}.agent-compose textarea{width:100%;min-height:120px;margin-top:8px;border:1px solid rgba(74,98,118,.25);background:#fff;padding:11px 12px;font:inherit;color:var(--ink)}.agent-compose button[type=submit]{border:1px solid rgba(74,98,118,.25);background:#fff;border-radius:999px;padding:10px 14px;cursor:pointer}.agent-snapshot{max-height:260px}.agent-empty{border:1px dashed rgba(74,98,118,.28);border-radius:12px;padding:24px;text-align:center;color:var(--steel);font-family:var(--mono)}html[data-theme=dark] .agent-stat,html[data-theme=dark] .agent-decision,html[data-theme=dark] .agent-message-card,html[data-theme=dark] .agent-controls button,html[data-theme=dark] .agent-compose textarea,html[data-theme=dark] .agent-compose button[type=submit]{background:#101b24;color:var(--ink);border-color:rgba(184,210,228,.14)}html[data-theme=dark] .agent-controls button.active{background:#E6EDF2;color:#071017}@media(max-width:900px){.agent-hero{grid-template-columns:repeat(2,1fr)}.agent-layout{grid-template-columns:1fr}}
+.report-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0}.report-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.report-actions button{border:1px solid rgba(74,98,118,.25);background:#fff;border-radius:999px;padding:9px 13px;cursor:pointer}.report-actions button:disabled{opacity:.45;cursor:not-allowed}.report-table-wrap{overflow:auto;border:1px solid rgba(74,98,118,.18);border-radius:12px;background:#fff}.report-table{width:100%;border-collapse:collapse;min-width:1080px}.report-table th,.report-table td{padding:10px 12px;border-bottom:1px solid rgba(74,98,118,.12);text-align:left;vertical-align:top}.report-table th{position:sticky;top:0;background:#fff;color:var(--steel);font:700 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase}.report-table td{font-family:var(--mono);font-size:12px}.report-reason{font-family:var(--sans)!important;min-width:300px;max-width:520px;white-space:normal;line-height:1.35}.report-action{display:inline-flex;border-radius:999px;padding:4px 8px;font:700 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;background:rgba(74,98,118,.12);color:var(--steel)}.report-action.charge{background:rgba(216,155,42,.16);color:var(--store)}.report-action.discharge{background:rgba(46,156,98,.16);color:var(--produce)}.report-action.hold{background:rgba(74,98,118,.12);color:var(--steel)}.report-empty{padding:24px;text-align:center;color:var(--steel);font-family:var(--mono)}html[data-theme=dark] .report-actions button,html[data-theme=dark] .report-table-wrap,html[data-theme=dark] .report-table th{background:#101b24;color:var(--ink);border-color:rgba(184,210,228,.14)}html[data-theme=dark] .report-table th,html[data-theme=dark] .report-table td{border-bottom-color:rgba(184,210,228,.1)}
 """
 
 def brand_mark() -> str:
@@ -1023,6 +1024,85 @@ def trade_body() -> str:
     </script>
     """
 
+
+def reporting_body() -> str:
+    return """
+    <section class='card'>
+      <span class='kicker'>Reporting</span>
+      <h1 class='page-title'>Control decisions</h1>
+      <p class='page-copy'>A paginated audit trail of battery control decisions and setpoint writes.</p>
+      <div class='report-toolbar'>
+        <span class='history-hint' id='report-range'>Loading…</span>
+        <div class='report-actions'>
+          <button type='button' id='report-prev'>Previous 50</button>
+          <button type='button' id='report-next'>Next 50</button>
+          <button type='button' id='report-refresh'>Refresh</button>
+        </div>
+      </div>
+      <div class='report-table-wrap'>
+        <table class='report-table'>
+          <thead>
+            <tr>
+              <th>Time</th><th>Source</th><th>Action</th><th>Setpoint</th>
+              <th>Delta</th><th>SoC</th><th>Grid</th><th>Battery</th>
+              <th>Limits</th><th>Ack</th><th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id='report-rows'><tr><td colspan='11' class='report-empty'>Loading decisions…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <script>
+      const reportPageSize=50; let reportOffset=0, reportTotal=0;
+      const $=id=>document.getElementById(id);
+      const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+      const fmtTime=value=>value?new Date(value).toLocaleString([], {weekday:'short', hour:'2-digit', minute:'2-digit', second:'2-digit', day:'2-digit', month:'short'}):'--';
+      const fmtW=value=>value===null||value===undefined?'--':`${Number(value).toLocaleString()} W`;
+      const fmtPct=value=>value===null||value===undefined?'--':`${Number(value).toFixed(0)}%`;
+      function renderReport(payload){
+        reportTotal=payload.total||0;
+        const items=payload.items||[], body=$('report-rows');
+        if(!items.length){
+          body.innerHTML='<tr><td colspan="11" class="report-empty">No control decisions recorded yet.</td></tr>';
+        }else{
+          body.innerHTML=items.map(row=>`<tr>
+            <td>${fmtTime(row.timestamp)}</td>
+            <td>${esc(row.source)}</td>
+            <td><span class="report-action ${esc(row.action)}">${esc(row.action)}</span></td>
+            <td>${fmtW(row.setpoint_w)}</td>
+            <td>${fmtW(row.setpoint_delta)}</td>
+            <td>${fmtPct(row.battery_soc_at_time)}</td>
+            <td>${fmtW(row.grid_power_at_time)}</td>
+            <td>${fmtW(row.battery_power_at_time)}</td>
+            <td>${esc(row.soc_floor)}-${esc(row.soc_ceiling)}%</td>
+            <td>${row.ack_received?'yes':'no'}${row.ack_latency_ms!=null?` · ${esc(row.ack_latency_ms)} ms`:''}</td>
+            <td class="report-reason">${esc(row.trigger_reason)}</td>
+          </tr>`).join('');
+        }
+        const start=reportTotal?reportOffset+1:0, end=Math.min(reportOffset+items.length, reportTotal);
+        $('report-range').textContent=`Showing ${start}-${end} of ${reportTotal} decisions`;
+        $('report-prev').disabled=reportOffset<=0;
+        $('report-next').disabled=reportOffset+reportPageSize>=reportTotal;
+      }
+      async function loadReport(offset=reportOffset){
+        reportOffset=Math.max(0,offset);
+        $('report-range').textContent='Loading…';
+        try{
+          const res=await fetch(`/api/reporting/decisions?limit=${reportPageSize}&offset=${reportOffset}`);
+          if(!res.ok) throw new Error(`Reporting request failed (${res.status})`);
+          renderReport(await res.json());
+        }catch(err){
+          $('report-rows').innerHTML=`<tr><td colspan="11" class="report-empty error">${esc(err.message||'Unable to load reporting data')}</td></tr>`;
+          $('report-range').textContent='Unable to load decisions';
+        }
+      }
+      $('report-prev').addEventListener('click',()=>loadReport(reportOffset-reportPageSize));
+      $('report-next').addEventListener('click',()=>loadReport(reportOffset+reportPageSize));
+      $('report-refresh').addEventListener('click',()=>loadReport(reportOffset));
+      loadReport(0);
+    </script>
+    """
+
 def icon(name: str) -> str:
     shapes = {
         'solar': '<rect x="4" y="7" width="12" height="9"/><path d="M4 10h12M8 7v9M12 7v9M10 16v4M7 20h6"/><circle cx="21" cy="6" r="2"/><path d="M21 1v2M21 9v2M16 6h2M24 6h2"/>',
@@ -1112,5 +1192,7 @@ async def section(section: str) -> str:
         return render_page(title, trade_body())
     if title == "Solar":
         return render_page(title, solar_body())
+    if title == "Reporting":
+        return render_page(title, reporting_body())
     content = f"{title} module scaffold."
     return render_page(title, f"<div class='card'><h2>{title}</h2><p>{content}</p></div>")
