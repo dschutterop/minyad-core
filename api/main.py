@@ -1695,6 +1695,9 @@ async def api_control_battery(request: AgentBatteryControlRequest, session: Asyn
         override = BatteryOverrideRequest(mode="force_discharge", watts=abs(request.setpoint_w), duration_seconds=request.duration_minutes * 60)
         action = "discharge"
     else:
+        active_override = await current_battery_override(session)
+        if active_override is not None:
+            return {"status": "ok", "action": "hold", "setpoint_w": request.setpoint_w, "duration_minutes": request.duration_minutes, "override": active_override}
         override = BatteryOverrideRequest(mode="none", watts=None, duration_seconds=None)
         action = "hold"
     result = await set_battery_override(override, session)
@@ -1754,6 +1757,29 @@ def _normalize_battery_override_mode(mode: str | None) -> str:
     if mode == "force_off":
         return "force_idle"
     return mode or "none"
+
+
+async def current_battery_override(session: AsyncSession) -> dict[str, Any] | None:
+    row = (await session.execute(text("""
+        select mode, watts, duration_seconds, expires_at
+        from battery_override
+        where id = 1
+    """))).mappings().first()
+    if row is None or row["mode"] in (None, "none"):
+        return None
+    expires_at = row["expires_at"]
+    if expires_at is not None:
+        expires_at_utc = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) >= expires_at_utc:
+            return None
+    return {
+        "status": "ok",
+        "mode": row["mode"],
+        "watts": row["watts"],
+        "duration_seconds": row["duration_seconds"],
+        "expires_at": expires_at.isoformat() if expires_at else None,
+        "preserved": True,
+    }
 
 
 def serialize_agent_message(row: Any) -> dict[str, Any]:

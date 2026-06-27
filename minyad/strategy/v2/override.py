@@ -76,7 +76,7 @@ class OverrideManager:
         if mode in {"force_charge", "grid_charge_now"}:
             if state.battery_soc is not None and state.battery_soc >= plan.effective_soc_ceiling:
                 return 0
-            return self.settings.effective_max_charge_w
+            return min(abs(self.current.watts or self.settings.effective_max_charge_w), self.settings.effective_max_charge_w)
         if mode == "force_discharge":
             if state.battery_soc is not None and state.battery_soc <= plan.effective_soc_floor:
                 return 0
