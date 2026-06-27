@@ -23,13 +23,14 @@ def build_setpoint_log_insert(columns: set[str]) -> str:
         "battery_soc_at_time": ":soc",
         "grid_power_at_time": ":grid",
         "battery_power_at_time": ":battery_power",
+        "setpoint_delta": ":delta",
+        "trigger_reason": ":reason",
+        "ack_received": "true",
     }
     for column, value in optional_columns.items():
         if column in columns:
             insert_columns.append(column)
             values.append(value)
-    insert_columns.extend(["setpoint_delta", "trigger_reason", "ack_received"])
-    values.extend([":delta", ":reason", "true"])
     return f"""
                     insert into setpoint_log (
                         {", ".join(insert_columns)}
