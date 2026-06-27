@@ -1,6 +1,8 @@
 import importlib.util
 import os
 import sys
+import asyncio
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -41,6 +43,38 @@ def test_battery_override_accepts_and_normalizes_charge_aliases():
     assert current.mode == "force_charge"
     assert api_main._normalize_battery_override_mode(legacy.mode) == "force_charge"
     assert api_main._normalize_battery_override_mode("force_off") == "force_idle"
+
+
+def test_agent_hold_preserves_active_manual_battery_override():
+    class Result:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return {
+                "mode": "force_discharge",
+                "watts": 900,
+                "duration_seconds": 900,
+                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+            }
+
+    class Session:
+        def __init__(self):
+            self.statements = []
+
+        async def execute(self, statement, *_args, **_kwargs):
+            self.statements.append(str(statement))
+            return Result()
+
+    session = Session()
+    request = api_main.AgentBatteryControlRequest(setpoint_w=0)
+
+    response = asyncio.run(api_main.api_control_battery(request, session))
+
+    assert response["action"] == "hold"
+    assert response["override"]["mode"] == "force_discharge"
+    assert response["override"]["preserved"] is True
+    assert len(session.statements) == 1
 
 
 @pytest.mark.parametrize("value", [0, 201])
