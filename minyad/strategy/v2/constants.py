@@ -28,6 +28,8 @@ DEFAULTS: dict[str, str] = {
     "strategy.balance_gain": "0.6",
     "strategy.jitter_w": "50",
     "strategy.export_block_threshold_w": "100",
+    "strategy.export_block_hysteresis_w": "50",
+    "strategy.soc_hysteresis_pct": "2",
     "strategy.price_discharge_bias_w": "200",
     "strategy.control_refresh_interval_sec": "300",
     "strategy.active_command_retry_interval_sec": "60",
@@ -118,6 +120,14 @@ class Settings:
     @property
     def export_block_threshold_w(self) -> int:
         return self.int("strategy.export_block_threshold_w")
+
+    @property
+    def export_block_hysteresis_w(self) -> int:
+        return self.int("strategy.export_block_hysteresis_w")
+
+    @property
+    def soc_hysteresis_pct(self) -> float:
+        return self.float("strategy.soc_hysteresis_pct")
 
     @property
     def price_discharge_bias_w(self) -> int:
