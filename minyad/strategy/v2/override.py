@@ -38,7 +38,7 @@ class OverrideManager:
 
     async def apply_payload(self, payload: str | bytes | dict[str, Any]) -> Override:
         data = json.loads(payload.decode() if isinstance(payload, bytes) else payload) if not isinstance(payload, dict) else payload
-        mode = data.get("mode", "none")
+        mode = _normalize_mode(data.get("mode", "none"))
         duration = data.get("duration_seconds")
         expires_at = _parse_dt(data.get("expires_at")) if data.get("expires_at") else None
         if mode == "pause" and duration:
@@ -68,7 +68,7 @@ class OverrideManager:
 
     async def apply(self, candidate_w: int, state: ExecutorState, plan: DayPlan) -> int:
         await self.clear_if_expired()
-        mode = self.current.mode
+        mode = _normalize_mode(self.current.mode)
         if mode in {"none", None}:
             return candidate_w
         if mode in {"force_idle", "pause"}:
@@ -82,6 +82,14 @@ class OverrideManager:
                 return 0
             return -min(abs(self.current.watts or self.settings.max_discharge_w), self.settings.max_discharge_w)
         return candidate_w
+
+
+def _normalize_mode(mode: str | None) -> str:
+    if mode == "force_on":
+        return "force_charge"
+    if mode == "force_off":
+        return "force_idle"
+    return mode or "none"
 
 
 def _parse_dt(value: str | datetime | None) -> datetime | None:

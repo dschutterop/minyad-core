@@ -59,6 +59,7 @@ class StrategyService:
         self._start_scheduler()
         for topic in (
             "minyad/dsmr/net_power_w",
+            "minyad/grid/net_power_w",
             "minyad/battery/+",
             "minyad/forecast/power_w",
             "minyad/trade/prices",
@@ -101,7 +102,7 @@ class StrategyService:
         if topic.startswith("minyad/battery/"):
             self._handle_battery(topic, decoded)
             return
-        if topic == "minyad/dsmr/net_power_w":
+        if topic in {"minyad/dsmr/net_power_w", "minyad/grid/net_power_w"}:
             self.state = _replace(self.state, net_grid_w=int(float(decoded)))
             await self.tick()
 

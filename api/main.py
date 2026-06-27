@@ -684,14 +684,14 @@ class AgentMessageCreate(BaseModel):
 
 
 class BatteryOverrideRequest(BaseModel):
-    mode: Literal["none", "force_on", "force_off", "force_discharge", "pause"]
+    mode: Literal["none", "force_on", "force_charge", "force_off", "force_idle", "force_discharge", "pause"]
     watts: int | None = Field(default=None, ge=0)
     duration_seconds: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_required_fields(self) -> "BatteryOverrideRequest":
-        if self.mode in {"force_on", "force_discharge"} and self.watts is None:
-            raise ValueError("watts is required for force_on and force_discharge")
+        if self.mode in {"force_on", "force_charge", "force_discharge"} and self.watts is None:
+            raise ValueError("watts is required for force_charge and force_discharge")
         if self.mode == "pause" and self.duration_seconds is None:
             raise ValueError("duration_seconds is required for pause")
         return self
@@ -1592,7 +1592,7 @@ async def api_forecast(hours_ahead: int = 12, session: AsyncSession = Depends(ge
 @app.post("/api/control/battery", dependencies=MUTATION_AUTH)
 async def api_control_battery(request: AgentBatteryControlRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     if request.setpoint_w > 0:
-        override = BatteryOverrideRequest(mode="force_on", watts=request.setpoint_w, duration_seconds=request.duration_minutes * 60)
+        override = BatteryOverrideRequest(mode="force_charge", watts=request.setpoint_w, duration_seconds=request.duration_minutes * 60)
         action = "charge"
     elif request.setpoint_w < 0:
         override = BatteryOverrideRequest(mode="force_discharge", watts=abs(request.setpoint_w), duration_seconds=request.duration_minutes * 60)
@@ -1649,6 +1649,14 @@ async def list_agent_decisions(
         limit :limit
     """), {"limit": limit})).mappings().all()
     return [serialize_agent_decision(row) for row in rows]
+
+
+def _normalize_battery_override_mode(mode: str | None) -> str:
+    if mode == "force_on":
+        return "force_charge"
+    if mode == "force_off":
+        return "force_idle"
+    return mode or "none"
 
 
 def serialize_agent_message(row: Any) -> dict[str, Any]:
@@ -1795,6 +1803,7 @@ async def delete_agent_message(message_id: int, session: AsyncSession = Depends(
 
 @app.post("/battery/override", dependencies=MUTATION_AUTH)
 async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    mode = _normalize_battery_override_mode(request.mode)
     settings = await battery_settings(session)
     soc_floor = int(settings.get("soc_floor", 20))
     soc_ceiling = int(settings.get("soc_ceiling", 90))
@@ -1807,17 +1816,17 @@ async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSe
         soc_value = float(soc) if soc not in (None, "") else None
     except (TypeError, ValueError):
         soc_value = None
-    if request.mode == "force_discharge" and soc_value is not None and soc_value <= soc_floor:
+    if mode == "force_discharge" and soc_value is not None and soc_value <= soc_floor:
         raise HTTPException(status_code=422, detail=f"discharge blocked because SoC {soc_value:g}% is at or below configured floor {soc_floor}%")
-    if request.mode == "force_on" and soc_value is not None and soc_value >= soc_ceiling:
+    if mode == "force_charge" and soc_value is not None and soc_value >= soc_ceiling:
         raise HTTPException(status_code=422, detail=f"charge blocked because SoC {soc_value:g}% is at or above configured ceiling {soc_ceiling}%")
     configured_max_w = int(settings.get("max_charge_w", 0))
     hardware_max_w = int(settings.get("max_charge_a", 30)) * int(settings.get("nominal_v", 48))
     max_charge_w = min(configured_max_w, hardware_max_w)
     max_discharge_w = int(settings.get("max_discharge_w", 5000))
-    max_allowed_w = max_discharge_w if request.mode == "force_discharge" else max_charge_w
+    max_allowed_w = max_discharge_w if mode == "force_discharge" else max_charge_w
     if request.watts is not None and request.watts > max_allowed_w:
-        limit_name = "MAX_DISCHARGE_W" if request.mode == "force_discharge" else "MAX_CHARGE_W"
+        limit_name = "MAX_DISCHARGE_W" if mode == "force_discharge" else "MAX_CHARGE_W"
         raise HTTPException(status_code=422, detail=f"watts must not exceed {limit_name} ({max_allowed_w})")
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=request.duration_seconds) if request.duration_seconds else None
     await session.execute(
@@ -1826,10 +1835,11 @@ async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSe
             values (1, :mode, :watts, :duration_seconds, :expires_at, now())
             on conflict (id) do update set mode=:mode, watts=:watts, duration_seconds=:duration_seconds, expires_at=:expires_at, updated_at=now()
         """),
-        {"mode": request.mode, "watts": request.watts, "duration_seconds": request.duration_seconds, "expires_at": expires_at},
+        {"mode": mode, "watts": request.watts, "duration_seconds": request.duration_seconds, "expires_at": expires_at},
     )
     await session.commit()
     payload = request.model_dump()
+    payload["mode"] = mode
     mqtt.client.publish("minyad/control/override", json.dumps(payload), qos=0, retain=False)
     return {"status": "ok", **payload}
 
