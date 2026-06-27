@@ -79,3 +79,13 @@ def test_reporting_route_renders_decision_log_not_scaffold():
     assert response.status_code == 200
     assert "Control decisions" in response.text
     assert "Reporting module scaffold" not in response.text
+
+
+def test_settings_route_renders_language_selector():
+    with TestClient(app) as client:
+        response = client.get("/settings")
+
+    assert response.status_code == 200
+    assert 'name="language"' in response.text or "name='language'" in response.text
+    assert "English" in response.text
+    assert "Dutch" in response.text

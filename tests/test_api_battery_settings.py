@@ -87,3 +87,17 @@ def test_claude_agent_settings_update_defaults_and_validation():
 def test_claude_agent_settings_update_rejects_negative_min_tokens():
     with pytest.raises(ValidationError):
         api_main.ClaudeAgentSettingsUpdate(min_tokens_remaining=-1)
+
+
+def test_system_settings_update_accepts_supported_languages():
+    api_main.SystemSettingsUpdate.model_rebuild(_types_namespace={"Literal": api_main.Literal})
+
+    assert api_main.SystemSettingsUpdate(language="en").language == "en"
+    assert api_main.SystemSettingsUpdate(language="nl").language == "nl"
+
+
+def test_system_settings_update_rejects_unsupported_language():
+    api_main.SystemSettingsUpdate.model_rebuild(_types_namespace={"Literal": api_main.Literal})
+
+    with pytest.raises(ValidationError):
+        api_main.SystemSettingsUpdate(language="de")
