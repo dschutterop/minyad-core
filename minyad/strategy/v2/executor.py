@@ -18,6 +18,10 @@ class StrategyExecutor:
         self.current_setpoint_w = 0
         self._direction: int | None = None
         self._first_seen: float | None = None
+        self._soc_discharge_blocked = False
+        self._soc_charge_blocked = False
+        self._export_blocked = False
+        self._grid_charge_ceiling_reached = False
 
     def set_plan(self, plan: DayPlan) -> None:
         self.plan = plan
@@ -27,8 +31,21 @@ class StrategyExecutor:
         current = state.current_setpoint_w if state.current_setpoint_w is not None else self.current_setpoint_w
         in_grid_charge = self.plan.in_grid_charge_window(now)
         in_price_discharge = self.plan.in_price_discharge_window(now)
+        band = self.settings.soc_hysteresis_pct
 
-        if in_grid_charge and (state.battery_soc is None or state.battery_soc < self.plan.effective_soc_ceiling):
+        # Track whether we've hit the ceiling inside a grid charge window so we
+        # don't oscillate at the boundary when SoC dips a fraction below it.
+        if in_grid_charge and state.battery_soc is not None:
+            if state.battery_soc >= self.plan.effective_soc_ceiling:
+                self._grid_charge_ceiling_reached = True
+            elif state.battery_soc <= self.plan.effective_soc_ceiling - band:
+                self._grid_charge_ceiling_reached = False
+        elif not in_grid_charge:
+            self._grid_charge_ceiling_reached = False
+
+        force_grid_charge = in_grid_charge and (state.battery_soc is None or not self._grid_charge_ceiling_reached)
+
+        if force_grid_charge:
             candidate = self.settings.effective_max_charge_w
             reason = "grid charge window active; forcing max charge"
         else:
@@ -49,9 +66,18 @@ class StrategyExecutor:
                     reason += "; price discharge bias applied"
                 candidate = _clamp(candidate, -self.settings.max_discharge_w, self.settings.effective_max_charge_w)
 
-        if state.net_grid_w < -self.settings.export_block_threshold_w and candidate < 0:
+        # Export block with hysteresis: once export exceeds threshold, block
+        # discharge until export falls back by at least hysteresis_w.
+        threshold = self.settings.export_block_threshold_w
+        hysteresis = self.settings.export_block_hysteresis_w
+        if state.net_grid_w < -threshold:
+            self._export_blocked = True
+        elif state.net_grid_w >= -(threshold - hysteresis):
+            self._export_blocked = False
+        if self._export_blocked and candidate < 0:
             candidate = 0
             reason = "discharge blocked during export"
+
         candidate, limit_reason = self._apply_soc_limits(candidate, state)
         if limit_reason:
             reason = limit_reason
@@ -72,15 +98,31 @@ class StrategyExecutor:
             self._first_seen = now
             return self.settings.ramp_hold_seconds <= 0
         assert self._first_seen is not None
-        return now - self._first_seen >= self.settings.ramp_hold_seconds
+        if now - self._first_seen >= self.settings.ramp_hold_seconds:
+            self._first_seen = now  # reset so each ramp step requires a new hold period
+            return True
+        return False
 
     def _apply_soc_limits(self, candidate: int, state: ExecutorState) -> tuple[int, str | None]:
         if state.battery_soc is None:
             return candidate, None
-        if state.battery_soc <= self.plan.effective_soc_floor and candidate < 0:
-            return 0, f"SoC floor reached ({state.battery_soc}% <= {self.plan.effective_soc_floor}%); discharge blocked"
-        if state.battery_soc >= self.plan.effective_soc_ceiling and candidate > 0:
-            return 0, f"SoC ceiling reached ({state.battery_soc}% >= {self.plan.effective_soc_ceiling}%); charge blocked"
+        band = self.settings.soc_hysteresis_pct
+        soc = state.battery_soc
+
+        if soc <= self.plan.effective_soc_floor:
+            self._soc_discharge_blocked = True
+        elif soc >= self.plan.effective_soc_floor + band:
+            self._soc_discharge_blocked = False
+
+        if soc >= self.plan.effective_soc_ceiling:
+            self._soc_charge_blocked = True
+        elif soc <= self.plan.effective_soc_ceiling - band:
+            self._soc_charge_blocked = False
+
+        if self._soc_discharge_blocked and candidate < 0:
+            return 0, f"SoC floor hold ({soc}% <= {self.plan.effective_soc_floor + band}%); discharge blocked"
+        if self._soc_charge_blocked and candidate > 0:
+            return 0, f"SoC ceiling hold ({soc}% >= {self.plan.effective_soc_ceiling - band}%); charge blocked"
         return candidate, None
 
 

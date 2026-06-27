@@ -27,3 +27,31 @@ def test_bridge_stale_suppresses_setpoint():
 def test_voltage_guard_suppresses_setpoint():
     guard = SoCGuard(Settings())
     assert guard.apply(-500, ExecutorState(0, battery_soc=50, battery_voltage=45.9), plan()) == 0
+
+
+def test_discharge_stays_blocked_within_hysteresis_band():
+    guard = SoCGuard(Settings(initial={"strategy.soc_hysteresis_pct": "2"}))
+    guard.apply(-500, ExecutorState(0, battery_soc=20), plan())  # engage block
+    # SoC at 21% — still inside the 2% band, must remain blocked
+    assert guard.apply(-500, ExecutorState(0, battery_soc=21), plan()) == 0
+
+
+def test_discharge_releases_above_hysteresis_band():
+    guard = SoCGuard(Settings(initial={"strategy.soc_hysteresis_pct": "2"}))
+    guard.apply(-500, ExecutorState(0, battery_soc=20), plan())  # engage block
+    # SoC at 22.1% — past floor + band, block should lift
+    assert guard.apply(-500, ExecutorState(0, battery_soc=22.1), plan()) == -500
+
+
+def test_charge_stays_blocked_within_hysteresis_band():
+    guard = SoCGuard(Settings(initial={"strategy.soc_hysteresis_pct": "2"}))
+    guard.apply(500, ExecutorState(0, battery_soc=90), plan())  # engage block
+    # SoC at 89% — still inside the 2% band
+    assert guard.apply(500, ExecutorState(0, battery_soc=89), plan()) == 0
+
+
+def test_charge_releases_below_hysteresis_band():
+    guard = SoCGuard(Settings(initial={"strategy.soc_hysteresis_pct": "2"}))
+    guard.apply(500, ExecutorState(0, battery_soc=90), plan())  # engage block
+    # SoC at 87.9% — past ceiling - band, block should lift
+    assert guard.apply(500, ExecutorState(0, battery_soc=87.9), plan()) == 500
