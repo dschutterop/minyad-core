@@ -163,10 +163,18 @@ class StrategyService:
 
     async def log_setpoint(self, decision: StrategyDecision) -> None:
         async with AsyncSessionLocal() as session:
-            await session.execute(
+            columns = (await session.execute(
                 text("""
+                    select column_name
+                    from information_schema.columns
+                    where table_name = 'setpoint_log'
+                """)
+            )).scalars().all()
+            setpoint_column = "setpoint_w" if "setpoint_w" in columns else "charge_rate_w"
+            await session.execute(
+                text(f"""
                     insert into setpoint_log (
-                        source, soc_floor, soc_ceiling, setpoint_w, discharge_allowed,
+                        source, soc_floor, soc_ceiling, {setpoint_column}, discharge_allowed,
                         battery_soc_at_time, grid_power_at_time, battery_power_at_time,
                         setpoint_delta, trigger_reason, ack_received
                     ) values (

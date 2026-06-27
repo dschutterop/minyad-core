@@ -1001,19 +1001,61 @@ def serialize_control_decision(row: Any) -> dict[str, Any]:
     return data
 
 
+async def setpoint_log_columns(session: AsyncSession) -> set[str]:
+    rows = (await session.execute(
+        text("""
+            select column_name
+            from information_schema.columns
+            where table_name = 'setpoint_log'
+        """)
+    )).scalars().all()
+    return set(rows)
+
+
+def setpoint_log_select_list(columns: set[str]) -> str:
+    def col(name: str, fallback: str | None = None, alias: str | None = None) -> str:
+        target = alias or name
+        if name in columns:
+            return name if target == name else f"{name} as {target}"
+        if fallback and fallback in columns:
+            return f"{fallback} as {target}"
+        return f"null as {target}"
+
+    return ", ".join(
+        [
+            col("id"),
+            col("timestamp"),
+            col("source"),
+            col("soc_floor"),
+            col("soc_ceiling"),
+            col("setpoint_w", "charge_rate_w"),
+            col("discharge_allowed"),
+            col("battery_soc_at_time"),
+            col("grid_power_at_time"),
+            col("battery_power_at_time"),
+            col("apparent_load_at_time", "home_load_at_time"),
+            col("setpoint_delta"),
+            col("trigger_reason"),
+            col("ack_received"),
+            col("ack_latency_ms"),
+        ]
+    )
+
+
 @app.get("/reporting/decisions")
 async def reporting_decisions(
     limit: int = Query(default=50, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
+    columns = await setpoint_log_columns(session)
+    if not columns:
+        return {"limit": limit, "offset": offset, "total": 0, "items": []}
     total = (await session.execute(text("select count(*) from setpoint_log"))).scalar_one()
+    select_list = setpoint_log_select_list(columns)
     rows = (await session.execute(
-        text("""
-            select id, timestamp, source, soc_floor, soc_ceiling, setpoint_w, discharge_allowed,
-                   battery_soc_at_time, grid_power_at_time, battery_power_at_time,
-                   apparent_load_at_time, setpoint_delta, trigger_reason,
-                   ack_received, ack_latency_ms
+        text(f"""
+            select {select_list}
             from setpoint_log
             order by timestamp desc, id desc
             limit :limit offset :offset
