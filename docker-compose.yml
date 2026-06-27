@@ -90,12 +90,43 @@ services:
     environment:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
+      STRATEGY_V2_PRIMARY: "false"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
       minyad-mqtt:
         condition: service_healthy
     networks: [minyad-internal]
+
+  minyad-strategy:
+    build:
+      context: .
+      dockerfile: minyad-strategy/Dockerfile
+    container_name: minyad-strategy
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_URL: ${DB_URL}
+      MQTT_HOST: minyad-mqtt
+      MQTT_PORT: 1883
+      TZ: Europe/Amsterdam
+      STRATEGY_V2_PRIMARY: "false"
+    depends_on:
+      minyad-migrate:
+        condition: service_completed_successfully
+      minyad-mqtt:
+        condition: service_healthy
+    networks: [minyad-internal]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
 
   minyad-deadman:
     build:

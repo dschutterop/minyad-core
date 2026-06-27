@@ -38,6 +38,7 @@ MAX_CHARGE_POWER_W = int(os.getenv("MAX_CHARGE_POWER_W", "6000"))
 MAX_DISCHARGE_POWER_W = int(os.getenv("MAX_DISCHARGE_POWER_W", "6000"))
 CONTROL_REFRESH_INTERVAL_SEC = int(os.getenv("CONTROL_REFRESH_INTERVAL_SEC", "300"))
 ACTIVE_COMMAND_RETRY_INTERVAL_SEC = int(os.getenv("ACTIVE_COMMAND_RETRY_INTERVAL_SEC", "60"))
+STRATEGY_V2_PRIMARY = os.getenv("STRATEGY_V2_PRIMARY", "false").strip().lower() in {"1", "true", "yes", "on"}
 BATTERY_TOPIC_TYPES = {
     "soc": int,
     "soh": int,
@@ -128,6 +129,8 @@ class ControlApp:
         self.mqtt.subscribe("minyad/battery/+", self._on_mqtt)
         self.mqtt.subscribe("minyad/bridge/+", self._on_mqtt)
         self.mqtt.subscribe("minyad/control/override", self._on_mqtt)
+        if STRATEGY_V2_PRIMARY:
+            self.mqtt.subscribe("minyad/strategy/setpoint_w", self._on_mqtt)
         self.mqtt.start()
         await self.wait_for_initial_bridge_health()
         await self.apply_override(await load_override())
@@ -200,9 +203,15 @@ class ControlApp:
     async def handle_message(self, topic: str, payload: bytes) -> None:
         decoded = payload.decode()
         LOGGER.debug("MQTT message topic=%s payload=%r", topic, decoded)
+        if topic == "minyad/strategy/setpoint_w":
+            await self.apply_strategy_v2_setpoint(int(float(decoded)))
+            return
         if topic in {"minyad/dsmr/net_power_w", "minyad/grid/net_power_w"}:
             grid_power_w = int(decoded)
             self.latest_grid_power_w = grid_power_w
+            if STRATEGY_V2_PRIMARY:
+                LOGGER.debug("Strategy v2 primary enabled; ignoring local FSM grid sample")
+                return
             # DSMR/grid net power is positive for grid import and negative for export.
             # HysteresisController expects surplus-style samples: positive export/available
             # power starts charging, while negative import starts discharging.
@@ -271,6 +280,16 @@ class ControlApp:
                     available=True,
                 )
             return
+
+    async def apply_strategy_v2_setpoint(self, signed_setpoint_w: int) -> None:
+        if not STRATEGY_V2_PRIMARY:
+            return
+        if signed_setpoint_w > 0:
+            await self.publish_setpoint(signed_setpoint_w, state_changed=True)
+        elif signed_setpoint_w < 0:
+            await self.publish_discharge_setpoint(abs(signed_setpoint_w), state_changed=True)
+        else:
+            await self.stop_charging()
 
     async def handle_battery_topic(self, topic: str, payload: str) -> None:
         measurement = topic.removeprefix("minyad/battery/")
