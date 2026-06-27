@@ -182,6 +182,12 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def psycopg2_database_url(url: str) -> str:
+    if url.startswith("postgresql+asyncpg://"):
+        return "postgresql://" + url.removeprefix("postgresql+asyncpg://")
+    return url
+
+
 def build_backend(config: Config) -> InverterBackend:
     modbus_client: InverterBackend | None = None
     api_client: InverterBackend | None = None
@@ -251,6 +257,7 @@ class GoodWeBridge:
         self._last_api_battery_power_w: int | None = None
         self._last_api_grid_power_w: int | None = None
         self._last_api_battery_soc: int | None = None
+        self._last_logged_signed_setpoint_w = 0
         self._pending_charge_check: tuple[float, int, int | None] | None = None
 
     def load_poll_interval(self) -> int:
@@ -398,38 +405,47 @@ class GoodWeBridge:
             logger.warning("Immediate polling failed: %s", exc, exc_info=True)
 
     async def handle_charge_setpoint(self, watts: int) -> None:
+        previous_charge = self.target_charge_limit_w
         self.target_charge_limit_w = max(0, int(watts))
-        await self._apply_actuator_targets(state_changed=self.control_state == "CHARGING")
+        clears_discharge = self.target_charge_limit_w > 0 and self.target_discharge_limit_w > 0
+        if self.target_charge_limit_w > 0:
+            self.target_discharge_limit_w = 0
+        if self.target_charge_limit_w == previous_charge and not clears_discharge and self._last_api_command is not None:
+            return
+        await self._apply_actuator_targets(state_changed=(previous_charge == 0 and self.target_charge_limit_w > 0))
 
     async def handle_discharge_setpoint(self, watts: int) -> None:
+        previous_discharge = self.target_discharge_limit_w
         self.target_discharge_limit_w = max(0, int(watts))
-        await self._apply_actuator_targets(state_changed=self.control_state == "DISCHARGING")
+        clears_charge = self.target_discharge_limit_w > 0 and self.target_charge_limit_w > 0
+        if self.target_discharge_limit_w > 0:
+            self.target_charge_limit_w = 0
+        if self.target_discharge_limit_w == previous_discharge and not clears_charge and self._last_api_command is not None:
+            return
+        await self._apply_actuator_targets(state_changed=(previous_discharge == 0 and self.target_discharge_limit_w > 0))
 
     async def _apply_actuator_targets(self, *, state_changed: bool = False) -> None:
-        if self._last_p1_grid_power_w is None or (self._last_p1_grid_power_monotonic is not None and monotonic() - self._last_p1_grid_power_monotonic > 60):
-            self._skip_actuator_write("stale P1 data")
-            return
         charge = self.target_charge_limit_w
         discharge = self.target_discharge_limit_w
         unchanged = charge == self._last_charge_setpoint_w and discharge == self._last_discharge_setpoint_w
         age = None if self._last_write_monotonic is None else monotonic() - self._last_write_monotonic
+        modbus_result: str
         if unchanged and not state_changed and self._last_api_command is not None and not (age is not None and age >= self.config.write_refresh_interval_s):
-            self._skip_actuator_write("unchanged target")
-            return
-        delta = max(abs(charge - self._last_charge_setpoint_w), abs(discharge - self._last_discharge_setpoint_w))
-        if not state_changed and delta < self.config.min_target_change_w and not unchanged:
-            self._skip_actuator_write("below min delta")
-            return
-        if age is not None and age < self.config.min_write_interval_s:
-            self._skip_actuator_write("write interval not elapsed")
-            return
-        modbus_result = await self._apply_modbus_limits(charge, discharge, state_changed=state_changed)
+            modbus_result = self._record_skipped_modbus_write("unchanged target")
+        else:
+            delta = max(abs(charge - self._last_charge_setpoint_w), abs(discharge - self._last_discharge_setpoint_w))
+            if not state_changed and delta < self.config.min_target_change_w and not unchanged:
+                modbus_result = self._record_skipped_modbus_write("below min delta")
+            elif age is not None and age < self.config.min_write_interval_s:
+                modbus_result = self._record_skipped_modbus_write("write interval not elapsed")
+            else:
+                modbus_result = await self._apply_modbus_limits(charge, discharge, state_changed=state_changed)
         api_command, api_success = await self._apply_api_command(charge, discharge)
         if api_success is True:
             self.publish_commanded_battery_state(api_command)
         self.publish_metrics()
         self._log_control_decision(charge, discharge, modbus_write_result=modbus_result, api_command=api_command, api_command_success=api_success)
-        if self.control_state == "CHARGING" and charge > 0:
+        if api_success is True and api_command == "charge":
             self._pending_charge_check = (monotonic(), charge, self._last_api_battery_power_w)
 
     async def _apply_modbus_limits(self, charge: int, discharge: int, *, state_changed: bool) -> str:
@@ -457,12 +473,23 @@ class GoodWeBridge:
         return "success"
 
     async def _apply_api_command(self, charge: int, discharge: int) -> tuple[str, bool | None]:
-        if self.control_state == "CHARGING" and charge > 0:
+        if charge > 0 and discharge <= 0:
             command, target = "charge", charge
             call = self.backend.set_charge
-        elif self.control_state == "DISCHARGING" and discharge > 0:
+        elif discharge > 0 and charge <= 0:
             command, target = "discharge", discharge
             call = self.backend.set_discharge
+        elif charge > 0 and discharge > 0:
+            if charge >= discharge:
+                command, target = "charge", charge
+                call = self.backend.set_charge
+            else:
+                command, target = "discharge", discharge
+                call = self.backend.set_discharge
+            logger.warning(
+                "[api] Conflicting charge/discharge targets received; choosing api_command=%s target_power_w=%s charge_limit_w=%s discharge_limit_w=%s",
+                command, target, charge, discharge,
+            )
         else:
             command, target = "stop_forced_mode", 0
             call = getattr(self.backend, "stop_forced_mode", None)
@@ -506,6 +533,11 @@ class GoodWeBridge:
             self.publish(MQTT_TOPIC_BATTERY_POWER_W, 0, retain=True)
             self.publish(MQTT_TOPIC_BATTERY_MODE, "idle", retain=True)
 
+    def _record_skipped_modbus_write(self, reason: str) -> str:
+        self.modbus_write_skipped_total += 1
+        logger.info("[modbus] Limit write skipped reason=%s p1_grid_power_w=%s target_charge_limit_w=%s target_discharge_limit_w=%s current_charge_limit_w=%s current_discharge_limit_w=%s", reason, self._last_p1_grid_power_w, self.target_charge_limit_w, self.target_discharge_limit_w, self._last_charge_setpoint_w, self._last_discharge_setpoint_w)
+        return f"skipped_{reason.replace(' ', '_')}"
+
     def _skip_actuator_write(self, reason: str) -> None:
         self.modbus_write_skipped_total += 1
         self.publish_metrics()
@@ -513,11 +545,58 @@ class GoodWeBridge:
         self._log_control_decision(self.target_charge_limit_w, self.target_discharge_limit_w, modbus_write_result=f"skipped_{reason.replace(' ', '_')}", api_command="skipped", api_command_success=None)
 
     def _log_control_decision(self, charge: int, discharge: int, *, modbus_write_result: str, api_command: str, api_command_success: bool | None) -> None:
-        target_power_w = charge if self.control_state == "CHARGING" else discharge if self.control_state == "DISCHARGING" else 0
+        desired_state = "CHARGING" if charge > 0 and discharge <= 0 else "DISCHARGING" if discharge > 0 and charge <= 0 else self.control_state
+        target_power_w = charge if desired_state == "CHARGING" else discharge if desired_state == "DISCHARGING" else 0
+        signed_setpoint_w = charge if desired_state == "CHARGING" else -discharge if desired_state == "DISCHARGING" else 0
+        reason = f"bridge actuator consequence; api_command={api_command} api_success={api_command_success} modbus_result={modbus_write_result}"
         logger.info(
             "[control] decision p1_grid_power_w=%s desired_state=%s target_power_w=%s api_command=%s api_command_success=%s modbus_charge_limit_w=%s modbus_discharge_limit_w=%s modbus_write_result=%s api_battery_power_w=%s api_grid_power_w=%s battery_soc=%s bridge_max_charge_a=%s bridge_max_allowed_charge_a=%s dry_run=%s note=modbus_limits_are_not_force_setpoints",
-            self._last_p1_grid_power_w, self.control_state, target_power_w, api_command, api_command_success, charge, discharge, modbus_write_result, self._last_api_battery_power_w, self._last_api_grid_power_w, self._last_api_battery_soc, self.config.max_charge_a, self.config.max_allowed_charge_a, self.config.dry_run,
+            self._last_p1_grid_power_w, desired_state, target_power_w, api_command, api_command_success, charge, discharge, modbus_write_result, self._last_api_battery_power_w, self._last_api_grid_power_w, self._last_api_battery_soc, self.config.max_charge_a, self.config.max_allowed_charge_a, self.config.dry_run,
         )
+        self._insert_setpoint_log(
+            signed_setpoint_w=signed_setpoint_w,
+            discharge_allowed=signed_setpoint_w < 0,
+            setpoint_delta=signed_setpoint_w - self._last_logged_signed_setpoint_w,
+            reason=reason,
+            ack_received=api_command_success is True,
+        )
+        self._last_logged_signed_setpoint_w = signed_setpoint_w
+
+    def _insert_setpoint_log(self, *, signed_setpoint_w: int, discharge_allowed: bool, setpoint_delta: int, reason: str, ack_received: bool) -> None:
+        if not self.config.database_url:
+            return
+        try:
+            with closing(psycopg2.connect(psycopg2_database_url(self.config.database_url))) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("select column_name from information_schema.columns where table_name=%s", ("setpoint_log",))
+                    columns = {row[0] for row in cur.fetchall()}
+                    if not columns:
+                        return
+                    setpoint_column = "setpoint_w" if "setpoint_w" in columns else "charge_rate_w"
+                    insert_columns = ["source", "soc_floor", "soc_ceiling", setpoint_column, "discharge_allowed"]
+                    values = ["%s", "%s", "%s", "%s", "%s"]
+                    params: list[Any] = ["goodwe_bridge", 0, 100, signed_setpoint_w, discharge_allowed]
+                    optional_values = {
+                        "battery_soc_at_time": self._last_api_battery_soc,
+                        "grid_power_at_time": self._last_p1_grid_power_w,
+                        "battery_power_at_time": self._last_api_battery_power_w,
+                        "setpoint_delta": setpoint_delta,
+                        "trigger_reason": reason,
+                        "ack_received": ack_received,
+                        "ack_latency_ms": None,
+                    }
+                    for column, value in optional_values.items():
+                        if column in columns:
+                            insert_columns.append(column)
+                            values.append("%s")
+                            params.append(value)
+                    cur.execute(
+                        f"insert into setpoint_log ({', '.join(insert_columns)}) values ({', '.join(values)})",
+                        params,
+                    )
+                conn.commit()
+        except Exception as exc:
+            logger.warning("Unable to write bridge action to setpoint_log: %s", exc)
 
     async def poll_once(self) -> None:
         state = await self.backend.read_state()

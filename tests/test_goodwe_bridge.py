@@ -165,6 +165,10 @@ def test_subscribes_to_control_state_topic(monkeypatch):
     assert bridge.mqtt_client.args[0] == goodwe_bridge.mqtt.CallbackAPIVersion.VERSION2
 
 
+def test_psycopg2_database_url_normalizes_asyncpg_url():
+    assert goodwe_bridge.psycopg2_database_url("postgresql+asyncpg://user:pass@db/minyad") == "postgresql://user:pass@db/minyad"
+
+
 def test_idle_to_active_state_triggers_immediate_battery_status_poll(monkeypatch):
     monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
 
@@ -205,7 +209,7 @@ def test_unchanged_charge_setpoint_is_not_written_twice(monkeypatch):
         await bridge.handle_charge_setpoint(750)
         await bridge.handle_charge_setpoint(0)
 
-        assert backend.charge_setpoints == [750, 0]
+        assert backend.battery_limits == [(750, 0), (0, 0)]
 
     asyncio.run(run())
 
@@ -221,7 +225,7 @@ def test_unchanged_discharge_setpoint_is_not_written_twice(monkeypatch):
         await bridge.handle_discharge_setpoint(425)
         await bridge.handle_discharge_setpoint(0)
 
-        assert backend.discharge_setpoints == [425, 0]
+        assert backend.battery_limits == [(0, 425), (0, 0)]
 
     asyncio.run(run())
 
@@ -403,14 +407,14 @@ class CommandBackend(Backend):
         return True
 
 
-def test_export_charging_sends_api_charge_command_and_modbus_charge_limit(monkeypatch):
+def test_export_charging_sends_api_charge_command_and_modbus_charge_limit_while_control_state_is_idle(monkeypatch):
     monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
 
     async def run():
         backend = CommandBackend()
         bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
         bridge.handle_grid_power("-1200")
-        bridge.control_state = "CHARGING"
+        bridge.control_state = "IDLE"
         await bridge.handle_charge_setpoint(1100)
         assert backend.battery_limits == [(1100, 0)]
         assert backend.api_commands == [("charge", 1100)]
@@ -418,6 +422,158 @@ def test_export_charging_sends_api_charge_command_and_modbus_charge_limit(monkey
         assert (goodwe_bridge.MQTT_TOPIC_BATTERY_MODE, "charge", True) in bridge.mqtt_client.published
 
     asyncio.run(run())
+
+
+def test_write_interval_does_not_block_api_charge_command(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        config = make_config()
+        config = goodwe_bridge.Config(
+            **{
+                **config.__dict__,
+                "min_write_interval_s": 60.0,
+            }
+        )
+        bridge = goodwe_bridge.GoodWeBridge(config, backend)
+        bridge.handle_grid_power("-1853")
+        bridge._last_write_monotonic = goodwe_bridge.monotonic()
+        bridge._last_charge_setpoint_w = 1000
+        bridge.control_state = "IDLE"
+
+        await bridge.handle_charge_setpoint(2880)
+
+        assert backend.battery_limits == []
+        assert backend.api_commands == [("charge", 2880)]
+
+    asyncio.run(run())
+
+
+def test_charge_command_does_not_require_fresh_p1_data(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+        bridge._last_p1_grid_power_w = None
+        bridge._last_p1_grid_power_monotonic = None
+
+        await bridge.handle_charge_setpoint(1200)
+
+        assert backend.battery_limits == [(1200, 0)]
+        assert backend.api_commands == [("charge", 1200)]
+
+    asyncio.run(run())
+
+
+def test_positive_charge_target_clears_stale_discharge_target(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+        bridge.handle_grid_power("-1200")
+        bridge.target_discharge_limit_w = 900
+
+        await bridge.handle_charge_setpoint(1100)
+
+        assert bridge.target_discharge_limit_w == 0
+        assert backend.battery_limits == [(1100, 0)]
+        assert backend.api_commands == [("charge", 1100)]
+
+    asyncio.run(run())
+
+
+def test_zero_opposite_target_after_charge_is_noop(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+
+    async def run():
+        backend = CommandBackend()
+        bridge = goodwe_bridge.GoodWeBridge(make_config(), backend)
+        await bridge.handle_charge_setpoint(1100)
+        await bridge.handle_discharge_setpoint(0)
+
+        assert backend.battery_limits == [(1100, 0)]
+        assert backend.api_commands == [("charge", 1100)]
+
+    asyncio.run(run())
+
+
+def test_bridge_action_is_written_to_setpoint_log(monkeypatch):
+    monkeypatch.setattr(goodwe_bridge.mqtt, "Client", FakeClient)
+    captured = {}
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            if sql.startswith("select column_name"):
+                return
+            captured["sql"] = sql
+            captured["params"] = params
+
+        def fetchall(self):
+            return [
+                ("source",),
+                ("soc_floor",),
+                ("soc_ceiling",),
+                ("setpoint_w",),
+                ("discharge_allowed",),
+                ("battery_soc_at_time",),
+                ("grid_power_at_time",),
+                ("battery_power_at_time",),
+                ("setpoint_delta",),
+                ("trigger_reason",),
+                ("ack_received",),
+                ("ack_latency_ms",),
+            ]
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            captured["committed"] = True
+
+        def close(self):
+            captured["closed"] = True
+
+    def connect(url):
+        captured["url"] = url
+        return Connection()
+
+    monkeypatch.setattr(goodwe_bridge.psycopg2, "connect", connect, raising=False)
+    config = make_config()
+    config = goodwe_bridge.Config(**{**config.__dict__, "database_url": "postgresql://example"})
+    bridge = goodwe_bridge.GoodWeBridge(config, Backend())
+    bridge._last_p1_grid_power_w = -1853
+    bridge._last_api_battery_power_w = 0
+    bridge._last_api_battery_soc = 74
+
+    bridge._log_control_decision(
+        2880,
+        0,
+        modbus_write_result="skipped_write_interval_not_elapsed",
+        api_command="charge",
+        api_command_success=True,
+    )
+
+    assert captured["url"] == "postgresql://example"
+    assert captured["committed"] is True
+    assert "insert into setpoint_log" in captured["sql"]
+    assert captured["params"][0] == "goodwe_bridge"
+    assert captured["params"][3] == 2880
+    assert captured["params"][4] is False
+    assert captured["params"][5] == 74
+    assert captured["params"][6] == -1853
+    assert captured["params"][7] == 0
+    assert "api_command=charge" in captured["params"][9]
+    assert captured["params"][10] is True
 
 
 def test_import_discharging_sends_api_discharge_command_and_modbus_discharge_limit(monkeypatch):
