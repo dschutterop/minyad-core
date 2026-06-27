@@ -70,3 +70,12 @@ def test_api_proxy_falls_back_to_legacy_unprefixed_route(monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"solar_power_w": 1805}
     assert calls == ["/api/grid/status", "/grid/status"]
+
+
+def test_reporting_route_renders_decision_log_not_scaffold():
+    with TestClient(app) as client:
+        response = client.get("/reporting")
+
+    assert response.status_code == 200
+    assert "Control decisions" in response.text
+    assert "Reporting module scaffold" not in response.text
