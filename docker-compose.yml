@@ -90,7 +90,7 @@ services:
     environment:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
-      STRATEGY_V2_PRIMARY: "false"
+      STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-true}
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -110,7 +110,7 @@ services:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
       TZ: Europe/Amsterdam
-      STRATEGY_V2_PRIMARY: "false"
+      STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-true}
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully

@@ -32,6 +32,17 @@ def test_battery_settings_update_accepts_nominal_v():
     assert update.nominal_v == 48
 
 
+def test_battery_override_accepts_and_normalizes_charge_aliases():
+    api_main.BatteryOverrideRequest.model_rebuild(_types_namespace={"Literal": api_main.Literal})
+    legacy = api_main.BatteryOverrideRequest(mode="force_on", watts=700)
+    current = api_main.BatteryOverrideRequest(mode="force_charge", watts=700)
+
+    assert legacy.mode == "force_on"
+    assert current.mode == "force_charge"
+    assert api_main._normalize_battery_override_mode(legacy.mode) == "force_charge"
+    assert api_main._normalize_battery_override_mode("force_off") == "force_idle"
+
+
 @pytest.mark.parametrize("value", [0, 201])
 def test_battery_settings_update_rejects_invalid_max_charge_a(value):
     with pytest.raises(ValidationError):

@@ -422,7 +422,7 @@ class ControlApp:
     async def apply_override(self, command: dict[str, Any]) -> None:
         if not self.controller:
             return
-        mode = OverrideMode(command.get("mode", "none"))
+        mode = OverrideMode(_normalize_override_mode(command.get("mode", "none")))
         watts = int(command.get("watts") or 0)
         duration = command.get("duration_seconds")
         if mode is OverrideMode.NONE:
@@ -860,6 +860,14 @@ class ControlApp:
         if state is not ControlState.DISCHARGING:
             self.reported_state_override = None
         return state.value
+
+
+def _normalize_override_mode(mode: str | None) -> str:
+    if mode == "force_charge":
+        return OverrideMode.FORCE_ON.value
+    if mode == "force_idle":
+        return OverrideMode.FORCE_OFF.value
+    return mode or OverrideMode.NONE.value
 
 
 async def run_control_app() -> None:

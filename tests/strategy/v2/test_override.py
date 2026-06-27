@@ -29,3 +29,17 @@ def test_force_charge_overrides_discharge_decision():
     asyncio.run(manager.apply_payload({"mode": "force_charge"}))
     result = asyncio.run(manager.apply(-500, ExecutorState(0, battery_soc=50), plan()))
     assert result == 1440
+
+
+def test_legacy_force_on_alias_charges_under_v2():
+    manager = OverrideManager(Settings(initial={"battery.max_charge_w": "1440"}))
+    asyncio.run(manager.apply_payload({"mode": "force_on", "watts": 700}))
+    result = asyncio.run(manager.apply(-500, ExecutorState(0, battery_soc=50), plan()))
+    assert result == 1440
+
+
+def test_legacy_force_off_alias_idles_under_v2():
+    manager = OverrideManager(Settings())
+    asyncio.run(manager.apply_payload({"mode": "force_off"}))
+    result = asyncio.run(manager.apply(700, ExecutorState(0, battery_soc=50), plan()))
+    assert result == 0
