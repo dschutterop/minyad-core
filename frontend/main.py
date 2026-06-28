@@ -196,6 +196,7 @@ LANGUAGE_BOOT_SCRIPT = """
       'Retries': 'Pogingen',
       'Retry delay s': 'Retryvertraging s',
       'GoodWe poll interval s': 'GoodWe pollinterval s',
+      'GoodWe poll interval grace s': 'GoodWe pollintervalmarge s',
       'Save battery settings': 'Batterijinstellingen opslaan',
       'EPEX day-ahead collection settings. Changes are published to MQTT and picked up without restarting minyad-trade.': 'EPEX day-ahead verzamelinstellingen. Wijzigingen worden naar MQTT gepubliceerd en opgepakt zonder minyad-trade te herstarten.',
       'Bidding zone': 'Biedzone',
@@ -729,6 +730,7 @@ def battery_settings_body() -> str:
         <label>Retries <input name='inverter_retries' type='number' min='1' max='10'></label>
         <label>Retry delay s <input name='inverter_delay' type='number' min='1' max='30'></label>
         <label>GoodWe poll interval s <input name='inverter_poll_interval_s' type='number' min='1' max='3600'></label>
+        <label>GoodWe poll interval grace s <input name='goodwe_poll_interval_grace_s' type='number' min='0' max='3600'></label>
         <p style='grid-column:1/-1;color:var(--steel);font-size:14px;margin:0'>Effective charge cap = min(max_charge_w, max_charge_a × nominal_v): <strong id='effective-charge-cap'>-- W</strong></p>
         <button type='submit'>Save battery settings</button>
       </form><pre id='settings-result'></pre></section>

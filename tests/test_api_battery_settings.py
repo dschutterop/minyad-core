@@ -34,6 +34,18 @@ def test_battery_settings_update_accepts_nominal_v():
     assert update.nominal_v == 48
 
 
+def test_battery_settings_update_accepts_goodwe_poll_interval_grace():
+    update = api_main.BatterySettingsUpdate(goodwe_poll_interval_grace_s=60)
+
+    assert update.goodwe_poll_interval_grace_s == 60
+    assert api_main.BATTERY_KEYS["goodwe_poll_interval_grace_s"] == (0, 3600)
+
+
+def test_bridge_stale_seconds_is_derived_from_poll_interval_and_grace():
+    assert api_main.derived_bridge_stale_seconds({"inverter_poll_interval_s": 120, "goodwe_poll_interval_grace_s": 60}) == 180
+    assert api_main.derived_bridge_stale_seconds({"inverter_poll_interval_s": 45, "goodwe_poll_interval_grace_s": 10}) == 55
+
+
 def test_battery_override_accepts_and_normalizes_charge_aliases():
     api_main.BatteryOverrideRequest.model_rebuild(_types_namespace={"Literal": api_main.Literal})
     legacy = api_main.BatteryOverrideRequest(mode="force_on", watts=700)
