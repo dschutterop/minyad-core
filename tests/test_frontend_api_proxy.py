@@ -89,3 +89,4 @@ def test_settings_route_renders_language_selector():
     assert 'name="language"' in response.text or "name='language'" in response.text
     assert "English" in response.text
     assert "Dutch" in response.text
+    assert "goodwe_poll_interval_grace_s" in response.text

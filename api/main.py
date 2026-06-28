@@ -137,8 +137,13 @@ BATTERY_KEYS = {
     "inverter_retries": (1, 10),
     "inverter_delay": (1, 30),
     "inverter_poll_interval_s": (1, 3600),
+    "goodwe_poll_interval_grace_s": (0, 3600),
 }
 TEXT_KEYS = {"inverter_ip"}
+BATTERY_DEFAULTS = {
+    "inverter_poll_interval_s": 120,
+    "goodwe_poll_interval_grace_s": 60,
+}
 
 STRATEGY_DEFAULTS = {
     "ghi_solar_rich_threshold": "4.5",
@@ -747,6 +752,7 @@ class BatterySettingsUpdate(BaseModel):
     inverter_retries: int | None = None
     inverter_delay: int | None = None
     inverter_poll_interval_s: int | None = Field(default=None, ge=1)
+    goodwe_poll_interval_grace_s: int | None = Field(default=None, ge=0)
 
     @field_validator("inverter_ip")
     @classmethod
@@ -1153,13 +1159,19 @@ async def scaffold_api_key(request: ApiKeyCreate, session: AsyncSession = Depend
 
 async def battery_settings(session: AsyncSession) -> dict[str, Any]:
     result = await session.execute(text("select key, value from settings where key like 'battery.%'"))
-    settings: dict[str, Any] = {}
+    settings: dict[str, Any] = dict(BATTERY_DEFAULTS)
     for row in result:
         name = row.key.removeprefix("battery.")
         if name.startswith("status."):
             continue
         settings[name] = row.value if name in TEXT_KEYS else int(row.value)
     return settings
+
+
+def derived_bridge_stale_seconds(settings: dict[str, Any]) -> int:
+    return int(settings.get("inverter_poll_interval_s", BATTERY_DEFAULTS["inverter_poll_interval_s"])) + int(
+        settings.get("goodwe_poll_interval_grace_s", BATTERY_DEFAULTS["goodwe_poll_interval_grace_s"])
+    )
 
 
 async def store_power_curve_point(
@@ -2112,6 +2124,14 @@ async def update_battery_settings(update: BatterySettingsUpdate, session: AsyncS
             """),
             {"key": f"battery.{key}", "value": str(value)},
         )
+    merged_after_validation = {**current, **data}
+    await session.execute(
+        text("""
+            insert into settings (key, value, encrypted, updated_at) values ('strategy.bridge_stale_seconds', :value, false, now())
+            on conflict (key) do update set value=:value, encrypted=false, updated_at=now()
+        """),
+        {"value": str(derived_bridge_stale_seconds(merged_after_validation))},
+    )
     await session.commit()
     settings = await battery_settings(session)
     await publish_battery_mqtt_settings(settings)

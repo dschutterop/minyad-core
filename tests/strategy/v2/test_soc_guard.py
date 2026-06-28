@@ -20,11 +20,29 @@ def test_charge_blocked_at_ceiling():
 def test_bridge_stale_suppresses_setpoint():
     guard = SoCGuard(Settings())
     now = datetime(2026, 6, 27, 12, tzinfo=timezone.utc)
-    state = ExecutorState(0, battery_soc=50, bridge_last_seen=now - timedelta(seconds=61))
+    state = ExecutorState(0, battery_soc=50, bridge_last_seen=now - timedelta(seconds=181))
     assert guard.apply(500, state, plan(), now) == 0
     adjusted, reason = guard.apply_with_reason(500, state, plan(), now)
     assert adjusted == 0
-    assert reason == "guard: bridge stale (61s > 60s)"
+    assert reason == "guard: bridge stale (181s > 180s)"
+
+
+def test_bridge_stale_guard_tolerates_goodwe_poll_interval():
+    guard = SoCGuard(Settings())
+    now = datetime(2026, 6, 27, 12, tzinfo=timezone.utc)
+    state = ExecutorState(0, battery_soc=50, bridge_last_seen=now - timedelta(seconds=120))
+    assert guard.apply(500, state, plan(), now) == 500
+
+
+def test_bridge_stale_seconds_comes_from_poll_interval_plus_grace():
+    guard = SoCGuard(Settings(initial={"battery.inverter_poll_interval_s": "90", "battery.goodwe_poll_interval_grace_s": "15"}))
+    now = datetime(2026, 6, 27, 12, tzinfo=timezone.utc)
+    fresh = ExecutorState(0, battery_soc=50, bridge_last_seen=now - timedelta(seconds=105))
+    stale = ExecutorState(0, battery_soc=50, bridge_last_seen=now - timedelta(seconds=106))
+    assert guard.apply(500, fresh, plan(), now) == 500
+    adjusted, reason = guard.apply_with_reason(500, stale, plan(), now)
+    assert adjusted == 0
+    assert reason == "guard: bridge stale (106s > 105s)"
 
 
 def test_voltage_guard_suppresses_setpoint():

@@ -15,6 +15,8 @@ DEFAULTS: dict[str, str] = {
     "battery.max_discharge_w": "5000",
     "battery.max_charge_a": "30",
     "battery.nominal_v": "48",
+    "battery.inverter_poll_interval_s": "120",
+    "battery.goodwe_poll_interval_grace_s": "60",
     "strategy.ghi_solar_rich_threshold": "4.5",
     "strategy.ghi_solar_poor_threshold": "1.5",
     "strategy.grid_target_w": "0",
@@ -33,7 +35,7 @@ DEFAULTS: dict[str, str] = {
     "strategy.price_discharge_bias_w": "200",
     "strategy.control_refresh_interval_sec": "300",
     "strategy.active_command_retry_interval_sec": "60",
-    "strategy.bridge_stale_seconds": "60",
+    "strategy.bridge_stale_seconds": "180",
     "strategy.voltage_floor_v": "46.0",
     "strategy.adjustment_log_interval_sec": "300",
 }
@@ -136,6 +138,10 @@ class Settings:
 
     @property
     def bridge_stale_seconds(self) -> int:
+        poll_interval = self.values.get("battery.inverter_poll_interval_s")
+        grace = self.values.get("battery.goodwe_poll_interval_grace_s")
+        if poll_interval is not None and grace is not None:
+            return int(float(poll_interval)) + int(float(grace))
         return self.int("strategy.bridge_stale_seconds")
 
     @property

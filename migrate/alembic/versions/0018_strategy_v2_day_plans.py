@@ -49,7 +49,7 @@ def upgrade() -> None:
               ('strategy.price_discharge_bias_w', '200', false),
               ('strategy.control_refresh_interval_sec', '300', false),
               ('strategy.active_command_retry_interval_sec', '60', false),
-              ('strategy.bridge_stale_seconds', '60', false),
+              ('strategy.bridge_stale_seconds', '180', false),
               ('strategy.voltage_floor_v', '46.0', false)
             on conflict (key) do nothing
             """
