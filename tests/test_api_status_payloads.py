@@ -2,7 +2,9 @@ import os
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from api.main import battery_curve_power_w, battery_status_payload, compute_household_load, derive_battery_state, grid_status_payload
+from datetime import datetime, timezone
+
+from api.main import battery_curve_power_w, battery_status_payload, build_surplus_payload, compute_household_load, derive_battery_state, grid_status_payload
 
 
 def test_battery_status_payload_excludes_grid_keys():
@@ -100,6 +102,49 @@ def test_household_load_uses_idle_actual_battery_power_over_stale_discharge_setp
 
     assert result["battery_discharge_w"] == 0
     assert result["battery_charge_w"] == 0
+
+
+def test_surplus_payload_reports_remaining_and_gross_surplus_while_battery_charges():
+    payload = build_surplus_payload(
+        {"grid_net_power_w": "-300", "solar_power_w": "2500"},
+        {"state": "CHARGING", "control_state": "CHARGING", "power_w": "-1200", "soc": 62},
+        {"soc_floor": 20, "soc_ceiling": 90, "cooldown": 180, "start_w": 500, "stop_w": 150},
+        now=datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert payload["surplus_w"] == 300
+    assert payload["gross_surplus_w"] == 1500
+    assert payload["battery"]["phase"] == "charging"
+    assert payload["battery"]["is_charging"] is True
+    assert payload["minyad"]["is_absorbing_surplus"] is True
+
+
+def test_surplus_payload_marks_cooldown_even_when_export_remains():
+    payload = build_surplus_payload(
+        {"grid_net_power_w": "-700"},
+        {"state": "IDLE", "control_state": "COOLDOWN", "power_w": "0"},
+        {"cooldown": 180},
+        now=datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert payload["surplus_w"] == 700
+    assert payload["gross_surplus_w"] == 700
+    assert payload["battery"]["phase"] == "cooldown"
+    assert payload["battery"]["is_cooldown"] is True
+    assert payload["minyad"]["surplus_handling"] == "cooldown"
+
+
+def test_surplus_payload_marks_idle_with_remaining_export():
+    payload = build_surplus_payload(
+        {"grid_net_power_w": "-450"},
+        {"state": "IDLE", "control_state": "IDLE", "power_w": "0"},
+        {},
+        now=datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert payload["has_surplus"] is True
+    assert payload["battery"]["phase"] == "idle"
+    assert payload["battery"]["is_idle"] is True
 
 
 def test_build_health_status_reports_core_components(monkeypatch):
