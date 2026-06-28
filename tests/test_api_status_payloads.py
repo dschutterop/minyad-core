@@ -4,7 +4,7 @@ os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
 from datetime import datetime, timezone
 
-from api.main import battery_curve_power_w, battery_status_payload, build_surplus_payload, compute_household_load, derive_battery_state, grid_status_payload
+from api.main import SURPLUS_API_VERSION, app, battery_curve_power_w, battery_status_payload, build_surplus_payload, compute_household_load, derive_battery_state, grid_status_payload
 
 
 def test_battery_status_payload_excludes_grid_keys():
@@ -112,6 +112,7 @@ def test_surplus_payload_reports_remaining_and_gross_surplus_while_battery_charg
         now=datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc),
     )
 
+    assert payload["api_version"] == SURPLUS_API_VERSION
     assert payload["surplus_w"] == 300
     assert payload["gross_surplus_w"] == 1500
     assert payload["battery"]["phase"] == "charging"
@@ -145,6 +146,13 @@ def test_surplus_payload_marks_idle_with_remaining_export():
     assert payload["has_surplus"] is True
     assert payload["battery"]["phase"] == "idle"
     assert payload["battery"]["is_idle"] is True
+
+
+def test_surplus_api_exposes_versioned_route_and_legacy_alias():
+    route_paths = {route.path for route in app.routes}
+
+    assert "/api/v1/surplus" in route_paths
+    assert "/api/surplus" in route_paths
 
 
 def test_build_health_status_reports_core_components(monkeypatch):
