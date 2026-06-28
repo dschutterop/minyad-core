@@ -35,6 +35,7 @@ DEFAULTS: dict[str, str] = {
     "strategy.active_command_retry_interval_sec": "60",
     "strategy.bridge_stale_seconds": "60",
     "strategy.voltage_floor_v": "46.0",
+    "strategy.adjustment_log_interval_sec": "300",
 }
 
 

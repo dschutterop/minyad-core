@@ -1,4 +1,6 @@
-from minyad.strategy.v2.reasons import adjustment_reason_suffix
+from datetime import datetime, timedelta, timezone
+
+from minyad.strategy.v2.reasons import adjusted_decision_log_due, adjustment_reason_suffix
 from minyad.strategy.v2.setpoint_log import build_setpoint_log_insert
 
 
@@ -46,3 +48,27 @@ def test_adjustment_reason_suffix_names_guard_and_override():
 
 def test_adjustment_reason_suffix_keeps_legacy_fallback():
     assert adjustment_reason_suffix(None, None) == "; guard/override adjusted setpoint"
+
+
+def test_adjusted_decision_log_due_when_unchanged_suppression_persists():
+    now = datetime(2026, 6, 27, 23, 54, tzinfo=timezone.utc)
+    last = now - timedelta(seconds=300)
+    assert adjusted_decision_log_due(
+        adjusted=True,
+        setpoint_changed=False,
+        now=now,
+        last_adjustment_log_at=last,
+        interval_seconds=300,
+    )
+
+
+def test_adjusted_decision_log_not_due_before_interval():
+    now = datetime(2026, 6, 27, 23, 54, tzinfo=timezone.utc)
+    last = now - timedelta(seconds=299)
+    assert not adjusted_decision_log_due(
+        adjusted=True,
+        setpoint_changed=False,
+        now=now,
+        last_adjustment_log_at=last,
+        interval_seconds=300,
+    )

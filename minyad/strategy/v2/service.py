@@ -25,7 +25,7 @@ from .executor import StrategyExecutor
 from .models import DayPlan, ExecutorState, StrategyDecision
 from .override import OverrideManager
 from .planner import AMSTERDAM, StrategyPlanner, default_day_plan
-from .reasons import adjustment_reason_suffix
+from .reasons import adjusted_decision_log_due, adjustment_reason_suffix
 from .setpoint_log import build_setpoint_log_insert
 from .soc_guard import SoCGuard
 
@@ -49,6 +49,8 @@ class StrategyService:
         self.state = ExecutorState(net_grid_w=0)
         self.loop: asyncio.AbstractEventLoop | None = None
         self.last_decision: StrategyDecision | None = None
+        self.last_adjustment_log_at: datetime | None = None
+        self.tick_lock = asyncio.Lock()
         self.scheduler: AsyncIOScheduler | None = None
 
     async def start(self) -> None:
@@ -118,12 +120,18 @@ class StrategyService:
             self.state = _replace(self.state, battery_voltage=float(payload))
 
     async def tick(self) -> None:
+        async with self.tick_lock:
+            await self._tick_locked()
+
+    async def _tick_locked(self) -> None:
         if self.executor is None or self.plan is None:
             return
         decision = self.executor.tick(self.state)
+        raw_setpoint = decision.setpoint_w
         setpoint, override_reason = await self.overrides.apply_with_reason(decision.setpoint_w, self.state, self.plan)
         setpoint, guard_reason = self.guard.apply_with_reason(setpoint, self.state, self.plan, decision.timestamp)
-        if setpoint != decision.setpoint_w:
+        adjusted = setpoint != raw_setpoint
+        if adjusted:
             adjustment_reason = adjustment_reason_suffix(override_reason, guard_reason)
             decision = StrategyDecision(
                 decision.timestamp,
@@ -137,10 +145,23 @@ class StrategyService:
                 decision.in_grid_charge_window,
                 decision.in_price_discharge_window,
             )
-        if self.last_decision is None or setpoint != self.last_decision.setpoint_w:
+        setpoint_changed = self.last_decision is None or setpoint != self.last_decision.setpoint_w
+        adjustment_log_due = adjusted_decision_log_due(
+            adjusted=adjusted,
+            setpoint_changed=setpoint_changed,
+            now=decision.timestamp,
+            last_adjustment_log_at=self.last_adjustment_log_at,
+            interval_seconds=self.settings.int("strategy.adjustment_log_interval_sec"),
+        )
+        if setpoint_changed:
             self.publish_setpoint(setpoint)
+        if setpoint_changed or adjustment_log_due:
             self.publish_decision(decision)
             await self.log_setpoint(decision)
+        if adjusted and (setpoint_changed or adjustment_log_due):
+            self.last_adjustment_log_at = decision.timestamp
+        elif not adjusted:
+            self.last_adjustment_log_at = None
         self.last_decision = decision
         self.state = _replace(self.state, current_setpoint_w=setpoint)
 
