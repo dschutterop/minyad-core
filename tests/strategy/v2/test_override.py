@@ -13,6 +13,9 @@ def test_force_idle_suppresses_all_setpoints():
     asyncio.run(manager.apply_payload({"mode": "force_idle"}))
     result = asyncio.run(manager.apply(700, ExecutorState(0, battery_soc=50), plan()))
     assert result == 0
+    adjusted, reason = asyncio.run(manager.apply_with_reason(700, ExecutorState(0, battery_soc=50), plan()))
+    assert adjusted == 0
+    assert reason == "override: force_idle"
 
 
 def test_pause_auto_expires():
@@ -29,6 +32,9 @@ def test_force_charge_overrides_discharge_decision():
     asyncio.run(manager.apply_payload({"mode": "force_charge", "watts": 700}))
     result = asyncio.run(manager.apply(-500, ExecutorState(0, battery_soc=50), plan()))
     assert result == 700
+    adjusted, reason = asyncio.run(manager.apply_with_reason(-500, ExecutorState(0, battery_soc=50), plan()))
+    assert adjusted == 700
+    assert reason == "override: force_charge"
 
 
 def test_force_charge_clamps_requested_watts_to_effective_limit():
