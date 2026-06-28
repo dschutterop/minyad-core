@@ -1311,6 +1311,98 @@ def compute_household_load(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _status_text(value: Any, fallback: str = "UNKNOWN") -> str:
+    text_value = str(value or fallback).strip().upper()
+    return text_value or fallback
+
+
+def build_surplus_payload(
+    grid: dict[str, Any],
+    battery: dict[str, Any],
+    settings: dict[str, Any] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Build the external surplus snapshot used by downstream surplus consumers.
+
+    Positive surplus is export/available power.  ``surplus_w`` is the remaining
+    grid export after Minyad's battery steering; ``gross_surplus_w`` adds the
+    measured battery charge power so a consumer can see that surplus exists even
+    while Minyad is still feeding it into the battery.
+    """
+    settings = settings or {}
+    timestamp = now or datetime.now(timezone.utc)
+    grid_net_w = _numeric_w(grid, "grid_net_power_w")
+    grid_import_w = _numeric_w(grid, "grid_delivered_w")
+    grid_export_w = _numeric_w(grid, "grid_returned_w")
+    if grid_import_w is None:
+        grid_import_w = max(0, grid_net_w or 0)
+    if grid_export_w is None:
+        grid_export_w = max(0, -(grid_net_w or 0))
+
+    battery_power_w = battery_curve_power_w(battery)
+    battery_charge_w = max(0, -(battery_power_w or 0))
+    battery_discharge_w = max(0, battery_power_w or 0)
+    remaining_surplus_w = max(0, grid_export_w)
+    gross_surplus_w = remaining_surplus_w + battery_charge_w
+    control_state = _status_text(battery.get("control_state") or battery.get("state"), "IDLE")
+    activity_state = _status_text(battery.get("state") or derive_battery_state(battery), control_state)
+    if control_state == "COOLDOWN":
+        battery_phase = "cooldown"
+    elif activity_state == "CHARGING" or control_state == "CHARGING" or battery_charge_w > 0:
+        battery_phase = "charging"
+    elif activity_state == "DISCHARGING" or control_state == "DISCHARGING" or battery_discharge_w > 0:
+        battery_phase = "discharging"
+    else:
+        battery_phase = "idle"
+
+    return {
+        "timestamp": timestamp.astimezone(timezone.utc).isoformat(),
+        "surplus_w": remaining_surplus_w,
+        "gross_surplus_w": gross_surplus_w,
+        "has_surplus": remaining_surplus_w > 0,
+        "has_gross_surplus": gross_surplus_w > 0,
+        "grid": {
+            "net_power_w": grid_net_w,
+            "import_w": grid_import_w,
+            "export_w": grid_export_w,
+            "status": grid.get("grid_status"),
+            "timestamp": grid.get("grid_timestamp"),
+        },
+        "solar": {
+            "power_w": _numeric_w(grid, "solar_power_w"),
+            "updated_at": grid.get("solar_updated_at"),
+        },
+        "battery": {
+            "phase": battery_phase,
+            "control_state": control_state,
+            "activity_state": activity_state,
+            "mode": battery.get("mode"),
+            "mode_label": battery.get("mode_label"),
+            "power_w": battery_power_w,
+            "charge_w": battery_charge_w,
+            "discharge_w": battery_discharge_w,
+            "soc": battery.get("soc"),
+            "soc_floor": settings.get("soc_floor"),
+            "soc_ceiling": settings.get("soc_ceiling"),
+            "available": battery.get("available"),
+            "override_mode": battery.get("override_mode", "none"),
+            "bridge_status": battery.get("bridge_status"),
+            "bridge_last_seen": battery.get("bridge_last_seen"),
+            "is_charging": battery_phase == "charging",
+            "is_discharging": battery_phase == "discharging",
+            "is_idle": battery_phase == "idle",
+            "is_cooldown": battery_phase == "cooldown",
+        },
+        "minyad": {
+            "surplus_handling": battery_phase,
+            "is_absorbing_surplus": battery_phase == "charging",
+            "cooldown_seconds": settings.get("cooldown"),
+            "charge_start_threshold_w": settings.get("start_w"),
+            "charge_stop_threshold_w": settings.get("stop_w"),
+        },
+    }
+
+
 async def household_status_payload(session: AsyncSession, store: bool = True) -> dict[str, Any]:
     payload = latest_mqtt_status()
     if not payload or not any(k.startswith("grid_") for k in payload):
@@ -1659,6 +1751,14 @@ async def api_state(session: AsyncSession = Depends(get_session)) -> dict[str, A
         "grid": grid,
         "household": household,
     }
+
+
+@app.get("/api/surplus")
+async def api_surplus(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    battery = await battery_status(session)
+    grid = await grid_status(session)
+    settings = await battery_settings(session)
+    return build_surplus_payload(grid, battery, settings)
 
 
 @app.get("/api/forecast")
