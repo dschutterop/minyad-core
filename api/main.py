@@ -183,6 +183,7 @@ SOLAR_PEAK_W = int(os.getenv("SOLAR_PEAK_W", "5000"))
 SOLAR_FORECAST_EFFICIENCY = 0.80
 OPEN_METEO_RETRY_ATTEMPTS = max(1, int(os.getenv("OPEN_METEO_RETRY_ATTEMPTS", "3")))
 OPEN_METEO_RETRY_BASE_DELAY_SECONDS = float(os.getenv("OPEN_METEO_RETRY_BASE_DELAY_SECONDS", "2"))
+SURPLUS_API_VERSION = "v1"
 
 
 def _apply_log_level(debug: bool) -> None:
@@ -1356,6 +1357,7 @@ def build_surplus_payload(
         battery_phase = "idle"
 
     return {
+        "api_version": SURPLUS_API_VERSION,
         "timestamp": timestamp.astimezone(timezone.utc).isoformat(),
         "surplus_w": remaining_surplus_w,
         "gross_surplus_w": gross_surplus_w,
@@ -1753,12 +1755,17 @@ async def api_state(session: AsyncSession = Depends(get_session)) -> dict[str, A
     }
 
 
-@app.get("/api/surplus")
-async def api_surplus(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+@app.get("/api/v1/surplus")
+async def api_v1_surplus(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     battery = await battery_status(session)
     grid = await grid_status(session)
     settings = await battery_settings(session)
     return build_surplus_payload(grid, battery, settings)
+
+
+@app.get("/api/surplus")
+async def api_surplus(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    return await api_v1_surplus(session)
 
 
 @app.get("/api/forecast")
