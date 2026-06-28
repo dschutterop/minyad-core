@@ -15,15 +15,20 @@ class SoCGuard:
         self._charge_blocked = False
 
     def apply(self, setpoint_w: int, state: ExecutorState, plan: DayPlan, now: datetime | None = None) -> int:
+        adjusted, _reason = self.apply_with_reason(setpoint_w, state, plan, now)
+        return adjusted
+
+    def apply_with_reason(self, setpoint_w: int, state: ExecutorState, plan: DayPlan, now: datetime | None = None) -> tuple[int, str | None]:
         now = now or datetime.now(timezone.utc)
         if state.bridge_last_seen is not None:
             last_seen = state.bridge_last_seen
             if last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=timezone.utc)
-            if (now - last_seen.astimezone(timezone.utc)).total_seconds() > self.settings.bridge_stale_seconds:
-                return 0
+            age_seconds = (now - last_seen.astimezone(timezone.utc)).total_seconds()
+            if age_seconds > self.settings.bridge_stale_seconds:
+                return 0, f"guard: bridge stale ({age_seconds:.0f}s > {self.settings.bridge_stale_seconds}s)"
         if state.battery_voltage is not None and state.battery_voltage < self.settings.voltage_floor_v:
-            return 0
+            return 0, f"guard: battery voltage low ({state.battery_voltage:.1f}V < {self.settings.voltage_floor_v:.1f}V)"
         if state.battery_soc is not None:
             band = self.settings.soc_hysteresis_pct
             soc = state.battery_soc
@@ -39,7 +44,11 @@ class SoCGuard:
                 self._charge_blocked = False
 
             if self._discharge_blocked:
-                setpoint_w = max(0, setpoint_w)
+                adjusted = max(0, setpoint_w)
+                if adjusted != setpoint_w:
+                    return adjusted, f"guard: SoC floor hold ({soc}% <= {plan.effective_soc_floor + band}%)"
             if self._charge_blocked:
-                setpoint_w = min(0, setpoint_w)
-        return int(setpoint_w)
+                adjusted = min(0, setpoint_w)
+                if adjusted != setpoint_w:
+                    return adjusted, f"guard: SoC ceiling hold ({soc}% >= {plan.effective_soc_ceiling - band}%)"
+        return int(setpoint_w), None

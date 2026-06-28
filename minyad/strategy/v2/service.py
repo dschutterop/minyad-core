@@ -25,6 +25,7 @@ from .executor import StrategyExecutor
 from .models import DayPlan, ExecutorState, StrategyDecision
 from .override import OverrideManager
 from .planner import AMSTERDAM, StrategyPlanner, default_day_plan
+from .reasons import adjustment_reason_suffix
 from .setpoint_log import build_setpoint_log_insert
 from .soc_guard import SoCGuard
 
@@ -120,9 +121,10 @@ class StrategyService:
         if self.executor is None or self.plan is None:
             return
         decision = self.executor.tick(self.state)
-        setpoint = await self.overrides.apply(decision.setpoint_w, self.state, self.plan)
-        setpoint = self.guard.apply(setpoint, self.state, self.plan, decision.timestamp)
+        setpoint, override_reason = await self.overrides.apply_with_reason(decision.setpoint_w, self.state, self.plan)
+        setpoint, guard_reason = self.guard.apply_with_reason(setpoint, self.state, self.plan, decision.timestamp)
         if setpoint != decision.setpoint_w:
+            adjustment_reason = adjustment_reason_suffix(override_reason, guard_reason)
             decision = StrategyDecision(
                 decision.timestamp,
                 setpoint,
@@ -130,7 +132,7 @@ class StrategyService:
                 decision.net_grid_w,
                 decision.solar_forecast_w,
                 decision.mode,
-                f"{decision.reason}; guard/override adjusted setpoint",
+                f"{decision.reason}{adjustment_reason}",
                 decision.plan_date,
                 decision.in_grid_charge_window,
                 decision.in_price_discharge_window,

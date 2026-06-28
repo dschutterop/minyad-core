@@ -67,21 +67,27 @@ class OverrideManager:
             await self.persist()
 
     async def apply(self, candidate_w: int, state: ExecutorState, plan: DayPlan) -> int:
+        adjusted, _reason = await self.apply_with_reason(candidate_w, state, plan)
+        return adjusted
+
+    async def apply_with_reason(self, candidate_w: int, state: ExecutorState, plan: DayPlan) -> tuple[int, str | None]:
         await self.clear_if_expired()
         mode = _normalize_mode(self.current.mode)
         if mode in {"none", None}:
-            return candidate_w
+            return candidate_w, None
         if mode in {"force_idle", "pause"}:
-            return 0
+            return 0, f"override: {mode}"
         if mode in {"force_charge", "grid_charge_now"}:
             if state.battery_soc is not None and state.battery_soc >= plan.effective_soc_ceiling:
-                return 0
-            return min(abs(self.current.watts or self.settings.effective_max_charge_w), self.settings.effective_max_charge_w)
+                return 0, f"override: {mode} blocked at SoC ceiling ({state.battery_soc}% >= {plan.effective_soc_ceiling}%)"
+            adjusted = min(abs(self.current.watts or self.settings.effective_max_charge_w), self.settings.effective_max_charge_w)
+            return adjusted, f"override: {mode}"
         if mode == "force_discharge":
             if state.battery_soc is not None and state.battery_soc <= plan.effective_soc_floor:
-                return 0
-            return -min(abs(self.current.watts or self.settings.max_discharge_w), self.settings.max_discharge_w)
-        return candidate_w
+                return 0, f"override: force_discharge blocked at SoC floor ({state.battery_soc}% <= {plan.effective_soc_floor}%)"
+            adjusted = -min(abs(self.current.watts or self.settings.max_discharge_w), self.settings.max_discharge_w)
+            return adjusted, "override: force_discharge"
+        return candidate_w, f"override: unknown mode {mode}"
 
 
 def _normalize_mode(mode: str | None) -> str:

@@ -1,3 +1,4 @@
+from minyad.strategy.v2.reasons import adjustment_reason_suffix
 from minyad.strategy.v2.setpoint_log import build_setpoint_log_insert
 
 
@@ -35,3 +36,13 @@ def test_setpoint_log_insert_supports_legacy_schema_without_newer_columns():
     assert "setpoint_delta" not in sql
     assert "trigger_reason" not in sql
     assert "ack_received" not in sql
+
+
+def test_adjustment_reason_suffix_names_guard_and_override():
+    assert adjustment_reason_suffix("override: force_idle", "guard: bridge stale (61s > 60s)") == (
+        "; override: force_idle; guard: bridge stale (61s > 60s)"
+    )
+
+
+def test_adjustment_reason_suffix_keeps_legacy_fallback():
+    assert adjustment_reason_suffix(None, None) == "; guard/override adjusted setpoint"
