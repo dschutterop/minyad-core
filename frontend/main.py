@@ -423,6 +423,61 @@ html[data-theme=light] .mailbox-panel{background:#fff;border-color:rgba(74,98,11
 .report-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0}.report-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.report-actions button{border:1px solid rgba(74,98,118,.25);background:#fff;border-radius:999px;padding:9px 13px;cursor:pointer}.report-actions button:disabled{opacity:.45;cursor:not-allowed}.report-table-wrap{overflow:auto;border:1px solid rgba(74,98,118,.18);border-radius:12px;background:#fff}.report-table{width:100%;border-collapse:collapse;min-width:1080px}.report-table th,.report-table td{padding:10px 12px;border-bottom:1px solid rgba(74,98,118,.12);text-align:left;vertical-align:top}.report-table th{position:sticky;top:0;background:#fff;color:var(--steel);font:700 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase}.report-table td{font-family:var(--mono);font-size:12px}.report-reason{font-family:var(--sans)!important;min-width:300px;max-width:520px;white-space:normal;line-height:1.35}.report-action{display:inline-flex;border-radius:999px;padding:4px 8px;font:700 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;background:rgba(74,98,118,.12);color:var(--steel)}.report-action.charge{background:rgba(216,155,42,.16);color:var(--store)}.report-action.discharge{background:rgba(46,156,98,.16);color:var(--produce)}.report-action.hold{background:rgba(74,98,118,.12);color:var(--steel)}.report-empty{padding:24px;text-align:center;color:var(--steel);font-family:var(--mono)}html[data-theme=dark] .report-actions button,html[data-theme=dark] .report-table-wrap,html[data-theme=dark] .report-table th{background:#101b24;color:var(--ink);border-color:rgba(184,210,228,.14)}html[data-theme=dark] .report-table th,html[data-theme=dark] .report-table td{border-bottom-color:rgba(184,210,228,.1)}
 """
 
+BRAND_CSS += """
+body.dashboard-page{--panel:#0A0A0A;--panel-2:#0A0A0A;--panel-3:#111;--p-ink:#F1F5F9;--p-mut:rgba(241,245,249,.54);--p-line:rgba(255,255,255,.08);--produce-d:#4ADE80;--store-d:#F8B42D;--import-d:#FF5F57;--home-d:#E8EEF4;--steel:#8D99A6;background:#0A0A0A;color:var(--p-ink);font-family:var(--mono);letter-spacing:0}
+body.dashboard-page .instrument,body.dashboard-page .dashboard-full,body.dashboard-page .dashboard-nav,body.dashboard-page .window-bar{background:#0A0A0A;border-color:var(--p-line);box-shadow:none}
+body.dashboard-page .dashboard-nav{padding:16px 24px;border-bottom:0}
+body.dashboard-page .wordmark strong{font-family:var(--mono);font-size:17px;font-weight:500;letter-spacing:.24em;text-transform:uppercase}
+body.dashboard-page .wordmark span{display:none}
+body.dashboard-page .brand-nav{display:none}
+body.dashboard-page .mark line,body.dashboard-page .mark circle{stroke:var(--produce-d)}
+body.dashboard-page .mark circle{fill:#0A0A0A}
+body.dashboard-page .window-bar{height:0;min-height:0;padding:0;border:0;overflow:hidden}
+body.dashboard-page .dash-head{padding:0 26px 20px}
+body.dashboard-page .dash-meta{font-size:14px;line-height:1.4;color:rgba(241,245,249,.72)}
+body.dashboard-page .tile,body.dashboard-page .chart-card,body.dashboard-page .flow-node,body.dashboard-page .mailbox-panel{background:rgba(17,17,17,.42);border:1px solid var(--p-line);border-left-width:1px;border-radius:8px;box-shadow:none}
+body.dashboard-page .tile.produce{border-left-color:var(--produce-d)}
+body.dashboard-page .tile.store{border-left-color:var(--store-d)}
+body.dashboard-page .tile.import{border-left-color:var(--import-d)}
+body.dashboard-page .tile.household{border-left-color:var(--home-d)}
+body.dashboard-page .tile-head{margin-bottom:24px}
+body.dashboard-page .tile-name,body.dashboard-page .scale-label,body.dashboard-page .chart-legend,body.dashboard-page .dash-meta{font-weight:400;letter-spacing:.12em}
+body.dashboard-page .tile-name{font-size:12px;color:rgba(241,245,249,.58)}
+body.dashboard-page .icon{stroke:currentColor;opacity:.86}
+body.dashboard-page .phrase{font-weight:400;letter-spacing:0;font-size:clamp(40px,5vw,62px)}
+body.dashboard-page .phrase .unit{font-size:.42em;font-weight:400;color:currentColor}
+body.dashboard-page .status-pill{border:1px solid currentColor;background:transparent;border-radius:999px;padding:6px 11px;font-size:10px;font-weight:500;gap:6px;box-shadow:none;color:var(--p-mut)}
+body.dashboard-page .status-pill i{width:auto;height:auto;border:0;border-radius:0;background:none;box-shadow:none;opacity:1;font-style:normal;line-height:1}
+body.dashboard-page .status-pill i::before{content:"●"}
+body.dashboard-page .status-pill.flash i{animation:none;box-shadow:none}
+body.dashboard-page .status-pill.badge{font-size:10px}
+body.dashboard-page .bar{height:7px;background:#050505;border-color:rgba(255,255,255,.10);border-radius:4px}
+body.dashboard-page .bar .fill{border-radius:0}
+body.dashboard-page .soc{margin-top:18px}
+body.dashboard-page .cells{gap:4px;margin:9px 0}
+body.dashboard-page .cells i{height:16px;border-radius:2px;background:#050505;border-color:rgba(255,255,255,.11)}
+body.dashboard-page .cells i.on{background:var(--store-d);border-color:var(--store-d)}
+body.dashboard-page .soc-limit{width:1px;box-shadow:none;top:-6px;bottom:-6px}
+body.dashboard-page .soc-limit-label{font-size:10px}
+body.dashboard-page .thin{height:4px;background:#050505;border-color:rgba(255,255,255,.10);border-radius:2px}
+body.dashboard-page .chart-card{padding:18px 18px 12px}
+body.dashboard-page .chart{height:300px}
+body.dashboard-page .axis,body.dashboard-page .gridline{stroke:rgba(255,255,255,.07)}
+body.dashboard-page .zero-line{stroke:rgba(255,255,255,.32);stroke-width:1}
+body.dashboard-page .forecast-fill,body.dashboard-page .prod-fill,body.dashboard-page .bat-charge-fill,body.dashboard-page .bat-discharge-fill,body.dashboard-page .grid-import-fill,body.dashboard-page .grid-export-fill,body.dashboard-page .imp-fill,body.dashboard-page .exp-fill{display:none}
+body.dashboard-page .forecast-line{stroke:rgba(141,153,166,.72);stroke-width:1.6}
+body.dashboard-page .prod-line,body.dashboard-page .bat-line,body.dashboard-page .grid-line,body.dashboard-page .home-line{stroke-width:1.8}
+body.dashboard-page .now{stroke:rgba(241,245,249,.72)}
+body.dashboard-page .chart-tooltip{background:#050505;border-color:rgba(255,255,255,.14);border-radius:6px;box-shadow:none}
+body.dashboard-page .daystrip{display:flex;align-items:center;gap:18px;margin-top:12px;padding-top:10px;border-top:1px solid var(--p-line);font-family:var(--mono);color:var(--p-mut)}
+body.dashboard-page .daystrip div{display:flex;align-items:baseline;gap:6px;min-width:0}
+body.dashboard-page .daystrip b{font-size:13px;font-weight:500;line-height:1}
+body.dashboard-page .daystrip span{font-size:10px;font-weight:400;letter-spacing:.08em;text-transform:uppercase}
+body.dashboard-page .sparkline path{stroke-width:1.8}
+body.dashboard-page .load-meta{font-family:var(--mono)}
+@media(max-width:860px){body.dashboard-page .dashboard-nav{padding:14px}body.dashboard-page .dash-head{padding:0 14px 16px}body.dashboard-page .daystrip{display:grid;grid-template-columns:1fr 1fr}}
+"""
+
 def brand_mark() -> str:
     return """
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
@@ -1233,8 +1288,8 @@ def energy_dashboard_body() -> str:
         if(visible.prices&&priceItems.length){const vals=priceItems.map(p=>p.price_eur_kwh), minP=Math.min(...vals), maxP=Math.max(...vals), lo=Math.min(0,minP), hi=maxP===lo?lo+0.01:maxP, barW=Math.max(2,(W-left-right)/Math.max(24,priceItems.length)*.24), yPrice=v=>H-bot-(H-bot-top)*(v-lo)/(hi-lo||1), priceColor=v=>{const t=(v-minP)/(maxP-minP||1), from=[191,219,254], to=[29,78,216], c=from.map((n,i)=>Math.round(n+(to[i]-n)*t)); return `rgb(${c[0]},${c[1]},${c[2]})`;}; for(const p of priceItems){const h=toHour(p.starts_at), x0=x(h)-barW/2, y0=yPrice(Math.max(lo,p.price_eur_kwh)), h0=Math.max(2,H-bot-y0); out+=`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${barW.toFixed(1)}" height="${h0.toFixed(1)}" rx="2" fill="${priceColor(p.price_eur_kwh)}" opacity="0.72" onmouseleave="hideChartTooltip()" onmousemove="handleChartHover(event,'price-bars')"/>`; } out+=`<text x="${W-right-2}" y="${top+10}" fill="#3B82F6" font-family="var(--mono)" font-size="10" text-anchor="end">${maxP.toFixed(3)} €/kWh</text>`;}
         out+=visible.forecast&&pointPath(forecastItems)?`<path class="forecast-line" d="${pointPath(forecastItems)}"/>`:'';
         out+=visible.solar&&pointPath(solarItems)?`<path class="prod-line" d="${pointPath(solarItems)}"/>`:'';
-        out+=visible.battery?(pointPath(batteryItems)?signedArea(batteryItems,true,'bat-charge-fill')+signedArea(batteryItems,false,'bat-discharge-fill')+`<path class="bat-line" d="${pointPath(batteryItems)}"/>`:`<path class="bat-line" d="${path(t=>1.2*Math.sin((t-15)/24*Math.PI*4))}"/>`):'';
-        out+=visible.grid?(pointPath(gridItems)?signedArea(gridItems,true,'grid-import-fill')+signedArea(gridItems,false,'grid-export-fill')+`<path class="grid-line" d="${pointPath(gridItems)}"/>`:`<path class="imp-fill" d="${area(t=>Math.min(0,1.2*Math.sin((t-12)/24*Math.PI*4)),0)}"/><path class="exp-fill" d="${area(t=>Math.max(0,1.0*Math.sin((t-10)/24*Math.PI*3)),0)}"/>`):'';
+        out+=visible.battery?(pointPath(batteryItems)?`<path class="bat-line" d="${pointPath(batteryItems)}"/>`:`<path class="bat-line" d="${path(t=>1.2*Math.sin((t-15)/24*Math.PI*4))}"/>`):'';
+        out+=visible.grid?(pointPath(gridItems)?`<path class="grid-line" d="${pointPath(gridItems)}"/>`:`<path class="grid-line" d="${path(t=>1.2*Math.sin((t-12)/24*Math.PI*4))}"/>`):'';
         out+=visible.household&&pointPath(householdItems)?`<path class="home-line" d="${pointPath(householdItems)}"/>`:'';
         out+=`<line class="now" x1="${x(hour)}" y1="${top}" x2="${x(hour)}" y2="${H-bot}"/>${visible.solar?`<circle cx="${x(hour)}" cy="${y(last.solar)}" r="4" fill="var(--produce-d)"/>`:''}<text x="${x(hour)+7}" y="${top+12}" fill="var(--p-ink)" font-family="var(--mono)" font-size="10">NOW</text>`;
         out+=`<circle id="day-chart-hover-dot" class="chart-dot" r="5" style="display:none"/>`; for(const [klass,items,isVisible] of paths){if(!isVisible)continue;const d=pointPath(items); if(!d)continue; out+=`<path class="chart-hover" d="${d}" onmouseleave="hideChartTooltip()" onmousemove="handleChartHover(event,'${klass}')"/>`;}
