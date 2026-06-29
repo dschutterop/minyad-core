@@ -38,10 +38,20 @@ def test_steady_import_discharges_after_hold():
     assert decision.setpoint_w < 0
 
 
-def test_discharge_blocked_during_export():
+def test_active_discharge_trims_during_export():
     executor, clock = make_executor({"strategy.ramp_hold_seconds": "0"})
     executor.current_setpoint_w = -500
     decision = executor.tick(ExecutorState(-200, battery_soc=50, current_setpoint_w=-500))
+    assert decision.setpoint_w == -380
+    assert "trimming discharge during export" in decision.reason
+
+
+def test_discharge_still_blocked_during_export_without_active_discharge():
+    now = datetime(2026, 6, 27, 18, tzinfo=timezone.utc)
+    plan = DayPlan(now.date(), "NORMAL", 2.0, 20, 90, price_discharge_windows=[(now - timedelta(minutes=1), now + timedelta(hours=1))])
+    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0"}, plan)
+    clock.now = now
+    decision = executor.tick(ExecutorState(-200, battery_soc=50, current_setpoint_w=0))
     assert decision.setpoint_w == 0
     assert "discharge blocked" in decision.reason
 
