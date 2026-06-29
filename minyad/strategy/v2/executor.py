@@ -75,8 +75,14 @@ class StrategyExecutor:
         elif state.net_grid_w >= -(threshold - hysteresis):
             self._export_blocked = False
         if self._export_blocked and candidate < 0:
-            candidate = 0
-            reason = "discharge blocked during export"
+            active_discharge = current < -self.settings.jitter_w or state.battery_power_w > self.settings.jitter_w
+            if active_discharge:
+                export_trim = _clamp(int(abs(state.net_grid_w) * self.settings.balance_gain), 0, self.settings.ramp_ceiling_w)
+                candidate = max(candidate, current + export_trim)
+                reason = f"trimming discharge during export; grid offset {state.net_grid_w}W"
+            else:
+                candidate = 0
+                reason = "discharge blocked during export"
 
         candidate, limit_reason = self._apply_soc_limits(candidate, state)
         if limit_reason:
