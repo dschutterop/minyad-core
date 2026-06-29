@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from minyad.strategy.v2 import Settings, StrategyPlanner
+from minyad.strategy.v2.planner import default_day_plan
 
 
 TZ = ZoneInfo("Europe/Amsterdam")
@@ -44,6 +45,25 @@ def test_price_windows_are_identified_and_cheap_is_overnight():
     assert plan.grid_charge_windows[0][1].hour == 5
     assert len(plan.price_discharge_windows) == 1
     assert plan.price_discharge_windows[0][0].hour == 18
+
+
+def test_friday_lifepo4_cycle_raises_ceiling_without_grid_charge():
+    friday = date(2026, 7, 3)
+    planner = StrategyPlanner(Settings(initial={"strategy.grid_charge_enabled": "true"}))
+    plan = planner.build_plan(friday, 2.0, prices(friday))
+
+    assert plan.effective_soc_ceiling == 100
+    assert plan.planned_soc_at_sunset == 100
+    assert plan.grid_charge_windows == []
+    assert "solar surplus only" in plan.reason
+
+
+def test_default_friday_plan_allows_lifepo4_full_cycle():
+    now = datetime(2026, 7, 3, 9, tzinfo=TZ)
+    plan = default_day_plan(Settings(), now)
+
+    assert plan.effective_soc_ceiling == 100
+    assert plan.grid_charge_windows == []
 
 
 def test_plan_is_idempotent():

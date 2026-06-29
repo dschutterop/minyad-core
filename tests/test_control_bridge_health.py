@@ -354,6 +354,24 @@ def test_soc_guard_masks_charge_trigger_at_ceiling(monkeypatch):
     assert surplus < app.controller.start_w
 
 
+def test_friday_cycle_ceiling_is_100_percent():
+    app = make_available_app()
+    app.settings = {"soc_ceiling": 90}
+    friday = datetime(2026, 7, 3, 12, tzinfo=timezone.utc)
+
+    assert app.effective_soc_ceiling(friday) == 100
+
+
+def test_friday_cycle_allows_charge_past_normal_ceiling(monkeypatch):
+    monkeypatch.setattr(control_main, "store_status", noop_store_status)
+    app = make_app_with_soc(soc=90)
+    app.effective_soc_ceiling = lambda _now=None: 100
+
+    surplus = app._apply_soc_guard(800)
+
+    assert surplus == 800
+
+
 def test_soc_update_stops_active_charge_at_ceiling(monkeypatch):
     monkeypatch.setattr(control_main, "store_status", noop_store_status)
     app = make_app_with_soc(soc=89, controller_state=control_main.ControlState.CHARGING)

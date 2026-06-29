@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from inspect import signature
 from time import monotonic
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
@@ -27,6 +28,9 @@ DEFAULT_SETPOINT_W = 0
 BRIDGE_OFFLINE_STATUSES = {"offline", "error"}
 SOC_FLOOR_DEFAULT = 20
 SOC_CEILING_DEFAULT = 90
+AMSTERDAM = ZoneInfo("Europe/Amsterdam")
+LIFEPO4_FULL_CYCLE_WEEKDAY = 4  # Friday, using Python's Monday=0 convention.
+LIFEPO4_FULL_CYCLE_CEILING = 100
 STATUS_HYSTERESE = "HYSTERESE"
 BRIDGE_LAST_SEEN_STALE_SECONDS = int(os.getenv("BRIDGE_LAST_SEEN_STALE_SECONDS", "60"))
 MIN_TARGET_CHANGE_W = int(os.getenv("MIN_TARGET_CHANGE_W", os.getenv("TARGET_MIN_CHANGE_W", "100")))
@@ -518,7 +522,7 @@ class ControlApp:
         if soc is None or self.controller is None:
             return surplus_w
         soc_floor = int(self.settings.get("soc_floor", SOC_FLOOR_DEFAULT))
-        soc_ceiling = int(self.settings.get("soc_ceiling", SOC_CEILING_DEFAULT))
+        soc_ceiling = self.effective_soc_ceiling()
         if soc <= soc_floor:
             if self.controller.state is ControlState.DISCHARGING:
                 LOGGER.warning("SoC %s%% at or below floor %s%%; forcing idle", soc, soc_floor)
@@ -535,6 +539,13 @@ class ControlApp:
             if surplus_w >= self.controller.start_w:
                 return self.controller.start_w - 1
         return surplus_w
+
+    def effective_soc_ceiling(self, now: datetime | None = None) -> int:
+        configured_ceiling = int(self.settings.get("soc_ceiling", SOC_CEILING_DEFAULT))
+        current = (now or datetime.now(AMSTERDAM)).astimezone(AMSTERDAM)
+        if current.weekday() == LIFEPO4_FULL_CYCLE_WEEKDAY:
+            return LIFEPO4_FULL_CYCLE_CEILING
+        return configured_ceiling
 
     @staticmethod
     def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -614,7 +625,7 @@ class ControlApp:
         reason = "slow_balance_deadband"
         soc = self.latest_battery_soc
         soc_floor = int(self.settings.get("soc_floor", SOC_FLOOR_DEFAULT))
-        soc_ceiling = int(self.settings.get("soc_ceiling", SOC_CEILING_DEFAULT))
+        soc_ceiling = self.effective_soc_ceiling()
         max_charge_power_w = self._max_charge_power_w()
         effective_charge_cap_w = max_charge_power_w
         charge_cap_inputs = self._charge_cap_inputs()
@@ -799,7 +810,7 @@ class ControlApp:
             self.setpoint_w = 0
             return
         soc = self.latest_battery_soc
-        soc_ceiling = int(self.settings.get("soc_ceiling", SOC_CEILING_DEFAULT))
+        soc_ceiling = self.effective_soc_ceiling()
         if watts > 0 and soc is not None and soc >= soc_ceiling:
             LOGGER.warning("SoC %s%% at or above ceiling %s%%; suppressing charge setpoint %sW", soc, soc_ceiling, watts)
             if self.controller and self.controller.state is ControlState.CHARGING:
