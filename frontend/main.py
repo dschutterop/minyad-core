@@ -437,13 +437,13 @@ body.dashboard-page .brand-nav a.active{color:var(--produce-d);border-bottom-col
 body.dashboard-page .mark{width:28px;height:28px;filter:drop-shadow(0 0 10px rgba(76,219,131,.32))}
 body.dashboard-page .mark line,body.dashboard-page .mark circle{stroke:var(--produce-d)}
 body.dashboard-page .mark circle{fill:#08111A}
-body.dashboard-page .window-bar{height:auto;border:0;display:flex;justify-content:flex-end;padding:0 26px 12px;background:transparent}
+body.dashboard-page .window-bar{height:auto;border:0;display:flex;justify-content:flex-end;padding:2px 26px 10px;background:transparent}
 body.dashboard-page .window-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-left:0}
 body.dashboard-page .layout-toggle{display:flex;gap:3px;padding:4px;border:1px solid rgba(184,210,228,.14);border-radius:999px;background:rgba(5,10,15,.48)}
 body.dashboard-page .layout-toggle button{border:0;background:transparent;color:var(--p-mut);border-radius:999px;padding:8px 12px;font:600 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
 body.dashboard-page .layout-toggle button.active{background:rgba(244,247,250,.12);color:var(--p-ink)}
 body.dashboard-page .mailbox-button{border:1px solid rgba(184,210,228,.14);background:rgba(5,10,15,.48);color:var(--p-ink);border-radius:999px;box-shadow:none}
-body.dashboard-page .dash-head{margin-top:-42px;padding:0 26px 22px}
+body.dashboard-page .dash-head{margin-top:0;padding:2px 26px 22px}
 body.dashboard-page .dash-meta{font-family:var(--mono);font-size:14px;line-height:1.35;color:rgba(244,247,250,.78);letter-spacing:.02em}
 body.dashboard-page .views{padding:0 26px 28px}
 body.dashboard-page .tile-grid{gap:16px;align-items:stretch}
@@ -471,7 +471,7 @@ body.dashboard-page .sparkline{height:58px;margin-top:auto;opacity:.95}
 body.dashboard-page .sparkline path{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 body.dashboard-page .sparkline .spark-fill{fill:currentColor;opacity:.12;stroke:none}
 body.dashboard-page .soc{margin-top:18px}
-body.dashboard-page .cells{grid-template-columns:repeat(16,1fr);gap:3px;margin:10px 0}
+body.dashboard-page .cells{grid-template-columns:repeat(10,1fr);gap:4px;margin:10px 0}
 body.dashboard-page .cells i{height:17px;border-radius:3px;background:#071019;border:1px solid rgba(184,210,228,.18)}
 body.dashboard-page .cells i.on{background:linear-gradient(180deg,#FFD36C,#F0A923);border-color:rgba(255,194,71,.82);box-shadow:0 0 10px rgba(255,194,71,.24)}
 body.dashboard-page .soc-limit{width:2px;top:-6px;bottom:-6px;box-shadow:0 0 10px currentColor}
@@ -1290,7 +1290,7 @@ def energy_dashboard_body() -> str:
       function setStatusPill(id,colorClass,isActive){const el=$(id); if(!el)return; el.className='status-pill '+colorClass+(isActive?' flash':'');}
       function renderReadings(){const home=Math.max(0,last.household||last.solar+last.battery-last.grid), gExport=last.grid>=0; $('solar-value').textContent=fmtPower(last.solar); $('m-solar').textContent=fmtPower(last.solar); $('battery-value').textContent=fmtPower(last.battery,true); $('grid-value').textContent=fmtPower(last.grid,true); $('household-value').textContent=fmtPower(home); $('f-solar').textContent=fmtPower(last.solar); $('f-battery').textContent=fmtPower(last.battery,true); $('f-grid').textContent=fmtPower(last.grid,true); $('f-home').textContent=fmtPower(home); $('m-battery').textContent=fmtPower(last.battery,true)+' '+unitLabel(); $('m-grid').textContent=fmtPower(last.grid,true)+' '+unitLabel(); $('f-grid-phrase').className='phrase '+(gExport?'produce-c':'import-c');}
       function setBar(id,v,max,color){const el=$(id); if(!el)return; const pct=Math.min(100,Math.abs(v)/max*50); el.style.background=color; if(v<0){el.style.left=(50-pct)+'%';el.style.width=pct+'%'}else{el.style.left='50%';el.style.width=pct+'%'}}
-      function setSoc(soc){$('soc-text').textContent=Math.round(soc)+'%'; const c=$('soc-cells'); c.innerHTML=''; for(let i=0;i<16;i++){const cell=document.createElement('i'); if(i<Math.round(soc/100*16))cell.className='on'; c.appendChild(cell)} renderSocLimits();}
+      function setSoc(soc){$('soc-text').textContent=Math.round(soc)+'%'; const c=$('soc-cells'), blocks=Math.max(1,Math.round(nominalKwh)); c.style.gridTemplateColumns=`repeat(${blocks},1fr)`; c.innerHTML=''; for(let i=0;i<blocks;i++){const cell=document.createElement('i'); if(i<Math.round(soc/100*blocks))cell.className='on'; c.appendChild(cell)} renderSocLimits();}
       function clampPct(value){return Math.max(0,Math.min(100,value));}
       function renderSocLimits(){const min=n(batteryLimits.min), max=n(batteryLimits.max); const limits=[['min',min],['max',max]]; for(const [kind,value] of limits){const line=$(`soc-${kind}-line`), label=$(`soc-${kind}-label`); if(!line||!label)continue; const hasValue=value!=null; line.hidden=!hasValue; label.hidden=!hasValue; if(!hasValue)continue; const pct=clampPct(value); line.style.left=pct+'%'; label.style.left=pct+'%'; label.textContent=`${kind} ${Math.round(value)}%`;}}
       async function loadBatteryLimits(){try{const res=await fetch('/api/battery/settings'); if(!res.ok)return; const settings=await res.json(); batteryLimits={min:n(settings.soc_floor),max:n(settings.soc_ceiling)}; renderSocLimits();}catch(e){}}
