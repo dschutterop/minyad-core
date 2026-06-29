@@ -1290,7 +1290,7 @@ def compute_household_load(payload: dict[str, Any]) -> dict[str, Any]:
     if grid_export_w is None:
         grid_export_w = max(0, -(grid_net_w or 0))
 
-    method_a_raw = solar_w - grid_export_w - battery_charge_w
+    method_a_raw = solar_w + battery_discharge_w - battery_charge_w - grid_export_w
     method_b_raw = solar_w + battery_discharge_w - battery_charge_w + grid_import_w - grid_export_w
     using_method = "B" if has_dsmr else "A"
     raw = method_b_raw if has_dsmr else method_a_raw
@@ -1300,13 +1300,14 @@ def compute_household_load(payload: dict[str, Any]) -> dict[str, Any]:
         load_w = 0
     method_a_w = max(0, round(method_a_raw))
     method_b_w = max(0, round(method_b_raw))
-    reference = max(abs(method_b_w), 1)
-    deviation_pct = abs(method_a_w - method_b_w) / reference * 100
+    comparable_method_b_w = max(0, round(method_b_raw - grid_import_w))
+    reference = max(abs(comparable_method_b_w), 1)
+    deviation_pct = abs(method_a_w - comparable_method_b_w) / reference * 100
     mismatch = has_dsmr and deviation_pct > 15
     if mismatch:
         LOGGER.debug(
             "Household load sanity-check mismatch: method_a=%sW method_b=%sW deviation=%.1f%% solar=%sW battery_charge=%sW battery_discharge=%sW grid_import=%sW grid_export=%sW",
-            method_a_w, method_b_w, deviation_pct, solar_w, battery_charge_w, battery_discharge_w, grid_import_w, grid_export_w,
+            method_a_w, comparable_method_b_w, deviation_pct, solar_w, battery_charge_w, battery_discharge_w, grid_import_w, grid_export_w,
         )
     return {
         "power_w": load_w,

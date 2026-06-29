@@ -104,6 +104,28 @@ def test_household_load_uses_idle_actual_battery_power_over_stale_discharge_setp
     assert result["battery_charge_w"] == 0
 
 
+def test_household_load_counts_battery_discharge_as_consumption_supply():
+    result = compute_household_load({"solar_power_w": "0", "power_w": "1000"})
+
+    assert result["power_w"] == 1000
+    assert result["method_a_w"] == 1000
+    assert result["battery_discharge_w"] == 1000
+
+
+def test_household_load_does_not_flag_normal_grid_import_as_mismatch():
+    result = compute_household_load({
+        "solar_power_w": "0",
+        "power_w": "1000",
+        "grid_delivered_w": "600",
+        "grid_returned_w": "0",
+    })
+
+    assert result["power_w"] == 1600
+    assert result["method_a_w"] == 1000
+    assert result["method_b_w"] == 1600
+    assert result["mismatch"] is False
+
+
 def test_surplus_payload_reports_remaining_and_gross_surplus_while_battery_charges():
     payload = build_surplus_payload(
         {"grid_net_power_w": "-300", "solar_power_w": "2500"},
