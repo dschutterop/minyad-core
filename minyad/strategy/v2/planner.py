@@ -16,6 +16,8 @@ from .models import DayPlan, Window
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 SCHIPLUIDEN_LAT = 51.97
 SCHIPLUIDEN_LON = 4.31
+LIFEPO4_FULL_CYCLE_WEEKDAY = 4  # Friday, using Python's Monday=0 convention.
+LIFEPO4_FULL_CYCLE_CEILING = 100
 
 
 class StrategyPlanner:
@@ -51,6 +53,7 @@ class StrategyPlanner:
         poor = self.settings.float("strategy.ghi_solar_poor_threshold")
         floor = self.settings.soc_floor
         ceiling = self.settings.soc_ceiling
+        full_cycle_day = is_lifepo4_full_cycle_day(plan_date)
         if ghi > rich:
             mode = "SOLAR_RICH"
             effective_floor = max(10, floor - 10)
@@ -68,7 +71,10 @@ class StrategyPlanner:
             sunset_target = floor + 30
 
         grid_charge_windows: list[Window] = []
-        if self.settings.bool("strategy.grid_charge_enabled") and mode in {"SOLAR_POOR", "NORMAL"}:
+        if full_cycle_day:
+            effective_ceiling = LIFEPO4_FULL_CYCLE_CEILING
+            sunset_target = max(sunset_target, LIFEPO4_FULL_CYCLE_CEILING)
+        elif self.settings.bool("strategy.grid_charge_enabled") and mode in {"SOLAR_POOR", "NORMAL"}:
             cheap = self._price_windows(prices, plan_date, below=self.settings.float("strategy.price_cheap_threshold_eur_kwh"))
             overnight = [window for window in cheap if self._is_overnight(window)]
             if overnight:
@@ -77,6 +83,8 @@ class StrategyPlanner:
         price_discharge_windows = self._price_windows(prices, plan_date, above=self.settings.float("strategy.price_expensive_threshold_eur_kwh"))
         valid_until = datetime.combine(plan_date, time(23, 59, 59), self.tz)
         reason = f"{mode}: GHI {ghi:.2f} kWh/m2; {len(grid_charge_windows)} charge and {len(price_discharge_windows)} discharge price windows"
+        if full_cycle_day:
+            reason += "; LiFePO4 Friday full cycle to 100% from solar surplus only"
         return DayPlan(plan_date, mode, round(ghi, 3), effective_floor, effective_ceiling, grid_charge_windows, price_discharge_windows, sunset_target, valid_until, reason)
 
     async def fetch_daily_ghi(self, plan_date: date) -> float:
@@ -195,18 +203,24 @@ class StrategyPlanner:
 
 def default_day_plan(settings: Settings, now: datetime | None = None) -> DayPlan:
     current = (now or datetime.now(AMSTERDAM)).astimezone(AMSTERDAM)
+    full_cycle_day = is_lifepo4_full_cycle_day(current.date())
+    ceiling = LIFEPO4_FULL_CYCLE_CEILING if full_cycle_day else settings.soc_ceiling
     return DayPlan(
         current.date(),
         "NORMAL",
         0.0,
         settings.soc_floor,
-        settings.soc_ceiling,
+        ceiling,
         [],
         [],
-        settings.soc_floor + 30,
+        LIFEPO4_FULL_CYCLE_CEILING if full_cycle_day else settings.soc_floor + 30,
         datetime.combine(current.date(), time(23, 59, 59), AMSTERDAM),
-        "default normal plan; no persisted day plan available",
+        "default normal plan; LiFePO4 Friday full cycle to 100% from solar surplus only" if full_cycle_day else "default normal plan; no persisted day plan available",
     )
+
+
+def is_lifepo4_full_cycle_day(plan_date: date) -> bool:
+    return plan_date.weekday() == LIFEPO4_FULL_CYCLE_WEEKDAY
 
 
 def _merge_contiguous(windows: list[Window]) -> list[Window]:
