@@ -12,10 +12,12 @@ def test_day_dashboard_window_starts_at_local_midnight(monkeypatch):
 
     now = datetime(2026, 6, 23, 10, 30, tzinfo=timezone.utc)
 
-    start, end = dashboard_window_bounds("day", timedelta(days=1), now)
+    start, end, now_ = dashboard_window_bounds("day", timedelta(days=1), now)
 
     assert start == datetime(2026, 6, 22, 22, 0, tzinfo=timezone.utc)
-    assert end == now
+    # end should be end-of-local-day, not now
+    assert end == datetime(2026, 6, 23, 21, 59, 59, tzinfo=timezone.utc)
+    assert now_ == now
 
 
 def test_non_day_dashboard_windows_stay_rolling(monkeypatch):
@@ -23,7 +25,8 @@ def test_non_day_dashboard_windows_stay_rolling(monkeypatch):
 
     now = datetime(2026, 6, 23, 10, 30, tzinfo=timezone.utc)
 
-    start, end = dashboard_window_bounds("hour", timedelta(hours=1), now)
+    start, end, now_ = dashboard_window_bounds("hour", timedelta(hours=1), now)
 
     assert start == datetime(2026, 6, 23, 9, 30, tzinfo=timezone.utc)
     assert end == now
+    assert now_ == now
