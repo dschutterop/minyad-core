@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from .constants import Settings
+from .floor_schedule import FloorScheduleState
 from .models import DayPlan, ExecutorState
 
 
@@ -13,6 +14,23 @@ class SoCGuard:
         self.settings = settings
         self._discharge_blocked = False
         self._charge_blocked = False
+        self._floor_schedule: FloorScheduleState | None = None
+
+    def set_floor_schedule(self, schedule: FloorScheduleState | None) -> None:
+        """Install (or clear) the self-correcting floor schedule.
+
+        When set, the discharge floor comes from ``schedule.value_at(now)``
+        instead of the static ``plan.effective_soc_floor``. The schedule glides
+        from the start-of-night SoC down to the plan's hard floor, so it is
+        always >= the static floor and the guard throttles discharge gradually
+        rather than cliffing once the hard floor is hit.
+        """
+        self._floor_schedule = schedule
+
+    def _active_floor(self, plan: DayPlan, now: datetime) -> float:
+        if self._floor_schedule is not None:
+            return self._floor_schedule.value_at(now)
+        return plan.effective_soc_floor
 
     def apply(self, setpoint_w: int, state: ExecutorState, plan: DayPlan, now: datetime | None = None) -> int:
         adjusted, _reason = self.apply_with_reason(setpoint_w, state, plan, now)
@@ -32,10 +50,11 @@ class SoCGuard:
         if state.battery_soc is not None:
             band = self.settings.soc_hysteresis_pct
             soc = state.battery_soc
+            floor = self._active_floor(plan, now)
 
-            if soc <= plan.effective_soc_floor:
+            if soc <= floor:
                 self._discharge_blocked = True
-            elif soc >= plan.effective_soc_floor + band:
+            elif soc >= floor + band:
                 self._discharge_blocked = False
 
             if soc >= plan.effective_soc_ceiling:
@@ -46,7 +65,7 @@ class SoCGuard:
             if self._discharge_blocked:
                 adjusted = max(0, setpoint_w)
                 if adjusted != setpoint_w:
-                    return adjusted, f"guard: SoC floor hold ({soc}% <= {plan.effective_soc_floor + band}%)"
+                    return adjusted, f"guard: SoC floor hold ({soc}% <= {floor + band}%)"
             if self._charge_blocked:
                 adjusted = min(0, setpoint_w)
                 if adjusted != setpoint_w:
