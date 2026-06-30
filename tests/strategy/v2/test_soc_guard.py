@@ -1,6 +1,17 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-from minyad.strategy.v2 import DayPlan, ExecutorState, Settings, SoCGuard
+from minyad.strategy.v2 import (
+    ConsumptionProfile,
+    DayPlan,
+    ExecutorState,
+    Settings,
+    SoCGuard,
+    build_floor_schedule,
+    night_horizon,
+)
+
+TZ = ZoneInfo("Europe/Amsterdam")
 
 
 def plan():
@@ -79,3 +90,39 @@ def test_charge_releases_below_hysteresis_band():
     guard.apply(500, ExecutorState(0, battery_soc=90), plan())  # engage block
     # SoC at 87.9% — past ceiling - band, block should lift
     assert guard.apply(500, ExecutorState(0, battery_soc=87.9), plan()) == 500
+
+
+def test_floor_schedule_blocks_discharge_above_static_floor():
+    """The dynamic floor gates discharge gradually, above the static floor."""
+    profile = ConsumptionProfile(slot_watts={slot: 500.0 for slot in range(96)}, tz=TZ)
+    night = datetime(2026, 6, 29, 21, 0, tzinfo=TZ)
+    h_start, h_end = night_horizon(night, time(21, 0), time(7, 0), tz=TZ)
+    schedule = build_floor_schedule(h_start, 80.0, 20.0, h_start, h_end, profile)
+
+    # Early in the night the gliding floor sits well above the static floor (20).
+    early = h_start + timedelta(hours=1)
+    schedule.observe(early, 500.0)
+    floor = schedule.recompute(early, 80.0)
+    assert floor > 20.0
+
+    guard = SoCGuard(Settings())
+    guard.set_floor_schedule(schedule)
+    # SoC at 60% is far above the static floor, but below the dynamic floor:
+    # discharge is throttled where the old logic would have allowed it.
+    state = ExecutorState(0, battery_soc=floor - 1)
+    adjusted, reason = guard.apply_with_reason(-500, state, plan(), early)
+    assert adjusted == 0
+    assert "SoC floor hold" in reason
+
+
+def test_floor_schedule_falls_back_to_static_floor_outside_horizon():
+    profile = ConsumptionProfile(slot_watts={slot: 500.0 for slot in range(96)}, tz=TZ)
+    night = datetime(2026, 6, 29, 21, 0, tzinfo=TZ)
+    h_start, h_end = night_horizon(night, time(21, 0), time(7, 0), tz=TZ)
+    schedule = build_floor_schedule(h_start, 80.0, 20.0, h_start, h_end, profile)
+
+    guard = SoCGuard(Settings())
+    guard.set_floor_schedule(schedule)
+    # After horizon end the schedule reports the hard floor, so 50% discharges freely.
+    after = h_end + timedelta(minutes=30)
+    assert guard.apply(-500, ExecutorState(0, battery_soc=50), plan(), after) == -500

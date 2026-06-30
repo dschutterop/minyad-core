@@ -8,7 +8,7 @@ import logging
 import os
 import signal
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from typing import Any
 
 import uvicorn
@@ -21,7 +21,9 @@ from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
 
 from .constants import Settings
+from .consumption_profile import ConsumptionProfile, load_consumption_profile
 from .executor import StrategyExecutor
+from .floor_schedule import FloorScheduleState, build_floor_schedule, night_horizon
 from .models import DayPlan, ExecutorState, StrategyDecision
 from .override import OverrideManager
 from .planner import AMSTERDAM, StrategyPlanner, default_day_plan
@@ -35,6 +37,9 @@ LOGGER = logging.getLogger(__name__)
 TOPIC_SETPOINT = "minyad/strategy/setpoint_w"
 TOPIC_ACTIVE = "minyad/strategy/active"
 TOPIC_DECISION = "minyad/strategy/decision"
+TOPIC_SOC_FLOOR = "minyad/strategy/soc_floor"
+TOPIC_FLOOR_DRIFT = "minyad/strategy/floor_drift_factor"
+TOPIC_FLOOR_REMAINING = "minyad/strategy/floor_remaining_expected_wh"
 
 
 class StrategyService:
@@ -46,6 +51,8 @@ class StrategyService:
         self.executor: StrategyExecutor | None = None
         self.guard = SoCGuard(self.settings)
         self.overrides = OverrideManager(self.settings, AsyncSessionLocal)
+        self.consumption_profile: ConsumptionProfile | None = None
+        self.floor_schedule: FloorScheduleState | None = None
         self.state = ExecutorState(net_grid_w=0)
         self.loop: asyncio.AbstractEventLoop | None = None
         self.last_decision: StrategyDecision | None = None
@@ -59,6 +66,7 @@ class StrategyService:
         await self.overrides.load()
         self.plan = await self.planner.load_plan(datetime.now(AMSTERDAM).date()) or default_day_plan(self.settings)
         self.executor = StrategyExecutor(self.settings, self.plan)
+        await self.refresh_consumption_profile()
         self.publish_active_plan()
         self._start_scheduler()
         for topic in (
@@ -128,6 +136,7 @@ class StrategyService:
             return
         decision = self.executor.tick(self.state)
         raw_setpoint = decision.setpoint_w
+        self.update_floor_schedule(decision.timestamp)
         setpoint, override_reason = await self.overrides.apply_with_reason(decision.setpoint_w, self.state, self.plan)
         setpoint, guard_reason = self.guard.apply_with_reason(setpoint, self.state, self.plan, decision.timestamp)
         adjusted = setpoint != raw_setpoint
@@ -182,6 +191,14 @@ class StrategyService:
             return
         self.mqtt.publish(TOPIC_ACTIVE, json.dumps(_plan_payload(self.plan)), retain=True)
 
+    def publish_floor_telemetry(self) -> None:
+        schedule = self.floor_schedule
+        if schedule is None:
+            return
+        self.mqtt.publish(TOPIC_SOC_FLOOR, f"{schedule.current_floor:.2f}", retain=True)
+        self.mqtt.publish(TOPIC_FLOOR_DRIFT, f"{schedule.drift_factor:.3f}", retain=True)
+        self.mqtt.publish(TOPIC_FLOOR_REMAINING, f"{schedule.remaining_expected_adjusted_wh:.1f}", retain=True)
+
     def publish_decision(self, decision: StrategyDecision) -> None:
         self.mqtt.publish(TOPIC_DECISION, json.dumps(_decision_payload(decision)), retain=True)
 
@@ -221,7 +238,60 @@ class StrategyService:
             self.executor.set_plan(self.plan)
         else:
             self.executor = StrategyExecutor(self.settings, self.plan)
+        await self.refresh_consumption_profile()
+        # A new plan opens a new night cycle; drop the stale floor schedule so the
+        # next tick inside the horizon rebuilds it against the fresh plan floor.
+        self.floor_schedule = None
+        self.guard.set_floor_schedule(None)
         self.publish_active_plan()
+
+    async def refresh_consumption_profile(self) -> None:
+        try:
+            self.consumption_profile = await load_consumption_profile(
+                AsyncSessionLocal,
+                lookback_days=self.settings.int("strategy.consumption_lookback_days"),
+                fallback_w=self.settings.float("strategy.consumption_fallback_w"),
+            )
+        except Exception:  # noqa: BLE001 - profile is advisory; never break the loop
+            LOGGER.exception("Unable to load household consumption profile; keeping previous")
+
+    def _household_load_w(self) -> float:
+        """Approximate instantaneous household load for floor self-correction.
+
+        Inside the overnight floor horizon solar production is ~0, so the load
+        is well approximated by grid import plus battery discharge. Both use the
+        same sign convention as the executor (net_grid_w > 0 = import,
+        battery_power_w > 0 = discharge).
+        """
+        return max(0.0, float(self.state.net_grid_w) + float(self.state.battery_power_w))
+
+    def update_floor_schedule(self, now: datetime) -> None:
+        """Build/observe/recompute the self-correcting floor and arm the guard."""
+        if self.plan is None or self.consumption_profile is None:
+            return
+        start_t = _parse_local_time(self.settings.get("strategy.floor_horizon_start_local", "21:00"))
+        end_t = _parse_local_time(self.settings.get("strategy.floor_horizon_end_local", "07:00"))
+        horizon_start, horizon_end = night_horizon(now, start_t, end_t)
+
+        if not (horizon_start <= now < horizon_end) or self.state.battery_soc is None:
+            self.floor_schedule = None
+            self.guard.set_floor_schedule(None)
+            return
+
+        if self.floor_schedule is None or self.floor_schedule.horizon_start != horizon_start:
+            self.floor_schedule = build_floor_schedule(
+                now,
+                self.state.battery_soc,
+                self.plan.effective_soc_floor,
+                horizon_start,
+                horizon_end,
+                self.consumption_profile,
+            )
+
+        self.floor_schedule.observe(now, self._household_load_w())
+        self.floor_schedule.recompute(now, self.state.battery_soc)
+        self.guard.set_floor_schedule(self.floor_schedule)
+        self.publish_floor_telemetry()
 
     async def _run_health_server(self) -> None:
         app = FastAPI()
@@ -255,6 +325,11 @@ def _replace(state: ExecutorState, **changes: Any) -> ExecutorState:
 def _parse_dt(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _parse_local_time(value: str) -> time:
+    hour, minute = (int(part) for part in value.split(":", 1))
+    return time(hour, minute)
 
 
 def _plan_payload(plan: DayPlan) -> dict[str, Any]:
