@@ -46,6 +46,23 @@ def test_active_discharge_trims_during_export():
     assert "trimming discharge during export" in decision.reason
 
 
+def test_active_discharge_export_trim_waits_for_fresh_telemetry():
+    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0"})
+    first = executor.tick(ExecutorState(-381, battery_soc=50, battery_power_w=1524, current_setpoint_w=-1438))
+    assert first.setpoint_w == -1210
+
+    duplicate = executor.tick(ExecutorState(-381, battery_soc=50, battery_power_w=1524, current_setpoint_w=-1210))
+    assert duplicate.setpoint_w == -1210
+    assert "waiting for fresh export telemetry" in duplicate.reason
+
+
+def test_active_discharge_export_trim_does_not_cross_into_charge():
+    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0"})
+    decision = executor.tick(ExecutorState(-381, battery_soc=50, battery_power_w=1524, current_setpoint_w=-70))
+    assert decision.setpoint_w == 0
+    assert "trimming discharge during export" in decision.reason
+
+
 def test_discharge_still_blocked_during_export_without_active_discharge():
     now = datetime(2026, 6, 27, 18, tzinfo=timezone.utc)
     plan = DayPlan(now.date(), "NORMAL", 2.0, 20, 90, price_discharge_windows=[(now - timedelta(minutes=1), now + timedelta(hours=1))])
@@ -125,8 +142,9 @@ def test_export_block_hysteresis_stays_blocked_within_band():
     # Trigger the export block
     executor.tick(ExecutorState(-150, battery_soc=50, current_setpoint_w=-400))
     # Export drops to -80W — within threshold but not past the 50W hysteresis clearance (-50W)
-    decision = executor.tick(ExecutorState(-80, battery_soc=50, current_setpoint_w=0))
-    assert decision.setpoint_w == 0
+    decision = executor.tick(ExecutorState(-80, battery_soc=50, current_setpoint_w=-310))
+    assert decision.setpoint_w <= 0
+    assert "trimming discharge during export" in decision.reason
 
 
 def test_export_block_hysteresis_releases_past_clearance():

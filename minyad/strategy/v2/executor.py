@@ -21,6 +21,7 @@ class StrategyExecutor:
         self._soc_discharge_blocked = False
         self._soc_charge_blocked = False
         self._export_blocked = False
+        self._last_export_trim_sample: tuple[int, int] | None = None
         self._grid_charge_ceiling_reached = False
 
     def set_plan(self, plan: DayPlan) -> None:
@@ -74,15 +75,26 @@ class StrategyExecutor:
             self._export_blocked = True
         elif state.net_grid_w >= -(threshold - hysteresis):
             self._export_blocked = False
-        if self._export_blocked and candidate < 0:
+        if self._export_blocked:
             active_discharge = current < -self.settings.jitter_w or state.battery_power_w > self.settings.jitter_w
-            if active_discharge:
-                export_trim = _clamp(int(abs(state.net_grid_w) * self.settings.balance_gain), 0, self.settings.ramp_ceiling_w)
-                candidate = max(candidate, current + export_trim)
-                reason = f"trimming discharge during export; grid offset {state.net_grid_w}W"
-            else:
+            if active_discharge and current < 0:
+                trim_sample = (state.net_grid_w, state.battery_power_w)
+                if trim_sample == self._last_export_trim_sample:
+                    candidate = current
+                    reason = f"waiting for fresh export telemetry before next discharge trim; grid offset {state.net_grid_w}W"
+                else:
+                    export_trim = _clamp(int(abs(state.net_grid_w) * self.settings.balance_gain), 0, self.settings.ramp_ceiling_w)
+                    candidate = min(0, max(candidate, current + export_trim))
+                    reason = f"trimming discharge during export; grid offset {state.net_grid_w}W"
+                    self._last_export_trim_sample = trim_sample
+            elif candidate < 0:
                 candidate = 0
                 reason = "discharge blocked during export"
+                self._last_export_trim_sample = None
+            else:
+                self._last_export_trim_sample = None
+        else:
+            self._last_export_trim_sample = None
 
         candidate, limit_reason = self._apply_soc_limits(candidate, state)
         if limit_reason:
