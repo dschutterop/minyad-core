@@ -1543,18 +1543,19 @@ WINDOWS = {
 }
 
 
-def dashboard_window_bounds(window: str, duration: timedelta, now: datetime | None = None) -> tuple[datetime, datetime]:
-    end = now or datetime.now(timezone.utc)
-    if end.tzinfo is None:
-        end = end.replace(tzinfo=timezone.utc)
-    end = end.astimezone(timezone.utc)
+def dashboard_window_bounds(window: str, duration: timedelta, now: datetime | None = None) -> tuple[datetime, datetime, datetime]:
+    now_ = now or datetime.now(timezone.utc)
+    if now_.tzinfo is None:
+        now_ = now_.replace(tzinfo=timezone.utc)
+    now_ = now_.astimezone(timezone.utc)
     if window != "day":
-        return end - duration, end
+        return now_ - duration, now_, now_
 
     dashboard_tz = ZoneInfo(os.getenv("MINYAD_TIMEZONE", "Europe/Amsterdam"))
-    local_end = end.astimezone(dashboard_tz)
-    local_start = local_end.replace(hour=0, minute=0, second=0, microsecond=0)
-    return local_start.astimezone(timezone.utc), end
+    local_now = now_.astimezone(dashboard_tz)
+    local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    local_end = local_now.replace(hour=23, minute=59, second=59, microsecond=0)
+    return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc), now_
 
 
 def _bucket_expr(column: str, seconds: int) -> str:
@@ -1699,17 +1700,17 @@ def extrapolate_battery_curve(start: datetime, end: datetime, step_seconds: int,
 async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month", "year"] = "day", session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     await ensure_recent_solar_forecast(session)
     duration, step_seconds, table_name = WINDOWS[window]
-    start, end = dashboard_window_bounds(window, duration)
+    start, end, now_ = dashboard_window_bounds(window, duration)
     if table_name == "power_curve_points":
         bucket = _bucket_expr("bucket_start", step_seconds)
-        source_filter = "bucket_start >= :start and bucket_start <= :end"
+        source_filter = "bucket_start >= :start and bucket_start <= :now_"
         power_expr = "avg(power_w)"
         delivered_expr = "avg(delivered_w)"
         returned_expr = "avg(returned_w)"
         net_expr = "avg(net_w)"
     else:
         bucket = "bucket_start"
-        source_filter = "granularity_seconds = :step_seconds and bucket_start >= :start and bucket_start <= :end"
+        source_filter = "granularity_seconds = :step_seconds and bucket_start >= :start and bucket_start <= :now_"
         power_expr = "avg(power_w)"
         delivered_expr = "avg(delivered_w)"
         returned_expr = "avg(returned_w)"
@@ -1720,7 +1721,7 @@ async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month",
         from {table_name}
         where {source_filter}
         group by ts, source order by ts
-    """), {"start": start, "end": end, "step_seconds": step_seconds})).mappings().all()
+    """), {"start": start, "end": end, "now_": now_, "step_seconds": step_seconds})).mappings().all()
     series = {"solar": [], "battery": [], "grid": [], "household": []}
     for row in rows:
         series[row["source"]].append({
@@ -1742,7 +1743,7 @@ async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month",
 
     mqtt_payload = latest_mqtt_status()
     soc = coerce_float_status_value("soc", mqtt_payload.get("soc", 50)) if mqtt_payload.get("soc") not in (None, "") else 50.0
-    battery_forecast = extrapolate_battery_curve(end, end + duration, step_seconds, soc, forecast)
+    battery_forecast = extrapolate_battery_curve(now_, end, step_seconds, soc, forecast)
 
     return {
         "window": window,
