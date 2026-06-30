@@ -38,6 +38,10 @@ DEFAULTS: dict[str, str] = {
     "strategy.bridge_stale_seconds": "180",
     "strategy.voltage_floor_v": "46.0",
     "strategy.adjustment_log_interval_sec": "300",
+    "strategy.floor_horizon_start_local": "21:00",
+    "strategy.floor_horizon_end_local": "07:00",
+    "strategy.consumption_lookback_days": "14",
+    "strategy.consumption_fallback_w": "300",
 }
 
 
