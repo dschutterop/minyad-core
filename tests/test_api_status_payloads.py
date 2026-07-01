@@ -2,8 +2,10 @@ import os
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
+import asyncio
 from datetime import datetime, timezone
 
+import api.main as api_main
 from api.main import SURPLUS_API_VERSION, app, battery_curve_power_w, battery_status_payload, build_surplus_payload, compute_household_load, derive_battery_state, grid_status_payload
 
 
@@ -17,6 +19,58 @@ def test_battery_status_payload_excludes_grid_keys():
     }
 
     assert battery_status_payload(payload) == {"soc": "80", "power_w": "250", "grid_power_w": "4"}
+
+
+def test_battery_status_includes_soc_limit_override_flag(monkeypatch):
+    class Result:
+        def __init__(self, rows=None, mapping=None):
+            self.rows = rows or []
+            self.mapping = mapping
+
+        def __iter__(self):
+            return iter(self.rows)
+
+        def mappings(self):
+            return self
+
+        def first(self):
+            return self.mapping
+
+    class Session:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return Result(rows=[])
+            return Result(mapping={"mode": "force_charge", "override_soc_limits": True})
+
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(
+        api_main,
+        "latest_mqtt_status",
+        lambda: {
+            "soc": "91",
+            "soh": "98",
+            "power_w": "-700",
+            "voltage": "52.1",
+            "mode": "charge",
+            "bridge_status": "online",
+            "bridge_last_seen": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    async def skip_curve_store(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(api_main, "store_power_curve_point", skip_curve_store)
+
+    payload = asyncio.run(api_main.battery_status(Session()))
+
+    assert payload["override_mode"] == "force_charge"
+    assert payload["override_soc_limits"] is True
 
 
 def test_grid_status_payload_includes_grid_and_solar_keys():
