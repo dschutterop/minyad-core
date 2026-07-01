@@ -27,8 +27,8 @@ def test_all_application_images_run_as_non_root() -> None:
         assert source.index("USER 1000:1000") < source.index("CMD "), dockerfile
 
 
-def test_compose_defaults_strategy_v2_primary_on() -> None:
+def test_compose_defaults_strategy_v3_primary_on() -> None:
     source = (ROOT / "docker-compose.yml").read_text()
 
-    assert 'STRATEGY_V2_PRIMARY: "false"' not in source
-    assert "STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-true}" in source
+    assert "STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-false}" in source
+    assert "SHADOW_MODE: ${STRATEGY3_SHADOW_MODE:-false}" in source
