@@ -426,72 +426,105 @@ html[data-theme=light] .mailbox-panel{background:#fff;border-color:rgba(74,98,11
 BRAND_CSS += """
 body.dashboard-page{--panel:#08111A;--panel-2:#101A24;--panel-3:#162434;--p-ink:#F4F7FA;--p-mut:rgba(226,235,243,.64);--p-line:rgba(184,210,228,.16);--produce-d:#4CDB83;--store-d:#FFC247;--import-d:#FF635C;--home-d:#F3F7FB;--steel:#9AAABA;background:radial-gradient(circle at 50% -10%,rgba(50,82,112,.32),transparent 38rem),linear-gradient(180deg,#071018 0,#08111A 42%,#05090E 100%);color:var(--p-ink);font-family:var(--sans);letter-spacing:0}
 body.dashboard-page .instrument,body.dashboard-page .dashboard-full{background:transparent;border:0;box-shadow:none}
-body.dashboard-page .dashboard-nav{background:transparent;border:0;padding:22px 26px 10px}
+body.dashboard-page .dashboard-nav{background:transparent;border:0;padding:20px 26px 8px}
 body.dashboard-page .brand-lockup{gap:12px}
 body.dashboard-page .wordmark strong{color:var(--p-ink);font-family:var(--mono);font-size:17px;font-weight:600;letter-spacing:.26em;text-transform:uppercase}
 body.dashboard-page .wordmark span{display:none}
 body.dashboard-page .brand-nav{display:flex;gap:12px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
-body.dashboard-page .brand-nav a{color:rgba(226,235,243,.58);font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;padding:7px 0;border-bottom:1px solid transparent}
+body.dashboard-page .brand-nav a{color:rgba(226,235,243,.46);font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;padding:7px 0;border-bottom:1px solid transparent}
 body.dashboard-page .brand-nav a:hover,body.dashboard-page .brand-nav a:focus-visible{color:var(--p-ink);outline:none}
 body.dashboard-page .brand-nav a.active{color:var(--produce-d);border-bottom-color:var(--produce-d)}
 body.dashboard-page .mark{width:28px;height:28px;filter:drop-shadow(0 0 10px rgba(76,219,131,.32))}
 body.dashboard-page .mark line,body.dashboard-page .mark circle{stroke:var(--produce-d)}
 body.dashboard-page .mark circle{fill:#08111A}
-body.dashboard-page .window-bar{height:auto;border:0;display:flex;justify-content:flex-end;padding:2px 26px 10px;background:transparent}
+body.dashboard-page .window-bar{height:auto;border:0;display:flex;justify-content:flex-end;padding:2px 26px 8px;background:transparent}
 body.dashboard-page .window-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-left:0}
-body.dashboard-page .layout-toggle{display:flex;gap:3px;padding:4px;border:1px solid rgba(184,210,228,.14);border-radius:999px;background:rgba(5,10,15,.48)}
-body.dashboard-page .layout-toggle button{border:0;background:transparent;color:var(--p-mut);border-radius:999px;padding:8px 12px;font:600 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
-body.dashboard-page .layout-toggle button.active{background:rgba(244,247,250,.12);color:var(--p-ink)}
+body.dashboard-page .layout-toggle,body.dashboard-page .segmented-control{display:flex;gap:3px;padding:4px;border:1px solid rgba(184,210,228,.14);border-radius:999px;background:rgba(5,10,15,.48)}
+body.dashboard-page .layout-toggle button,body.dashboard-page .segmented-control button{border:0;background:transparent;color:rgba(226,235,243,.58);border-radius:999px;padding:8px 12px;font:600 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+body.dashboard-page .layout-toggle button.active,body.dashboard-page .segmented-control button.active{background:rgba(244,247,250,.12);color:var(--p-ink);box-shadow:inset 0 0 0 1px rgba(244,247,250,.04)}
 body.dashboard-page .mailbox-button{border:1px solid rgba(184,210,228,.14);background:rgba(5,10,15,.48);color:var(--p-ink);border-radius:999px;box-shadow:none}
-body.dashboard-page .dash-head{margin-top:0;padding:2px 26px 22px}
-body.dashboard-page .dash-meta{font-family:var(--mono);font-size:14px;line-height:1.35;color:rgba(244,247,250,.78);letter-spacing:.02em}
+body.dashboard-page .dash-head{margin-top:0;padding:0 26px 18px}
+body.dashboard-page .dash-meta{font-family:var(--mono);font-size:12px;line-height:1.45;color:rgba(244,247,250,.62);letter-spacing:.02em}
 body.dashboard-page .views{padding:0 26px 28px}
 body.dashboard-page .tile-grid{gap:16px;align-items:stretch}
 body.dashboard-page .tile,body.dashboard-page .chart-card,body.dashboard-page .flow-node,body.dashboard-page .mailbox-panel{background:linear-gradient(180deg,rgba(16,26,36,.88),rgba(9,17,26,.9));border:1px solid var(--p-line);border-left-width:1px;border-radius:14px;box-shadow:0 0 0 1px rgba(255,255,255,.02),0 18px 48px rgba(0,0,0,.25);backdrop-filter:blur(10px)}
-body.dashboard-page .tile{min-height:260px;padding:22px;display:flex;flex-direction:column}
+body.dashboard-page .tile{min-width:0}
+body.dashboard-page .metric-card{min-height:262px;padding:20px;display:grid;grid-template-rows:auto auto minmax(92px,1fr) auto;gap:13px;align-content:stretch}
 body.dashboard-page .tile.produce{border-left:2px solid var(--produce-d);box-shadow:0 0 32px rgba(76,219,131,.08)}
 body.dashboard-page .tile.store{border-left:2px solid var(--store-d);box-shadow:0 0 32px rgba(255,194,71,.08)}
 body.dashboard-page .tile.import{border-left:2px solid var(--import-d);box-shadow:0 0 32px rgba(255,99,92,.08)}
 body.dashboard-page .tile.household{border-left:2px solid rgba(244,247,250,.9)}
-body.dashboard-page .tile-head{margin-bottom:24px;gap:14px}
-body.dashboard-page .tile-name{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.08em;color:rgba(244,247,250,.78)}
+body.dashboard-page .tile-head{margin-bottom:0;gap:14px}
+body.dashboard-page .metric-card-head{display:flex;align-items:center;justify-content:space-between;min-height:27px}
+body.dashboard-page .tile-name{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.095em;color:rgba(244,247,250,.76);line-height:1.35;text-transform:uppercase}
 body.dashboard-page .icon{width:23px;height:23px;stroke:currentColor;opacity:.82}
-body.dashboard-page .phrase{font-family:var(--mono);font-size:clamp(42px,5vw,62px);font-weight:500;letter-spacing:-.02em;text-shadow:0 0 22px color-mix(in srgb,currentColor 22%,transparent)}
-body.dashboard-page .phrase .unit{font-size:.42em;font-weight:500;margin-left:6px;color:currentColor}
-body.dashboard-page .status-pill{display:inline-flex;align-items:center;gap:7px;border:1px solid currentColor;background:color-mix(in srgb,currentColor 10%,transparent);border-radius:999px;padding:6px 11px;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;box-shadow:inset 0 0 18px color-mix(in srgb,currentColor 8%,transparent)}
-body.dashboard-page .status-pill i{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor;opacity:1}
-body.dashboard-page .status-pill.flash i{animation:none}
-body.dashboard-page .status-pill.badge{font-size:10px;background:rgba(255,194,71,.08)}
-body.dashboard-page .bar{height:8px;background:#071019;border:1px solid rgba(184,210,228,.18);border-radius:999px;box-shadow:inset 0 1px 4px rgba(0,0,0,.45)}
+body.dashboard-page .metric-value-row{display:grid;gap:5px;align-content:start}
+body.dashboard-page .phrase{font-family:var(--mono);font-size:clamp(42px,4.8vw,60px);font-weight:500;line-height:.95;letter-spacing:0;text-shadow:0 0 20px color-mix(in srgb,currentColor 20%,transparent);font-variant-numeric:tabular-nums}
+body.dashboard-page .phrase .unit{font-size:.42em;font-weight:500;margin-left:6px;color:currentColor;vertical-align:baseline}
+body.dashboard-page .metric-subtitle{font-family:var(--mono);font-size:11px;line-height:1.4;color:rgba(226,235,243,.62);letter-spacing:.04em;text-transform:uppercase}
+body.dashboard-page .metric-visual{display:grid;gap:9px;align-content:center;min-height:92px}
+body.dashboard-page .visual-stack{display:grid;gap:8px}
+body.dashboard-page .metric-footer{display:flex;align-items:end;justify-content:space-between;gap:12px;min-height:34px;padding-top:10px;border-top:1px solid rgba(184,210,228,.10);font-family:var(--mono)}
+body.dashboard-page .footer-stat{display:grid;gap:2px;min-width:0}
+body.dashboard-page .footer-stat b{display:block;font-size:14px;font-weight:650;line-height:1.1;color:var(--p-ink);font-variant-numeric:tabular-nums}
+body.dashboard-page .footer-stat-strong b{font-size:16px}
+body.dashboard-page .footer-label{font-size:10px;line-height:1.35;color:rgba(226,235,243,.58);letter-spacing:.08em;text-transform:uppercase}
+body.dashboard-page .status-pill{height:25px;display:inline-flex;align-items:center;gap:7px;border:1px solid currentColor;background:color-mix(in srgb,currentColor 9%,transparent);border-radius:999px;padding:0 10px;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.085em;line-height:1;text-transform:uppercase;white-space:nowrap;box-shadow:inset 0 0 16px color-mix(in srgb,currentColor 7%,transparent)}
+body.dashboard-page .status-pill i{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.9;box-shadow:0 0 8px currentColor}
+body.dashboard-page .status-pill.flash i,body.dashboard-page .status-pill.is-active i{animation:none;opacity:1;box-shadow:0 0 11px currentColor}
+body.dashboard-page .status-pill-small{height:21px;padding:0 8px;font-size:9px;letter-spacing:.08em}
+body.dashboard-page .status--producing{color:var(--produce-d)}
+body.dashboard-page .status--charging,body.dashboard-page .status--discharging{color:var(--store-d)}
+body.dashboard-page .status--exporting{color:var(--produce-d)}
+body.dashboard-page .status--importing{color:var(--import-d)}
+body.dashboard-page .status--live{color:var(--home-d)}
+body.dashboard-page .status--warning{color:var(--store-d);background:rgba(255,194,71,.10);border-color:rgba(255,194,71,.45)}
+body.dashboard-page .status--mismatch{color:var(--store-d);background:rgba(255,194,71,.12);border-color:rgba(255,194,71,.46)}
+body.dashboard-page .status--standby{color:rgba(226,235,243,.56);background:rgba(226,235,243,.05);border-color:rgba(226,235,243,.20)}
+body.dashboard-page .bar{height:10px;margin:0;background:rgba(7,16,25,.86);border:1px solid rgba(184,210,228,.18);border-radius:999px;box-shadow:inset 0 1px 4px rgba(0,0,0,.45)}
 body.dashboard-page .bar .fill{border-radius:999px;box-shadow:0 0 14px currentColor}
 body.dashboard-page .bar.center:after{background:rgba(244,247,250,.55)}
-body.dashboard-page .scale-label{font-family:var(--mono);font-size:11px;color:rgba(226,235,243,.62)}
-body.dashboard-page .load-meta{margin-top:auto;padding-top:10px;font-family:var(--mono)}
-body.dashboard-page .sparkline{height:58px;margin-top:auto;opacity:.95}
+body.dashboard-page .scale{align-items:center}
+body.dashboard-page .scale.three-up .scale-label:nth-child(2){text-align:center;color:rgba(244,247,250,.74)}
+body.dashboard-page .scale-label{font-family:var(--mono);font-size:11px;line-height:1.45;color:rgba(226,235,243,.66)}
+body.dashboard-page .sparkline{width:100%;height:58px;margin:0;opacity:.95}
 body.dashboard-page .sparkline path{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 body.dashboard-page .sparkline .spark-fill{fill:currentColor;opacity:.12;stroke:none}
-body.dashboard-page .soc{margin-top:18px}
-body.dashboard-page .cells{grid-template-columns:repeat(10,1fr);gap:4px;margin:10px 0}
-body.dashboard-page .cells i{height:17px;border-radius:3px;background:#071019;border:1px solid rgba(184,210,228,.18)}
-body.dashboard-page .cells i.on{background:linear-gradient(180deg,#FFD36C,#F0A923);border-color:rgba(255,194,71,.82);box-shadow:0 0 10px rgba(255,194,71,.24)}
-body.dashboard-page .soc-limit{width:2px;top:-6px;bottom:-6px;box-shadow:0 0 10px currentColor}
-body.dashboard-page .soc-limit-label{font-family:var(--mono);font-size:10px;font-weight:600}
+body.dashboard-page .soc{display:grid;gap:6px}
+body.dashboard-page .battery-pack-row{display:flex;align-items:center;gap:12px}
+body.dashboard-page .battery-pack{display:flex;align-items:center;gap:5px;min-width:0;flex:1}
+body.dashboard-page .battery-shell{position:relative;flex:1;min-width:0;border:1px solid rgba(184,210,228,.24);border-radius:7px;background:rgba(7,16,25,.82);padding:4px;box-shadow:inset 0 1px 5px rgba(0,0,0,.42)}
+body.dashboard-page .battery-terminal{width:5px;height:18px;border:1px solid rgba(184,210,228,.24);border-left:0;border-radius:0 4px 4px 0;background:rgba(184,210,228,.14)}
+body.dashboard-page .cells{display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin:0;height:24px}
+body.dashboard-page .cells i{height:100%;border-radius:3px;background:rgba(5,10,15,.9);border:1px solid rgba(184,210,228,.18)}
+body.dashboard-page .cells i.on{background:linear-gradient(180deg,#FFD36C,#F0A923);border-color:rgba(255,194,71,.82);box-shadow:0 0 10px rgba(255,194,71,.22)}
+body.dashboard-page .battery-pack.low .cells i.on{background:linear-gradient(180deg,#FF7A72,#D9463F);border-color:rgba(255,99,92,.82);box-shadow:0 0 10px rgba(255,99,92,.25)}
+body.dashboard-page .battery-pack.high .cells i.on{background:linear-gradient(180deg,#DDEB72,#FFC247);border-color:rgba(76,219,131,.42)}
+body.dashboard-page .battery-soc-text{min-width:42px;text-align:right;font-family:var(--mono);font-size:17px;font-weight:700;color:var(--store-d);font-variant-numeric:tabular-nums}
+body.dashboard-page .soc-limit{width:2px;top:2px;bottom:2px;z-index:2;box-shadow:0 0 10px currentColor}
+body.dashboard-page .soc-limit-labels{height:14px;margin-top:0}
+body.dashboard-page .soc-limit-label{font-family:var(--mono);font-size:10px;font-weight:600;line-height:1.2}
 body.dashboard-page .thin{display:none}
-body.dashboard-page .battery-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
 body.dashboard-page .tile.produce .sparkline{color:var(--produce-d)}
 body.dashboard-page .tile.import .sparkline{color:var(--import-d)}
+body.dashboard-page .tile.produce #grid-spark{color:var(--produce-d)}
 body.dashboard-page .tile.household .sparkline{color:var(--home-d)}
-body.dashboard-page .chart-card{margin-top:20px;padding:22px}
+body.dashboard-page .chart-card{margin-top:18px;padding:20px}
 body.dashboard-page .chart-top{align-items:flex-start;gap:18px;margin-bottom:8px}
-body.dashboard-page .chart-legend{font-family:var(--mono);font-size:12px;gap:12px}
-body.dashboard-page .chart-legend button{padding:4px 5px;border-radius:6px}
+body.dashboard-page .chart-legend{font-family:var(--mono);font-size:11px;line-height:1.4;gap:10px 14px}
+body.dashboard-page .chart-legend button{display:inline-flex;align-items:center;gap:6px;padding:4px 5px;border-radius:6px}
 body.dashboard-page .chart-legend button:hover,body.dashboard-page .chart-legend button:focus-visible{background:rgba(255,255,255,.06)}
+body.dashboard-page .chart-legend button[aria-pressed="false"]{opacity:.34;text-decoration:none}
+body.dashboard-page .chart-legend i{width:18px;height:2px;margin-right:0;border-radius:999px}
 body.dashboard-page .chart-range{display:flex;gap:4px;align-items:center;margin-left:auto;border:1px solid rgba(184,210,228,.13);background:rgba(5,10,15,.52);border-radius:999px;padding:4px}
 body.dashboard-page .chart-range button{border:0;background:transparent;color:var(--p-mut);border-radius:999px;padding:7px 12px;font:600 11px/1 var(--mono);cursor:pointer}
 body.dashboard-page .chart-range button.active{background:rgba(244,247,250,.12);color:var(--p-ink)}
 body.dashboard-page .chart-wrap{padding-top:2px}
-body.dashboard-page .chart{height:340px}
-body.dashboard-page .axis,body.dashboard-page .gridline{stroke:rgba(184,210,228,.10)}
+body.dashboard-page .chart{height:322px}
+body.dashboard-page .axis-label{fill:rgba(226,235,243,.72);font-family:var(--mono);font-size:10px}
+body.dashboard-page .axis,body.dashboard-page .gridline{stroke:rgba(184,210,228,.11)}
+body.dashboard-page .gridline-h{stroke:rgba(184,210,228,.17)}
+body.dashboard-page .gridline-v{stroke:rgba(184,210,228,.065)}
 body.dashboard-page .zero-line{stroke:rgba(244,247,250,.35);stroke-width:1.2}
 body.dashboard-page .forecast-line{stroke:rgba(154,170,186,.78);stroke-width:1.7;stroke-dasharray:6 7}
 body.dashboard-page .prod-line{stroke:var(--produce-d);stroke-width:2.2;opacity:.92}
@@ -504,15 +537,53 @@ body.dashboard-page .grid-import-fill{fill:rgba(255,99,92,.10)}
 body.dashboard-page .grid-export-fill{fill:rgba(76,219,131,.08)}
 body.dashboard-page .imp-fill{fill:rgba(255,99,92,.10)}
 body.dashboard-page .exp-fill{fill:rgba(76,219,131,.08)}
-body.dashboard-page .now{stroke:rgba(244,247,250,.78);stroke-width:1;stroke-dasharray:3 6}
+body.dashboard-page .now{stroke:rgba(244,247,250,.84);stroke-width:1.25;stroke-dasharray:3 6}
+body.dashboard-page .now-label-bg{fill:rgba(244,247,250,.12);stroke:rgba(244,247,250,.22);stroke-width:1}
+body.dashboard-page .now-label{fill:var(--p-ink);font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.08em}
 body.dashboard-page .chart-tooltip{background:#071019;border-color:rgba(184,210,228,.22);border-radius:10px;box-shadow:0 16px 38px rgba(0,0,0,.42)}
-body.dashboard-page .daystrip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:0;margin-top:16px;padding-top:0;border:1px solid rgba(184,210,228,.12);border-radius:12px;overflow:hidden;background:rgba(8,17,26,.72)}
-body.dashboard-page .daystrip div{min-width:0;padding:14px 16px;border-right:1px solid rgba(184,210,228,.10)}
-body.dashboard-page .daystrip div:last-child{border-right:0}
-body.dashboard-page .daystrip b{display:block;font-family:var(--mono);font-size:20px;font-weight:600}
-body.dashboard-page .daystrip span{font-family:var(--mono);font-size:10px;color:rgba(226,235,243,.62);letter-spacing:.08em;text-transform:uppercase}
+body.dashboard-page .daystrip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:0;margin-top:14px;padding-top:0;border:1px solid rgba(184,210,228,.12);border-radius:12px;overflow:hidden;background:rgba(8,17,26,.72)}
+body.dashboard-page .kpi-tile{min-width:0;display:grid;align-content:center;gap:5px;min-height:62px;padding:12px 15px;border-right:1px solid rgba(184,210,228,.10)}
+body.dashboard-page .kpi-tile:last-child{border-right:0}
+body.dashboard-page .kpi-tile b{display:block;font-family:var(--mono);font-size:20px;font-weight:650;line-height:1;font-variant-numeric:tabular-nums}
+body.dashboard-page .kpi-tile span{font-family:var(--mono);font-size:10px;line-height:1.35;color:rgba(226,235,243,.62);letter-spacing:.08em;text-transform:uppercase}
 @media(max-width:1200px){body.dashboard-page .tile-grid{grid-template-columns:repeat(2,1fr)}body.dashboard-page .daystrip{grid-template-columns:repeat(4,1fr)}}
-@media(max-width:860px){body.dashboard-page .dashboard-nav{padding:16px 14px 8px;align-items:flex-start;flex-direction:column}body.dashboard-page .brand-nav{justify-content:flex-start;gap:10px}body.dashboard-page .window-bar{justify-content:flex-start;padding:2px 14px 14px}body.dashboard-page .window-actions{justify-content:flex-start}body.dashboard-page .layout-toggle button{padding:7px 10px}body.dashboard-page .dash-head{margin-top:0;padding:0 14px 16px}body.dashboard-page .views{padding:0 14px 22px}body.dashboard-page .tile-grid{grid-template-columns:1fr}body.dashboard-page .chart{height:260px}body.dashboard-page .chart-top{display:grid}body.dashboard-page .chart-range{margin-left:0}body.dashboard-page .daystrip{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:860px){body.dashboard-page .dashboard-nav{padding:16px 14px 8px;align-items:flex-start;flex-direction:column}body.dashboard-page .brand-nav{justify-content:flex-start;gap:10px}body.dashboard-page .window-bar{justify-content:flex-start;padding:2px 14px 14px}body.dashboard-page .window-actions{justify-content:flex-start}body.dashboard-page .layout-toggle button,body.dashboard-page .segmented-control button{padding:7px 10px}body.dashboard-page .dash-head{margin-top:0;padding:0 14px 16px}body.dashboard-page .views{padding:0 14px 22px}body.dashboard-page .tile-grid{grid-template-columns:1fr}body.dashboard-page .metric-card{min-height:0}body.dashboard-page .chart{height:260px}body.dashboard-page .chart-top{display:grid}body.dashboard-page .chart-range{margin-left:0}body.dashboard-page .daystrip{grid-template-columns:repeat(2,1fr)}body.dashboard-page .metric-footer{align-items:start;flex-wrap:wrap}}
+html[data-theme=light] body.dashboard-page{--panel:#EDF1F4;--panel-2:#FFFFFF;--panel-3:#E6EDF2;--p-ink:#15202A;--p-mut:rgba(74,98,118,.72);--p-line:rgba(74,98,118,.20);--home-d:#263441;--steel:#5F7588;background:radial-gradient(circle at 50% -12%,rgba(76,219,131,.14),transparent 34rem),linear-gradient(180deg,#F7FAFC 0,#EDF1F4 48%,#E5EBF0 100%);color:var(--p-ink)}
+html[data-theme=light] body.dashboard-page .wordmark strong{color:var(--p-ink)}
+html[data-theme=light] body.dashboard-page .brand-nav a{color:rgba(74,98,118,.66)}
+html[data-theme=light] body.dashboard-page .brand-nav a:hover,html[data-theme=light] body.dashboard-page .brand-nav a:focus-visible{color:var(--ink)}
+html[data-theme=light] body.dashboard-page .brand-nav a.active{color:var(--produce);border-bottom-color:var(--produce)}
+html[data-theme=light] body.dashboard-page .mark{filter:drop-shadow(0 0 8px rgba(46,156,98,.18))}
+html[data-theme=light] body.dashboard-page .mark line,html[data-theme=light] body.dashboard-page .mark circle{stroke:var(--produce)}
+html[data-theme=light] body.dashboard-page .mark circle{fill:#EDF1F4}
+html[data-theme=light] body.dashboard-page .layout-toggle,html[data-theme=light] body.dashboard-page .segmented-control,html[data-theme=light] body.dashboard-page .chart-range,html[data-theme=light] body.dashboard-page .mailbox-button{background:rgba(255,255,255,.72);border-color:rgba(74,98,118,.20);color:var(--ink)}
+html[data-theme=light] body.dashboard-page .layout-toggle button,html[data-theme=light] body.dashboard-page .segmented-control button,html[data-theme=light] body.dashboard-page .chart-range button{color:rgba(74,98,118,.76)}
+html[data-theme=light] body.dashboard-page .layout-toggle button.active,html[data-theme=light] body.dashboard-page .segmented-control button.active,html[data-theme=light] body.dashboard-page .chart-range button.active{background:#DDE6ED;color:#15202A}
+html[data-theme=light] body.dashboard-page .dash-meta{color:rgba(74,98,118,.72)}
+html[data-theme=light] body.dashboard-page .tile,html[data-theme=light] body.dashboard-page .chart-card,html[data-theme=light] body.dashboard-page .flow-node,html[data-theme=light] body.dashboard-page .mailbox-panel{background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(244,248,250,.94));border-color:rgba(74,98,118,.18);box-shadow:0 0 0 1px rgba(255,255,255,.72),0 18px 42px rgba(21,32,42,.10);backdrop-filter:blur(8px)}
+html[data-theme=light] body.dashboard-page .tile.produce{box-shadow:0 0 0 1px rgba(255,255,255,.72),0 18px 42px rgba(21,32,42,.10),0 0 28px rgba(46,156,98,.08)}
+html[data-theme=light] body.dashboard-page .tile.store{box-shadow:0 0 0 1px rgba(255,255,255,.72),0 18px 42px rgba(21,32,42,.10),0 0 28px rgba(216,155,42,.08)}
+html[data-theme=light] body.dashboard-page .tile.import{box-shadow:0 0 0 1px rgba(255,255,255,.72),0 18px 42px rgba(21,32,42,.10),0 0 28px rgba(206,73,64,.08)}
+html[data-theme=light] body.dashboard-page .tile-name{color:rgba(74,98,118,.86)}
+html[data-theme=light] body.dashboard-page .metric-subtitle,html[data-theme=light] body.dashboard-page .scale-label,html[data-theme=light] body.dashboard-page .footer-label,html[data-theme=light] body.dashboard-page .kpi-tile span{color:rgba(74,98,118,.76)}
+html[data-theme=light] body.dashboard-page .metric-footer{border-top-color:rgba(74,98,118,.12)}
+html[data-theme=light] body.dashboard-page .footer-stat b{color:var(--p-ink)}
+html[data-theme=light] body.dashboard-page .status--standby{color:rgba(74,98,118,.70);background:rgba(74,98,118,.06);border-color:rgba(74,98,118,.24)}
+html[data-theme=light] body.dashboard-page .bar,html[data-theme=light] body.dashboard-page .battery-shell,html[data-theme=light] body.dashboard-page .cells i{background:#EEF3F6;border-color:rgba(74,98,118,.18);box-shadow:inset 0 1px 3px rgba(21,32,42,.08)}
+html[data-theme=light] body.dashboard-page .battery-terminal{background:#DDE6ED;border-color:rgba(74,98,118,.20)}
+html[data-theme=light] body.dashboard-page .daystrip{background:rgba(255,255,255,.86);border-color:rgba(74,98,118,.16)}
+html[data-theme=light] body.dashboard-page .kpi-tile{border-right-color:rgba(74,98,118,.12)}
+html[data-theme=light] body.dashboard-page .axis-label{fill:rgba(74,98,118,.82)}
+html[data-theme=light] body.dashboard-page .gridline-h{stroke:rgba(74,98,118,.16)}
+html[data-theme=light] body.dashboard-page .gridline-v{stroke:rgba(74,98,118,.07)}
+html[data-theme=light] body.dashboard-page .zero-line{stroke:rgba(21,32,42,.30)}
+html[data-theme=light] body.dashboard-page .now{stroke:rgba(21,32,42,.64)}
+html[data-theme=light] body.dashboard-page .now-label-bg{fill:rgba(255,255,255,.88);stroke:rgba(74,98,118,.22)}
+html[data-theme=light] body.dashboard-page .now-label{fill:#15202A}
+html[data-theme=light] body.dashboard-page .forecast-line{stroke:rgba(95,117,136,.78)}
+html[data-theme=light] body.dashboard-page .home-line{stroke:var(--home-d)}
+html[data-theme=light] body.dashboard-page .chart-tooltip{background:#FFFFFF;border-color:rgba(74,98,118,.20);color:var(--p-ink);box-shadow:0 16px 38px rgba(21,32,42,.16)}
+html[data-theme=light] body.dashboard-page .chart-tooltip span{color:rgba(74,98,118,.76)}
 """
 
 def brand_mark() -> str:
@@ -1199,20 +1270,194 @@ def dsmr_body() -> str:
     """
 
 
+def segmented_control(aria_label: str, buttons: list[tuple[str, str, str, bool]]) -> str:
+    rendered = "".join(
+        f'<button id="{button_id}" class="{"active" if active else ""}" type="button" onclick="{onclick}">{label}</button>'
+        for button_id, label, onclick, active in buttons
+    )
+    return f'<div class="layout-toggle segmented-control" role="tablist" aria-label="{aria_label}">{rendered}</div>'
+
+
+def status_pill(
+    pill_id: str,
+    label: str,
+    variant: str,
+    *,
+    label_id: str | None = None,
+    extra_class: str = "",
+    hidden: bool = False,
+) -> str:
+    classes = f"status-pill status--{variant}"
+    if extra_class:
+        classes += f" {extra_class}"
+    hidden_attr = " hidden" if hidden else ""
+    label_attr = f' id="{label_id}"' if label_id else ""
+    return f'<span class="{classes}" id="{pill_id}"{hidden_attr}><i></i><span{label_attr}>{label}</span></span>'
+
+
+def metric_card(
+    kind: str,
+    title: str,
+    icon_html: str,
+    pill_html: str,
+    value_id: str,
+    *,
+    card_id: str | None = None,
+    phrase_id: str | None = None,
+    value_class: str = "",
+    subtitle_html: str = "",
+    visual_html: str = "",
+    footer_html: str = "",
+    aria_label: str = "",
+) -> str:
+    value_classes = f"phrase {value_class}".strip()
+    id_attr = f' id="{card_id}"' if card_id else ""
+    phrase_id_attr = f' id="{phrase_id}"' if phrase_id else ""
+    return f"""
+            <article class="tile metric-card {kind}"{id_attr} aria-label="{aria_label or title}">
+              <div class="tile-head metric-card-head"><span class="tile-name">{icon_html} {title}</span>{pill_html}</div>
+              <div class="metric-value-row">
+                <div class="{value_classes}"{phrase_id_attr}><span id="{value_id}">--</span> <span class="unit power-unit">kW</span></div>
+                {subtitle_html}
+              </div>
+              <div class="metric-visual">{visual_html}</div>
+              <div class="metric-footer">{footer_html}</div>
+            </article>
+    """
+
+
+def battery_pack() -> str:
+    return """
+                <div class="soc">
+                  <div class="scale"><span class="scale-label">State of charge</span><span class="scale-label">usable window</span></div>
+                  <div class="battery-pack-row">
+                    <div id="battery-pack" class="battery-pack" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Battery state of charge">
+                      <div class="battery-shell">
+                        <div class="cells" id="soc-cells"></div>
+                        <span id="soc-min-line" class="soc-limit min" title="Minimum SoC" hidden></span>
+                        <span id="soc-max-line" class="soc-limit max" title="Maximum SoC" hidden></span>
+                      </div>
+                      <span class="battery-terminal" aria-hidden="true"></span>
+                    </div>
+                    <span id="soc-text" class="battery-soc-text">--%</span>
+                  </div>
+                  <div class="soc-limit-labels">
+                    <span id="soc-min-label" class="soc-limit-label min" hidden>min --%</span>
+                    <span id="soc-max-label" class="soc-limit-label max" hidden>max --%</span>
+                  </div>
+                </div>
+    """
+
+
+def kpi_tile(value_id: str, label: str, *, value: str = "--", accent_class: str = "") -> str:
+    value_classes = f' class="{accent_class}"' if accent_class else ""
+    return f'<div class="kpi-tile"><b id="{value_id}"{value_classes}>{value}</b><span>{label}</span></div>'
+
+
 def energy_dashboard_body() -> str:
+    unit_toggle = segmented_control(
+        "Power unit",
+        [
+            ("watts-toggle", "Watts", "setPowerUnit('w')", False),
+            ("kilowatts-toggle", "Kilowatts", "setPowerUnit('kw')", True),
+        ],
+    )
+    layout_toggle = segmented_control(
+        "Dashboard layout",
+        [
+            ("cluster-toggle", "Cluster", "setLayout('cluster')", True),
+            ("flow-toggle", "Flow", "setLayout('flow')", False),
+        ],
+    )
+    solar_card = metric_card(
+        "produce",
+        "Solar",
+        icon("solar"),
+        status_pill("solar-pill", "Producing", "producing", label_id="solar-status"),
+        "solar-value",
+        value_class="produce-c",
+        visual_html="""
+                <div class="visual-stack">
+                  <div class="bar"><span id="solar-bar" class="fill" style="background:var(--produce-d)"></span></div>
+                  <div class="scale"><span class="scale-label">0</span><span class="scale-label">~5 kWp peak</span></div>
+                  <svg id="solar-spark" class="sparkline" viewBox="0 0 240 58" role="img" aria-label="Solar production today"></svg>
+                </div>
+        """,
+        footer_html='<span class="footer-stat footer-stat-strong"><span class="footer-label">Generated today</span><b><span id="solar-kwh">--</span> kWh</b></span>',
+        aria_label="Solar live tile",
+    )
+    battery_card = metric_card(
+        "store",
+        "Battery",
+        icon("battery"),
+        status_pill("battery-pill", "Standby", "standby", label_id="battery-status-word"),
+        "battery-value",
+        value_class="store-c",
+        visual_html=f"""
+                <div class="visual-stack">
+                  <div class="bar center"><span id="battery-bar" class="fill" style="background:var(--store-d);left:50%"></span></div>
+                  <div class="scale three-up"><span class="scale-label scale-power" data-kw="-3 charge" data-w="-3000 charge">-3 charge</span><span class="scale-label">0</span><span class="scale-label scale-power" data-kw="+3 discharge" data-w="+3000 discharge">+3 discharge</span></div>
+                  {battery_pack()}
+                </div>
+        """,
+        footer_html='<span class="footer-stat"><span class="footer-label">Capacity</span><b id="battery-capacity-text">-- / 10 kWh</b></span><span class="footer-stat"><span class="footer-label">Health</span><b id="soh-text">--%</b></span><div class="thin"><i id="soh-bar" style="width:98%"></i></div>',
+        aria_label="Battery live tile",
+    )
+    grid_card = metric_card(
+        "import",
+        "Grid",
+        icon("grid"),
+        status_pill("grid-pill", "Importing", "importing", label_id="grid-status-word"),
+        "grid-value",
+        card_id="grid-tile",
+        phrase_id="grid-phrase",
+        value_class="import-c",
+        subtitle_html='<div class="metric-subtitle" id="grid-direction-label">importing from grid</div>',
+        visual_html="""
+                <div class="visual-stack">
+                  <div class="bar center"><span id="grid-bar" class="fill" style="left:50%"></span></div>
+                  <div class="scale three-up"><span class="scale-label scale-power" data-kw="-3 import" data-w="-3000 import">-3 import</span><span class="scale-label">0</span><span class="scale-label scale-power" data-kw="+3 export" data-w="+3000 export">+3 export</span></div>
+                  <svg id="grid-spark" class="sparkline" viewBox="0 0 240 58" role="img" aria-label="Grid power today"></svg>
+                </div>
+        """,
+        footer_html='<span class="footer-stat"><span class="footer-label">Imported today</span><b><span id="grid-import-kwh">--</span> kWh</b></span><span class="footer-stat"><span class="footer-label">Exported</span><b><span id="grid-export-kwh">--</span> kWh</b></span>',
+        aria_label="Grid live tile",
+    )
+    household_card = metric_card(
+        "household",
+        "Home Consumption",
+        icon("home"),
+        status_pill("household-pill", "Live", "live", label_id="household-status-word"),
+        "household-value",
+        value_class="household-c",
+        visual_html="""
+                <div class="visual-stack">
+                  <div class="bar"><span id="household-bar" class="fill" style="background:var(--home-d)"></span></div>
+                  <div class="scale"><span class="scale-label">0</span><span class="scale-label">~5 kW load</span></div>
+                  <svg id="household-spark" class="sparkline" viewBox="0 0 240 58" role="img" aria-label="Household load for the last hour"></svg>
+                </div>
+        """,
+        footer_html='<span class="footer-stat"><span class="footer-label">Consumed today</span><b><span id="household-kwh">--</span> kWh</b></span>' + status_pill("household-badge", "mismatch", "mismatch", extra_class="status-pill-small", hidden=True),
+        aria_label="Household load live tile",
+    )
+    kpi_strip = "".join(
+        [
+            kpi_tile("summary-self", "Self-sufficiency", value="--%", accent_class="produce-c"),
+            kpi_tile("kwh-produced", "Total generated", accent_class="produce-c"),
+            kpi_tile("summary-consumed", "Total consumed"),
+            kpi_tile("kwh-imported", "Imported", accent_class="import-c"),
+            kpi_tile("kwh-exported", "Exported", accent_class="produce-c"),
+            kpi_tile("summary-cycles", "Battery cycles", accent_class="store-c"),
+            kpi_tile("summary-co2", "CO2 saved", accent_class="produce-c"),
+        ]
+    )
     return """
     <section class="instrument dashboard-full" aria-label="Minyad live dashboard">
       <div class="dashboard-nav"><a class="brand-lockup" href="/" aria-label="Minyad dashboard">__MARK__<span class="wordmark"><strong>Minyad</strong><span>Virtual Power Plant</span></span></a><nav class="brand-nav" aria-label="Primary navigation">__NAV__</nav></div>
       <div class="window-bar">
         <div class="window-actions">
-          <div class="layout-toggle" role="tablist" aria-label="Power unit">
-            <button id="watts-toggle" type="button" onclick="setPowerUnit('w')">Watts</button>
-            <button id="kilowatts-toggle" class="active" type="button" onclick="setPowerUnit('kw')">Kilowatts</button>
-          </div>
-          <div class="layout-toggle" role="tablist" aria-label="Dashboard layout">
-            <button id="cluster-toggle" class="active" type="button" onclick="setLayout('cluster')">Cluster</button>
-            <button id="flow-toggle" type="button" onclick="setLayout('flow')">Flow</button>
-          </div>
+          __UNIT_TOGGLE__
+          __LAYOUT_TOGGLE__
           <button class="mailbox-button" type="button" onclick="toggleMailbox()" aria-label="Agent mailbox">✉<span id="mailbox-badge" class="badge" hidden>0</span></button>
         </div>
       </div>
@@ -1236,30 +1481,9 @@ def energy_dashboard_body() -> str:
       <div class="views">
         <div id="cluster-view" class="view active">
           <div class="tile-grid">
-            <article class="tile produce" aria-label="Solar live tile">
-              <div class="tile-head"><span class="tile-name">__SOLAR__ Solar</span><span class="status-pill produce-c" id="solar-pill"><i></i><span id="solar-status">Producing</span></span></div>
-              <div class="phrase produce-c"><span id="solar-value">--</span> <span class="unit power-unit">kW</span></div>
-              <div class="bar"><span id="solar-bar" class="fill" style="background:var(--produce-d)"></span></div><div class="scale"><span class="scale-label">0</span><span class="scale-label">~5 kWp peak</span></div><div class="load-meta"><span class="scale-label"><span id="solar-kwh">--</span> kWh generated today</span></div><svg id="solar-spark" class="sparkline" viewBox="0 0 240 58" role="img" aria-label="Solar production today"></svg>
-            </article>
-            <article class="tile store" aria-label="Battery live tile">
-              <div class="tile-head"><span class="tile-name">__BATTERY__ Battery</span><span class="status-pill store-c" id="battery-pill"><i></i><span id="battery-status-word">Standby</span></span></div>
-              <div class="phrase store-c"><span id="battery-value">--</span> <span class="unit power-unit">kW</span></div>
-              <div class="bar center"><span id="battery-bar" class="fill" style="background:var(--store-d);left:50%"></span></div><div class="scale"><span class="scale-label scale-power" data-kw="−3 charge" data-w="−3000 charge">−3 charge</span><span class="scale-label scale-power" data-kw="discharge +3" data-w="discharge +3000">discharge +3</span></div>
-              <div class="soc"><div class="scale"><span class="scale-label">State of charge (SoC)</span><span class="scale-label"><span id="soc-text">--</span></span></div><div class="soc-gauge"><div class="cells" id="soc-cells"></div><span id="soc-min-line" class="soc-limit min" title="Minimum SoC" hidden></span><span id="soc-max-line" class="soc-limit max" title="Maximum SoC" hidden></span></div><div class="soc-limit-labels"><span id="soc-min-label" class="soc-limit-label min" hidden>min --%</span><span id="soc-max-label" class="soc-limit-label max" hidden>max --%</span></div><div class="battery-meta"><span class="scale-label">Capacity</span><span class="scale-label" id="battery-capacity-text">-- / 10 kWh</span><span class="scale-label">Health <span id="soh-text">--%</span></span></div><div class="thin"><i id="soh-bar" style="width:98%"></i></div></div>
-            </article>
-            <article class="tile import" id="grid-tile" aria-label="Grid live tile">
-              <div class="tile-head"><span class="tile-name">__GRID__ Grid</span><span class="status-pill" id="grid-pill"><i></i><span id="grid-status-word">Importing</span></span></div>
-              <div class="phrase" id="grid-phrase"><span id="grid-value">--</span> <span class="unit power-unit">kW</span></div>
-              <div class="bar center"><span id="grid-bar" class="fill" style="left:50%"></span></div><div class="scale"><span class="scale-label scale-power" data-kw="−3 import" data-w="−3000 import">−3 import</span><span class="scale-label scale-power" data-kw="export +3" data-w="export +3000">export +3</span></div><div class="load-meta"><span class="scale-label"><span id="grid-import-kwh">--</span> kWh imported today</span><span class="scale-label"><span id="grid-export-kwh">--</span> exported</span></div><svg id="grid-spark" class="sparkline" viewBox="0 0 240 58" role="img" aria-label="Grid power today"></svg>
-            </article>
-            <article class="tile household" aria-label="Household load live tile">
-              <div class="tile-head"><span class="tile-name">Home Consumption</span><span class="status-pill" id="household-pill"><i></i><span id="household-status-word">Live</span></span></div>
-              <div class="phrase"><span id="household-value">--</span> <span class="unit power-unit">kW</span></div>
-              <svg id="household-spark" class="sparkline" viewBox="0 0 240 54" role="img" aria-label="Household load for the last hour"></svg>
-              <div class="load-meta"><span class="scale-label"><span id="household-kwh">--</span> kWh today</span><span class="status-pill badge" id="household-badge" hidden>⚠ mismatch</span></div>
-            </article>
+            __METRIC_CARDS__
           </div>
-          <div class="chart-card desktop-only"><div class="chart-top"><span class="tile-name">Combined day graph · kW / EUR/kWh</span><div class="chart-legend" aria-label="Toggle day graph series"><button type="button" data-chart-series="forecast" aria-pressed="true" style="color:var(--steel)"><i></i>Forecast</button><button type="button" data-chart-series="solar" aria-pressed="true" style="color:var(--produce-d)"><i></i>Production</button><button type="button" data-chart-series="battery" aria-pressed="true" style="color:var(--store-d)"><i></i>Battery</button><button type="button" data-chart-series="grid" aria-pressed="true" style="color:var(--import-d)"><i></i>Grid</button><button type="button" data-chart-series="household" aria-pressed="true" style="color:var(--home-d)"><i></i>Home</button><button type="button" data-chart-series="prices" aria-pressed="false" style="color:#3B82F6"><i style="height:8px;width:8px;border-radius:2px"></i>ENTSO-E prices</button></div><div class="chart-range" aria-label="Chart range"><button type="button" class="active" data-chart-range="24h">24H</button><button type="button" data-chart-range="12h">12H</button><button type="button" data-chart-range="7d">7D</button><button type="button" data-chart-range="30d">30D</button></div></div><div class="chart-wrap"><svg id="day-chart" class="chart" viewBox="0 0 960 300" role="img" aria-label="Forecast, production, battery, grid, home consumption and ENTSO-E price series for today"></svg><div id="day-chart-tooltip" class="chart-tooltip" hidden></div></div><div class="daystrip"><div><b class="produce-c" id="summary-self">--%</b><span>Self-sufficiency</span></div><div><b class="produce-c" id="kwh-produced">--</b><span>Total generated</span></div><div><b id="summary-consumed">--</b><span>Total consumed</span></div><div><b class="import-c" id="kwh-imported">--</b><span>Imported</span></div><div><b class="produce-c" id="kwh-exported">--</b><span>Exported</span></div><div><b class="store-c" id="summary-cycles">--</b><span>Battery cycles</span></div><div><b class="produce-c" id="summary-co2">--</b><span>CO2 saved</span></div></div></div>
+          <div class="chart-card desktop-only"><div class="chart-top"><span class="tile-name">Combined day graph · kW / EUR/kWh</span><div class="chart-legend" aria-label="Toggle day graph series"><button type="button" data-chart-series="forecast" aria-pressed="true" style="color:var(--steel)"><i></i>Forecast</button><button type="button" data-chart-series="solar" aria-pressed="true" style="color:var(--produce-d)"><i></i>Production</button><button type="button" data-chart-series="battery" aria-pressed="true" style="color:var(--store-d)"><i></i>Battery</button><button type="button" data-chart-series="grid" aria-pressed="true" style="color:var(--import-d)"><i></i>Grid</button><button type="button" data-chart-series="household" aria-pressed="true" style="color:var(--home-d)"><i></i>Home</button><button type="button" data-chart-series="prices" aria-pressed="false" style="color:#70A7D7"><i style="height:8px;width:8px;border-radius:2px"></i>ENTSO-E prices</button></div><div class="chart-range" aria-label="Chart range"><button type="button" class="active" data-chart-range="24h">24H</button><button type="button" data-chart-range="12h">12H</button><button type="button" data-chart-range="7d">7D</button><button type="button" data-chart-range="30d">30D</button></div></div><div class="chart-wrap"><svg id="day-chart" class="chart" viewBox="0 0 960 300" role="img" aria-label="Forecast, production, battery, grid, home consumption and ENTSO-E price series for today"></svg><div id="day-chart-tooltip" class="chart-tooltip" hidden></div></div><div class="daystrip">__KPI_STRIP__</div></div>
         </div>
         <div id="flow-view" class="view"><div class="flow-board"><svg class="flow-svg" viewBox="0 0 1000 560" aria-hidden="true"><path id="flow-solar-home" class="flow-line" d="M500 135 L500 245"/><path id="flow-home-battery" class="flow-line" d="M450 290 L260 420"/><path id="flow-home-grid" class="flow-line" d="M550 290 L740 420"/></svg><div class="flow-node solar"><span class="tile-name">Solar</span><div class="phrase produce-c"><span id="f-solar">--</span> <span class="unit power-unit">kW</span></div></div><div class="flow-node home"><span class="tile-name">Home</span><div class="phrase"><span id="f-home">--</span> <span class="unit power-unit">kW</span></div></div><div class="flow-node battery"><span class="tile-name">Battery</span><div class="phrase store-c"><span id="f-battery">--</span> <span class="unit power-unit">kW</span></div></div><div class="flow-node grid"><span class="tile-name">Grid</span><div class="phrase" id="f-grid-phrase"><span id="f-grid">--</span> <span class="unit power-unit">kW</span></div></div></div></div>
         <div class="mobile-readout"><div class="mobile-rows"><div class="mobile-row"><span class="tile-name">Battery</span><b class="value store-c" id="m-battery">-- kW</b></div><div class="mobile-row"><span class="tile-name">Grid</span><b class="value" id="m-grid">-- kW</b></div><div class="mobile-row"><span class="tile-name">Self-sufficiency</span><b class="value produce-c" id="m-self">--%</b></div></div></div>
@@ -1267,7 +1491,7 @@ def energy_dashboard_body() -> str:
     </section>
     <script>
       const solarMax=5, signedMax=3, nominalKwh=10; let powerUnit='kw'; let last={solar:0,battery:0,grid:0,household:0,soc:82,soh:98}; let batteryLimits={min:null,max:null,overrideSoc:false}; let curves=null; let curvesLoadedAt=0; let chartRange='24h'; let mailboxMessages=[]; let mailboxTab='messages'; let selectedMessageId=null; let tradePrices=[]; let tradePricesLoadedAt=0; const chartSeriesVisible={forecast:true,solar:true,battery:true,grid:true,household:true,prices:false};
-      const $=id=>document.getElementById(id); const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null}; const fmtPower=(v,signed=false)=>{if(v==null)return '--'; const value=powerUnit==='w'?Math.round(Math.abs(v)*1000):Math.abs(v).toFixed(2); return signed?(v>0?'+':'−')+value:String(value)}; const unitLabel=()=>powerUnit==='w'?'W':'kW';
+      const $=id=>document.getElementById(id); const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null}; const fmtPower=(v,signed=false)=>{if(v==null)return '--'; const value=powerUnit==='w'?Math.round(Math.abs(v)*1000):Math.abs(v).toFixed(2); return signed?(v>0?'+':'-')+value:String(value)}; const unitLabel=()=>powerUnit==='w'?'W':'kW';
       async function refreshMailboxCount(){try{const res=await fetch('/api/messages/unread-count'); if(!res.ok)return; const data=await res.json(); const count=Number(data.unread_count||0); const badge=$('mailbox-badge'); badge.textContent=count>99?'99+':String(count); badge.hidden=count<1;}catch(e){}}
       function mailboxChecks(m){return `<span class="message-checks" title="Human / AI acknowledgements"><span class="human ${m.operator_ack_at?'ack':''}">✓</span><span class="agent ${m.agent_ack_at?'ack':''}">✓</span></span>`;}
       async function loadMailbox(){const list=$('mailbox-list'); const detail=$('message-detail'); list.innerHTML='<span class="scale-label">Loading…</span>'; const archived=mailboxTab==='archive'; try{const res=await fetch(`/api/messages?sender=agent&limit=30&archived=${archived?'true':'false'}`); mailboxMessages=res.ok?await res.json():[];}catch(e){mailboxMessages=[];} if(!mailboxMessages.length){list.innerHTML=`<span class="scale-label">No agent messages in ${archived?'archive':'messages'}.</span>`; selectedMessageId=null; detail.innerHTML='<span class="scale-label">Select a message.</span>'; return;} if(!selectedMessageId||!mailboxMessages.some(m=>m.id===selectedMessageId))selectedMessageId=mailboxMessages[0].id; list.innerHTML=mailboxMessages.map(m=>`<button class="mailbox-item ${m.read_at?'':'unread'} ${m.id===selectedMessageId?'active':''}" type="button" onclick="openMessage(${m.id})"><small><span class="severity-dot ${m.severity}"></span>${m.category} · ${new Date(m.created_at).toLocaleString()}</small><span class="mailbox-subject"><span>${escapeHtml(m.subject)}</span>${mailboxChecks(m)}</span></button>`).join(''); await openMessage(selectedMessageId,false);}
@@ -1287,10 +1511,10 @@ def energy_dashboard_body() -> str:
       function initChartLegend(){document.querySelectorAll('[data-chart-series]').forEach(el=>el.addEventListener('click',()=>toggleChartSeries(el.dataset.chartSeries)));}
       function initChartRange(){document.querySelectorAll('[data-chart-range]').forEach(el=>el.addEventListener('click',async()=>{chartRange=el.dataset.chartRange||'24h'; document.querySelectorAll('[data-chart-range]').forEach(btn=>btn.classList.toggle('active',btn===el)); curves=null; curvesLoadedAt=0; await update();}));}
       function setPowerUnit(unit){powerUnit=unit; $('watts-toggle').classList.toggle('active',unit==='w'); $('kilowatts-toggle').classList.toggle('active',unit==='kw'); document.querySelectorAll('.power-unit').forEach(el=>el.textContent=unitLabel()); document.querySelectorAll('.scale-power').forEach(el=>el.textContent=el.dataset[unit]); renderReadings();}
-      function setStatusPill(id,colorClass,isActive){const el=$(id); if(!el)return; el.className='status-pill '+colorClass+(isActive?' flash':'');}
-      function renderReadings(){const home=Math.max(0,last.household||last.solar+last.battery-last.grid), gExport=last.grid>=0; $('solar-value').textContent=fmtPower(last.solar); $('m-solar').textContent=fmtPower(last.solar); $('battery-value').textContent=fmtPower(last.battery,true); $('grid-value').textContent=fmtPower(last.grid,true); $('household-value').textContent=fmtPower(home); $('f-solar').textContent=fmtPower(last.solar); $('f-battery').textContent=fmtPower(last.battery,true); $('f-grid').textContent=fmtPower(last.grid,true); $('f-home').textContent=fmtPower(home); $('m-battery').textContent=fmtPower(last.battery,true)+' '+unitLabel(); $('m-grid').textContent=fmtPower(last.grid,true)+' '+unitLabel(); $('f-grid-phrase').className='phrase '+(gExport?'produce-c':'import-c');}
+      function setStatusPill(id,variant,isActive=false){const el=$(id); if(!el)return; const small=el.classList.contains('status-pill-small')?' status-pill-small':''; el.className=`status-pill status--${variant}${small}${isActive?' is-active':''}`;}
+      function renderReadings(){const home=Math.max(0,last.household||last.solar+last.battery-last.grid), gExport=last.grid>=0; $('solar-value').textContent=fmtPower(last.solar); $('m-solar').textContent=fmtPower(last.solar); $('battery-value').textContent=fmtPower(last.battery,true); $('grid-value').textContent=fmtPower(last.grid,true); $('household-value').textContent=fmtPower(home); $('f-solar').textContent=fmtPower(last.solar); $('f-battery').textContent=fmtPower(last.battery,true); $('f-grid').textContent=fmtPower(last.grid,true); $('f-home').textContent=fmtPower(home); $('m-battery').textContent=fmtPower(last.battery,true)+' '+unitLabel(); $('m-grid').textContent=fmtPower(last.grid,true)+' '+unitLabel(); $('f-grid-phrase').className='phrase '+(gExport?'produce-c':'import-c'); const gridLabel=Math.abs(last.grid)<.03?'standing by':gExport?'exporting to grid':'importing from grid'; $('grid-direction-label').textContent=gridLabel; $('household-bar').style.width=Math.min(100,home/solarMax*100)+'%';}
       function setBar(id,v,max,color){const el=$(id); if(!el)return; const pct=Math.min(100,Math.abs(v)/max*50); el.style.background=color; if(v<0){el.style.left=(50-pct)+'%';el.style.width=pct+'%'}else{el.style.left='50%';el.style.width=pct+'%'}}
-      function setSoc(soc){$('soc-text').textContent=Math.round(soc)+'%'; const c=$('soc-cells'), blocks=Math.max(1,Math.round(nominalKwh)); c.style.gridTemplateColumns=`repeat(${blocks},1fr)`; c.innerHTML=''; for(let i=0;i<blocks;i++){const cell=document.createElement('i'); if(i<Math.round(soc/100*blocks))cell.className='on'; c.appendChild(cell)} renderSocLimits();}
+      function setSoc(soc){const pct=clampPct(n(soc)??0), rounded=Math.round(pct), c=$('soc-cells'), pack=$('battery-pack'), blocks=10; $('soc-text').textContent=rounded+'%'; if(pack){pack.className='battery-pack '+(pct<15?'low':pct>=90?'high':''); pack.setAttribute('aria-valuenow',String(rounded));} c.style.gridTemplateColumns=`repeat(${blocks},1fr)`; c.innerHTML=''; for(let i=0;i<blocks;i++){const cell=document.createElement('i'); if(i<Math.round(pct/100*blocks))cell.className='on'; c.appendChild(cell)} renderSocLimits();}
       function clampPct(value){return Math.max(0,Math.min(100,value));}
       function renderSocLimits(){const min=batteryLimits.overrideSoc?0:n(batteryLimits.min), max=batteryLimits.overrideSoc?100:n(batteryLimits.max); const limits=[['min',min],['max',max]]; for(const [kind,value] of limits){const line=$(`soc-${kind}-line`), label=$(`soc-${kind}-label`); if(!line||!label)continue; const hasValue=value!=null; line.hidden=!hasValue; label.hidden=!hasValue; if(!hasValue)continue; const pct=clampPct(value); line.style.left=pct+'%'; label.style.left=pct+'%'; label.textContent=`${kind} ${Math.round(value)}%${batteryLimits.overrideSoc?' override':''}`;}}
       async function loadBatteryLimits(){try{const res=await fetch('/api/battery/settings'); if(!res.ok)return; const settings=await res.json(); batteryLimits={...batteryLimits,min:n(settings.soc_floor),max:n(settings.soc_ceiling)}; renderSocLimits();}catch(e){}}
@@ -1313,29 +1537,29 @@ def energy_dashboard_body() -> str:
       function prepareChartRangeItems(items,start,end){const byBucket=new Map(); const bucketLen=chartRange==='30d'?3600000:chartRange==='7d'?900000:60000; for(const item of items||[]){const ts=new Date(item.timestamp).getTime(); if(ts<start||ts>end)continue; const key=Math.floor(ts/bucketLen)*bucketLen; byBucket.set(key,item);} return [...byBucket.values()].sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));}
       function chartTickLabel(ts){const d=new Date(ts); if(chartRange==='7d'||chartRange==='30d')return d.toLocaleDateString([], {day:'2-digit',month:'short'}); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}
       function mergeChartItems(...groups){const byMinute=new Map(); for(const group of groups){for(const item of group||[]){const key=new Date(item.timestamp).toISOString().slice(0,16); if(!byMinute.has(key))byMinute.set(key,item);}} return [...byMinute.values()].sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));}
-      function chartPointMeta(point){const kw=(point.power_w||0)/1000, absKw=Math.abs(kw).toFixed(2), time=new Date(point.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); if(point.source==='battery'){const state=Math.abs(point.power_w||0)<30?'Standby':point.power_w>0?'Discharging':'Charging'; const delivered=point.power_w>0?point.power_w:(point.delivered_w??0); const accepted=point.power_w<0?Math.abs(point.power_w):(point.returned_w??0); const soc=n(point.soc)??last.soc; return {label:'Battery', color:'var(--store-d)', time, lines:[`State: ${state}`, `Power delivered: ${Math.round(Math.max(0,delivered))} W (${absKw} kW)`, `Charge power: ${Math.round(Math.max(0,accepted))} W`, `Charge state: ${Math.round(soc)}%`]};} if(point.source==='solar')return {label:'Production', color:'var(--produce-d)', time, lines:[`Power: ${Math.round(point.power_w||0)} W (${absKw} kW)`]}; if(point.source==='grid'){const state=point.power_w>=0?'Exporting':'Importing'; return {label:'Grid', color:'var(--import-d)', time, lines:[`State: ${state}`, `Power: ${Math.round(Math.abs(point.power_w||0))} W (${absKw} kW)`]};} if(point.source==='household')return {label:'Home Consumption', color:'var(--p-mut)', time, lines:[`Power: ${Math.round(Math.max(0,point.power_w||0))} W (${absKw} kW)`]}; if(point.source==='prices')return {label:'ENTSO-E price', color:'#3B82F6', time:new Date(point.starts_at||point.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}), lines:[`Price: ${Number(point.price_eur_kwh).toFixed(4)} EUR/kWh`]}; return {label:'Forecast', color:'var(--steel)', time, lines:[`Expected production: ${Math.round(point.power_w||0)} W (${absKw} kW)`]};}
+      function chartPointMeta(point){const kw=(point.power_w||0)/1000, absKw=Math.abs(kw).toFixed(2), time=new Date(point.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); if(point.source==='battery'){const state=Math.abs(point.power_w||0)<30?'Standby':point.power_w>0?'Discharging':'Charging'; const delivered=point.power_w>0?point.power_w:(point.delivered_w??0); const accepted=point.power_w<0?Math.abs(point.power_w):(point.returned_w??0); const soc=n(point.soc)??last.soc; return {label:'Battery', color:'var(--store-d)', time, lines:[`State: ${state}`, `Power delivered: ${Math.round(Math.max(0,delivered))} W (${absKw} kW)`, `Charge power: ${Math.round(Math.max(0,accepted))} W`, `Charge state: ${Math.round(soc)}%`]};} if(point.source==='solar')return {label:'Production', color:'var(--produce-d)', time, lines:[`Power: ${Math.round(point.power_w||0)} W (${absKw} kW)`]}; if(point.source==='grid'){const state=point.power_w>=0?'Exporting':'Importing'; return {label:'Grid', color:point.power_w>=0?'var(--produce-d)':'var(--import-d)', time, lines:[`State: ${state}`, `Power: ${Math.round(Math.abs(point.power_w||0))} W (${absKw} kW)`]};} if(point.source==='household')return {label:'Home Consumption', color:'var(--home-d)', time, lines:[`Power: ${Math.round(Math.max(0,point.power_w||0))} W (${absKw} kW)`]}; if(point.source==='prices')return {label:'ENTSO-E price', color:'#70A7D7', time:new Date(point.starts_at||point.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}), lines:[`Price: ${Number(point.price_eur_kwh).toFixed(4)} EUR/kWh`]}; return {label:'Forecast', color:'var(--steel)', time, lines:[`Expected production: ${Math.round(point.power_w||0)} W (${absKw} kW)`]};}
       function showChartTooltip(event, point, xPos, yPos){const tip=$('day-chart-tooltip'), svg=$('day-chart'); if(!tip||!svg)return; const meta=chartPointMeta(point); tip.innerHTML=`<b style="color:${meta.color}">${meta.label} · ${meta.time}</b>${meta.lines.map(line=>`<span>${escapeHtml(line)}</span>`).join('')}`; const dot=$('day-chart-hover-dot'); if(dot){dot.setAttribute('cx',xPos); dot.setAttribute('cy',yPos); dot.setAttribute('fill',meta.color); dot.style.display='block';} const rect=svg.getBoundingClientRect(), wrap=svg.parentElement.getBoundingClientRect(); tip.style.left=(rect.left-wrap.left+(xPos/960)*rect.width)+'px'; tip.style.top=(rect.top-wrap.top+(yPos/300)*rect.height)+'px'; tip.hidden=false;}
       function hideChartTooltip(){const tip=$('day-chart-tooltip'), dot=$('day-chart-hover-dot'); if(tip)tip.hidden=true; if(dot)dot.style.display='none';}
       function drawChart(){
-        const svg=$('day-chart'), W=960,H=300, left=42,right=58,top=16,bot=28, mid=150, nowMs=Date.now(), [startMs,endMs]=chartDomain();
+        const svg=$('day-chart'), W=960,H=300, left=42,right=58,top=16,bot=28, mid=150, nowMs=Date.now(), [startMs,endMs]=chartDomain(), visible=chartSeriesVisible;
         const xTime=ts=>left+(W-left-right)*(ts-startMs)/(endMs-startMs||1), y=kw=>mid-kw/5*(mid-top);
         let out='';
-        for(let i=0;i<=4;i++){const ts=startMs+i*(endMs-startMs)/4, xx=xTime(ts); out+=`<line class="gridline" x1="${xx}" y1="${top}" x2="${xx}" y2="${H-bot}"/><text x="${xx}" y="${H-7}" fill="var(--p-mut)" font-family="var(--mono)" font-size="11" text-anchor="middle">${chartTickLabel(ts)}</text>`;}
-        for(let kw=-5;kw<=5;kw+=2.5)out+=`<text x="8" y="${y(kw)+4}" fill="var(--p-mut)" font-family="var(--mono)" font-size="10">${kw}</text>`;
-        for(let price=-0.10;price<=0.3001;price+=0.10){const yy=H-bot-(H-bot-top)*(price+0.10)/0.40; out+=`<text x="${W-8}" y="${yy+4}" fill="#3B82F6" font-family="var(--mono)" font-size="10" text-anchor="end">${price.toFixed(2)}</text>`;}
-        out+=`<text x="${left}" y="${top-4}" fill="var(--p-mut)" font-family="var(--mono)" font-size="10">kW</text><text x="${W-8}" y="${top-4}" fill="#3B82F6" font-family="var(--mono)" font-size="10" text-anchor="end">EUR/kWh</text>`;
+        for(let i=0;i<=4;i++){const ts=startMs+i*(endMs-startMs)/4, xx=xTime(ts); out+=`<line class="gridline gridline-v" x1="${xx}" y1="${top}" x2="${xx}" y2="${H-bot}"/><text class="axis-label" x="${xx}" y="${H-7}" text-anchor="middle">${chartTickLabel(ts)}</text>`;}
+        for(let kw=-5;kw<=5;kw+=2.5){const yy=y(kw); out+=`<line class="gridline gridline-h" x1="${left}" y1="${yy}" x2="${W-right}" y2="${yy}"/><text class="axis-label" x="8" y="${yy+4}">${kw}</text>`;}
+        if(visible.prices){for(let price=-0.10;price<=0.3001;price+=0.10){const yy=H-bot-(H-bot-top)*(price+0.10)/0.40; out+=`<text class="axis-label" x="${W-8}" y="${yy+4}" fill="#70A7D7" text-anchor="end">${price.toFixed(2)}</text>`;}}
+        out+=`<text class="axis-label" x="${left}" y="${top-4}">kW</text>${visible.prices?`<text class="axis-label" x="${W-8}" y="${top-4}" fill="#70A7D7" text-anchor="end">EUR/kWh</text>`:''}`;
         out+=`<line class="zero-line" x1="${left}" y1="${mid}" x2="${W-right}" y2="${mid}"/>`;
         const pointPath=items=>items&&items.length?items.map((p,i)=>`${i?'L':'M'}${xTime(new Date(p.timestamp).getTime()).toFixed(1)} ${y((p.power_w||0)/1000).toFixed(1)}`).join(' '):'';
         const forecastItems=prepareChartRangeItems(normalizeChartItems(curves?.forecast,'forecast'),startMs,endMs), solarItems=prepareChartRangeItems(normalizeChartItems(curves?.series?.solar,'solar'),startMs,endMs), batteryItems=mergeChartItems(prepareChartRangeItems(normalizeChartItems(curves?.series?.battery,'battery'),startMs,endMs),prepareChartRangeItems(normalizeChartItems(curves?.battery_forecast,'battery'),startMs,endMs)), gridItems=prepareChartRangeItems(normalizeChartItems(curves?.series?.grid,'grid'),startMs,endMs), householdItems=prepareChartRangeItems(normalizeChartItems(curves?.series?.household,'household'),startMs,endMs), priceItems=(tradePrices||[]).filter(p=>{const ts=new Date(p.starts_at).getTime(); return ts>=startMs&&ts<=endMs;});
         const signedArea=(items,positive,klass)=>items&&items.length?`<path class="${klass}" d="M${xTime(new Date(items[0].timestamp).getTime()).toFixed(1)} ${y(0)} `+items.map(p=>{const kw=(p.power_w||0)/1000; return `L${xTime(new Date(p.timestamp).getTime()).toFixed(1)} ${y(positive?Math.max(0,kw):Math.min(0,kw)).toFixed(1)}`}).join(' ')+` L${xTime(new Date(items[items.length-1].timestamp).getTime()).toFixed(1)} ${y(0)} Z"/>`:'';
-        const visible=chartSeriesVisible; const paths=[['forecast-line',forecastItems,visible.forecast],['prod-line',solarItems,visible.solar],['bat-line',batteryItems,visible.battery],['grid-line',gridItems,visible.grid],['home-line',householdItems,visible.household]];
-        if(visible.prices&&priceItems.length){const vals=priceItems.map(p=>p.price_eur_kwh), minP=Math.min(...vals), maxP=Math.max(...vals), lo=Math.min(0,minP), hi=maxP===lo?lo+0.01:maxP, barW=Math.max(2,(W-left-right)/Math.max(24,priceItems.length)*.24), yPrice=v=>H-bot-(H-bot-top)*(v-lo)/(hi-lo||1), priceColor=v=>{const t=(v-minP)/(maxP-minP||1), from=[191,219,254], to=[29,78,216], c=from.map((n,i)=>Math.round(n+(to[i]-n)*t)); return `rgb(${c[0]},${c[1]},${c[2]})`;}; for(const p of priceItems){const x0=xTime(new Date(p.starts_at).getTime())-barW/2, y0=yPrice(Math.max(lo,p.price_eur_kwh)), h0=Math.max(2,H-bot-y0); out+=`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${barW.toFixed(1)}" height="${h0.toFixed(1)}" rx="2" fill="${priceColor(p.price_eur_kwh)}" opacity="0.72" onmouseleave="hideChartTooltip()" onmousemove="handleChartHover(event,'price-bars')"/>`; } out+=`<text x="${W-right-2}" y="${top+10}" fill="#3B82F6" font-family="var(--mono)" font-size="10" text-anchor="end">${maxP.toFixed(3)} €/kWh</text>`;}
+        const paths=[['forecast-line',forecastItems,visible.forecast],['prod-line',solarItems,visible.solar],['bat-line',batteryItems,visible.battery],['grid-line',gridItems,visible.grid],['home-line',householdItems,visible.household]];
+        if(visible.prices&&priceItems.length){const vals=priceItems.map(p=>p.price_eur_kwh), minP=Math.min(...vals), maxP=Math.max(...vals), lo=Math.min(0,minP), hi=maxP===lo?lo+0.01:maxP, barW=Math.max(2,(W-left-right)/Math.max(24,priceItems.length)*.24), yPrice=v=>H-bot-(H-bot-top)*(v-lo)/(hi-lo||1), priceColor=v=>{const t=(v-minP)/(maxP-minP||1), from=[141,179,205], to=[72,129,170], c=from.map((n,i)=>Math.round(n+(to[i]-n)*t)); return `rgb(${c[0]},${c[1]},${c[2]})`;}; for(const p of priceItems){const x0=xTime(new Date(p.starts_at).getTime())-barW/2, y0=yPrice(Math.max(lo,p.price_eur_kwh)), h0=Math.max(2,H-bot-y0); out+=`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${barW.toFixed(1)}" height="${h0.toFixed(1)}" rx="2" fill="${priceColor(p.price_eur_kwh)}" opacity="0.56" onmouseleave="hideChartTooltip()" onmousemove="handleChartHover(event,'price-bars')"/>`; } out+=`<text class="axis-label" x="${W-right-2}" y="${top+10}" fill="#70A7D7" text-anchor="end">${maxP.toFixed(3)} EUR/kWh</text>`;}
         out+=visible.forecast&&pointPath(forecastItems)?`<path class="forecast-line" d="${pointPath(forecastItems)}"/>`:'';
         out+=visible.solar&&pointPath(solarItems)?`<path class="prod-line" d="${pointPath(solarItems)}"/>`:'';
         out+=visible.battery&&pointPath(batteryItems)?signedArea(batteryItems,true,'bat-charge-fill')+signedArea(batteryItems,false,'bat-discharge-fill')+`<path class="bat-line" d="${pointPath(batteryItems)}"/>`:'';
         out+=visible.grid&&pointPath(gridItems)?signedArea(gridItems,true,'grid-import-fill')+signedArea(gridItems,false,'grid-export-fill')+`<path class="grid-line" d="${pointPath(gridItems)}"/>`:'';
         out+=visible.household&&pointPath(householdItems)?`<path class="home-line" d="${pointPath(householdItems)}"/>`:'';
-        if(nowMs>=startMs&&nowMs<=endMs)out+=`<line class="now" x1="${xTime(nowMs)}" y1="${top}" x2="${xTime(nowMs)}" y2="${H-bot}"/>${visible.solar?`<circle cx="${xTime(nowMs)}" cy="${y(last.solar)}" r="4" fill="var(--produce-d)"/>`:''}<text x="${xTime(nowMs)+7}" y="${top+12}" fill="var(--p-ink)" font-family="var(--mono)" font-size="10">NOW</text>`;
+        if(nowMs>=startMs&&nowMs<=endMs){const nowX=xTime(nowMs), labelW=42, labelX=Math.max(left,Math.min(W-right-labelW,nowX-labelW/2)); out+=`<g class="now-marker"><line class="now" x1="${nowX.toFixed(1)}" y1="${top+8}" x2="${nowX.toFixed(1)}" y2="${H-bot}"/><rect class="now-label-bg" x="${labelX.toFixed(1)}" y="3" width="${labelW}" height="16" rx="8"/><text class="now-label" x="${(labelX+labelW/2).toFixed(1)}" y="14" text-anchor="middle">NOW</text></g>${visible.solar?`<circle cx="${nowX.toFixed(1)}" cy="${y(last.solar).toFixed(1)}" r="4" fill="var(--produce-d)"/>`:''}`;}
         out+=`<circle id="day-chart-hover-dot" class="chart-dot" r="5" style="display:none"/>`; for(const [klass,items,isVisible] of paths){if(!isVisible)continue;const d=pointPath(items); if(!d)continue; out+=`<path class="chart-hover" d="${d}" onmouseleave="hideChartTooltip()" onmousemove="handleChartHover(event,'${klass}')"/>`;}
         svg.innerHTML=out;
         window.chartHoverSeries={'forecast-line':forecastItems,'prod-line':solarItems,'bat-line':batteryItems,'grid-line':gridItems,'home-line':householdItems,'price-bars':priceItems};
@@ -1343,15 +1567,15 @@ def energy_dashboard_body() -> str:
       function handleChartHover(event,key){const svg=$('day-chart'), items=window.chartHoverSeries?.[key]||[]; if(!items.length)return; const pt=svg.createSVGPoint(); pt.x=event.clientX; pt.y=event.clientY; const loc=pt.matrixTransform(svg.getScreenCTM().inverse()); const [startMs,endMs]=chartDomain(), targetTs=startMs+Math.max(0,Math.min(1,(loc.x-42)/(960-42-58)))*(endMs-startMs); let nearest=items[0], best=Infinity; for(const item of items){const ts=new Date(key==='price-bars'?item.starts_at:item.timestamp).getTime(), delta=Math.abs(ts-targetTs); if(delta<best){best=delta; nearest=item;}} const isPrice=key==='price-bars', ts=new Date(isPrice?nearest.starts_at:nearest.timestamp).getTime(), yPos=isPrice?Math.max(24,Math.min(272,loc.y)):150-((nearest.power_w||0)/1000)/5*(150-16); showChartTooltip(event,nearest,42+(960-42-58)*(ts-startMs)/(endMs-startMs||1),yPos);}
       async function update(){const d=new Date(); $('clock').textContent=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); $('date').textContent=d.toLocaleDateString([], {day:'2-digit',month:'short',year:'numeric'}); let battery={},grid={},household={}; try{[grid,battery,household]=await Promise.all([fetch('/api/grid/status').then(r=>r.ok?r.json():{}),fetch('/api/battery/status').then(r=>r.ok?r.json():{}),fetch('/api/household/status').then(r=>r.ok?r.json():{})])}catch(e){}
         const solarW=n(grid.solar_power_w); last.solar=solarW==null?0:solarW/1000; last.battery=(n(battery.power_w)??0)/1000; const rawGrid=(n(grid.grid_net_power_w)??650)/1000; last.grid=-rawGrid; last.household=(n(household.power_w)??Math.max(0,last.solar*1000+last.battery*1000-last.grid*1000))/1000; last.soc=n(battery.soc)??last.soc; last.soh=n(battery.soh)??98; batteryLimits.overrideSoc=!!battery.override_soc_limits; const home=Math.max(0,last.household);
-        $('household-status-word').textContent=household.approx?'Approx':'Live'; setStatusPill('household-pill',household.approx?'store-c':'household-c',home>.03); const mismatchText=householdMismatchText(household); const badge=$('household-badge'); badge.hidden=!household.mismatch; badge.className='status-pill badge '+(household.mismatch?'warn':''); badge.title=mismatchText; badge.setAttribute('aria-label', mismatchText||'Geen household mismatch');
-        renderReadings(); const solarActive=last.solar>0.05; $('solar-bar').style.width=Math.min(100,last.solar/solarMax*100)+'%'; $('solar-status').textContent=solarActive?'Producing':'Standby'; setStatusPill('solar-pill','produce-c',solarActive);
-        const batteryActive=Math.abs(last.battery)>=.03; $('battery-status-word').textContent=!batteryActive?'Standby':last.battery>0?'Discharging':'Charging'; setStatusPill('battery-pill','store-c',batteryActive); setBar('battery-bar',last.battery,signedMax,'var(--store-d)'); setSoc(last.soc); $('soh-text').textContent=Math.round(last.soh)+'%'; $('battery-capacity-text').textContent=`${(nominalKwh*last.soc/100).toFixed(1)} / ${nominalKwh} kWh`; $('soh-bar').style.width=last.soh+'%';
-        const gExport=last.grid>=0; $('grid-status-word').textContent=Math.abs(last.grid)<.03?'Standby':gExport?'Exporting':'Importing'; $('grid-phrase').className='phrase '+(gExport?'produce-c':'import-c'); setStatusPill('grid-pill',gExport?'produce-c':'import-c',Math.abs(last.grid)>=.03); $('grid-tile').className='tile '+(gExport?'produce':'import'); setBar('grid-bar',last.grid,signedMax,gExport?'var(--produce-d)':'var(--import-d)');
+        $('household-status-word').textContent=household.approx?'Approx':'Live'; setStatusPill('household-pill',household.approx?'warning':'live',home>.03); const mismatchText=householdMismatchText(household); const badge=$('household-badge'); badge.hidden=!household.mismatch; setStatusPill('household-badge','mismatch',!!household.mismatch); badge.title=mismatchText; badge.setAttribute('aria-label', mismatchText||'Geen household mismatch');
+        renderReadings(); const solarActive=last.solar>0.05; $('solar-bar').style.width=Math.min(100,last.solar/solarMax*100)+'%'; $('solar-status').textContent=solarActive?'Producing':'Standby'; setStatusPill('solar-pill',solarActive?'producing':'standby',solarActive);
+        const batteryActive=Math.abs(last.battery)>=.03, batteryVariant=!batteryActive?'standby':last.battery>0?'discharging':'charging'; $('battery-status-word').textContent=!batteryActive?'Standby':last.battery>0?'Discharging':'Charging'; setStatusPill('battery-pill',batteryVariant,batteryActive); setBar('battery-bar',last.battery,signedMax,'var(--store-d)'); setSoc(last.soc); $('soh-text').textContent=Math.round(last.soh)+'%'; $('battery-capacity-text').textContent=`${(nominalKwh*last.soc/100).toFixed(1)} / ${nominalKwh} kWh`; $('soh-bar').style.width=last.soh+'%';
+        const gExport=last.grid>=0, gridActive=Math.abs(last.grid)>=.03, gridVariant=!gridActive?'standby':gExport?'exporting':'importing'; $('grid-status-word').textContent=!gridActive?'Standby':gExport?'Exporting':'Importing'; $('grid-phrase').className='phrase '+(gExport?'produce-c':'import-c'); setStatusPill('grid-pill',gridVariant,gridActive); $('grid-tile').className='tile metric-card '+(gExport?'produce':'import'); setBar('grid-bar',last.grid,signedMax,gExport?'var(--produce-d)':'var(--import-d)');
         $('flow-solar-home').style.stroke='var(--produce-d)'; $('flow-solar-home').style.strokeWidth=2+Math.min(10,last.solar*2); $('flow-home-battery').style.stroke='var(--store-d)'; $('flow-home-battery').style.strokeWidth=2+Math.min(10,Math.abs(last.battery)*3); $('flow-home-grid').style.stroke=gExport?'var(--produce-d)':'var(--import-d)'; $('flow-home-grid').style.strokeWidth=2+Math.min(10,Math.abs(last.grid)*3);
         await Promise.all([loadCurves(),loadTradePrices()]); appendCurrentChartPoints(); const hItems=curves?.series?.household||[], sItems=curves?.series?.solar||[], gItems=curves?.series?.grid||[]; const produced=solarDayKwh(sItems), imported=gridDayKwh(gItems,'import'), exported=gridDayKwh(gItems,'export'), householdKwh=householdDayKwh(hItems), used=Math.max(0,produced-exported), cycles=nominalKwh?dayKwh(curves?.series?.battery||[],p=>Math.abs(p.power_w||0))/nominalKwh:0, co2=produced*.39; $('solar-kwh').textContent=produced.toFixed(1); $('grid-import-kwh').textContent=imported.toFixed(1); $('grid-export-kwh').textContent=exported.toFixed(1); $('kwh-produced').textContent=produced.toFixed(1); $('kwh-exported').textContent=exported.toFixed(1); $('kwh-imported').textContent=imported.toFixed(1); $('summary-consumed').textContent=householdKwh.toFixed(1); $('summary-cycles').textContent=cycles.toFixed(2); $('summary-co2').textContent=co2.toFixed(1)+' kg'; const self=Math.round(100*Math.max(0,used)/(used+imported||1)); $('self-top').textContent=self+'%'; $('summary-self').textContent=self+'%'; $('m-self').textContent=self+'%'; drawSparkline('solar-spark',sItems); drawSparkline('grid-spark',normalizeChartItems(gItems,'grid'),{signed:true}); drawHouseholdSpark(hItems); $('household-kwh').textContent=householdKwh.toFixed(1); drawChart(); }
       initChartLegend(); initChartRange(); refreshMailboxCount(); setInterval(refreshMailboxCount,45000); loadBatteryLimits(); setInterval(loadBatteryLimits,60000); update(); setInterval(update,4000);
     </script>
-    """.replace("__MARK__", brand_mark()).replace("__NAV__", render_nav("Dashboard")).replace("__SOLAR__", icon("solar")).replace("__BATTERY__", icon("battery")).replace("__GRID__", icon("grid"))
+    """.replace("__MARK__", brand_mark()).replace("__NAV__", render_nav("Dashboard")).replace("__UNIT_TOGGLE__", unit_toggle).replace("__LAYOUT_TOGGLE__", layout_toggle).replace("__METRIC_CARDS__", solar_card + battery_card + grid_card + household_card).replace("__KPI_STRIP__", kpi_strip)
 
 
 def history_body() -> str:
@@ -1534,6 +1758,7 @@ def icon(name: str) -> str:
         'solar': '<rect x="4" y="7" width="12" height="9"/><path d="M4 10h12M8 7v9M12 7v9M10 16v4M7 20h6"/><circle cx="21" cy="6" r="2"/><path d="M21 1v2M21 9v2M16 6h2M24 6h2"/>',
         'battery': '<rect x="3" y="8" width="17" height="9" rx="2"/><path d="M20 11h2v3M7 11v3M11 11v3M15 11v3"/>',
         'grid': '<path d="M12 3v18M6 21h12M7 8h10M5 14h14M8 8l-3 13M16 8l3 13"/>',
+        'home': '<path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10.5V20h11v-9.5"/><path d="M10 20v-5h4v5"/>',
     }
     return f'<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">{shapes[name]}</svg>'
 
