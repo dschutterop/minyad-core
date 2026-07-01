@@ -1011,7 +1011,7 @@ def serialize_control_decision(row: Any) -> dict[str, Any]:
     discharge_allowed = bool(data.get("discharge_allowed"))
     if setpoint == 0:
         action = "discharge" if discharge_allowed else "hold"
-    elif source in {"strategy_v2", "goodwe_bridge"}:
+    elif source in {"strategy_v2", "strategy_v3", "goodwe_bridge"}:
         action = "charge" if setpoint > 0 else "discharge"
     else:
         action = "discharge" if setpoint > 0 else "charge"

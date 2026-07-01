@@ -34,6 +34,13 @@ from .soc_guard import SoCGuard
 configure_container_logging(getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
 LOGGER = logging.getLogger(__name__)
 
+
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+STRATEGY_V2_PRIMARY = _truthy(os.getenv("STRATEGY_V2_PRIMARY", "false"))
+
 TOPIC_SETPOINT = "minyad/strategy/setpoint_w"
 TOPIC_ACTIVE = "minyad/strategy/active"
 TOPIC_DECISION = "minyad/strategy/decision"
@@ -67,6 +74,10 @@ class StrategyService:
         self.plan = await self.planner.load_plan(datetime.now(AMSTERDAM).date()) or default_day_plan(self.settings)
         self.executor = StrategyExecutor(self.settings, self.plan)
         await self.refresh_consumption_profile()
+        if not STRATEGY_V2_PRIMARY:
+            LOGGER.info("Strategy v2 is not primary; health endpoint only, no MQTT subscriptions or setpoint logging")
+            await self._run_health_server()
+            return
         self.publish_active_plan()
         self._start_scheduler()
         for topic in (
@@ -306,6 +317,7 @@ class StrategyService:
         async def health() -> dict[str, Any]:
             return {
                 "status": "ok",
+                "primary": STRATEGY_V2_PRIMARY,
                 "state": asdict(self.state),
                 "plan": _plan_payload(self.plan) if self.plan else None,
                 "last_decision": _decision_payload(self.last_decision) if self.last_decision else None,

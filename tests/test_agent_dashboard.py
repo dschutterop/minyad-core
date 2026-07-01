@@ -43,6 +43,19 @@ def test_serialize_control_decision_labels_strategy_v2_signs() -> None:
     assert result["action"] == "discharge"
 
 
+def test_serialize_control_decision_labels_strategy_v3_signs() -> None:
+    result = serialize_control_decision(
+        {
+            "timestamp": datetime(2026, 7, 1, 21, 35, tzinfo=timezone.utc),
+            "source": "strategy_v3",
+            "setpoint_w": -560,
+            "discharge_allowed": True,
+        }
+    )
+
+    assert result["action"] == "discharge"
+
+
 def test_serialize_control_decision_labels_goodwe_bridge_signs() -> None:
     result = serialize_control_decision(
         {

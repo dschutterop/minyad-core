@@ -90,7 +90,7 @@ services:
     environment:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
-      STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-true}
+      STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-false}
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -110,7 +110,7 @@ services:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
       TZ: Europe/Amsterdam
-      STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-true}
+      STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-false}
       STRATEGY_VERSION: v2
     depends_on:
       minyad-migrate:
@@ -143,7 +143,7 @@ services:
       MQTT_PORT: 1883
       TZ: Europe/Amsterdam
       STRATEGY_VERSION: v3
-      SHADOW_MODE: ${STRATEGY3_SHADOW_MODE:-true}
+      SHADOW_MODE: ${STRATEGY3_SHADOW_MODE:-false}
       MQTT_CLIENT_ID: minyad-strategy-v3
     depends_on:
       minyad-migrate:
