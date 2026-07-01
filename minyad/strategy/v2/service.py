@@ -138,7 +138,13 @@ class StrategyService:
         raw_setpoint = decision.setpoint_w
         self.update_floor_schedule(decision.timestamp)
         setpoint, override_reason = await self.overrides.apply_with_reason(decision.setpoint_w, self.state, self.plan)
-        setpoint, guard_reason = self.guard.apply_with_reason(setpoint, self.state, self.plan, decision.timestamp)
+        setpoint, guard_reason = self.guard.apply_with_reason(
+            setpoint,
+            self.state,
+            self.plan,
+            decision.timestamp,
+            skip_soc_limits=self.overrides.bypasses_soc_limits(),
+        )
         adjusted = setpoint != raw_setpoint
         if adjusted:
             adjustment_reason = adjustment_reason_suffix(override_reason, guard_reason)

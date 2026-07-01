@@ -50,9 +50,11 @@ def test_battery_override_accepts_and_normalizes_charge_aliases():
     api_main.BatteryOverrideRequest.model_rebuild(_types_namespace={"Literal": api_main.Literal})
     legacy = api_main.BatteryOverrideRequest(mode="force_on", watts=700)
     current = api_main.BatteryOverrideRequest(mode="force_charge", watts=700)
+    soc_override = api_main.BatteryOverrideRequest(mode="force_discharge", watts=700, override_soc_limits=True)
 
     assert legacy.mode == "force_on"
     assert current.mode == "force_charge"
+    assert soc_override.override_soc_limits is True
     assert api_main._normalize_battery_override_mode(legacy.mode) == "force_charge"
     assert api_main._normalize_battery_override_mode("force_off") == "force_idle"
 
@@ -68,6 +70,7 @@ def test_agent_hold_preserves_active_manual_battery_override():
                 "watts": 900,
                 "duration_seconds": 900,
                 "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+                "override_soc_limits": True,
             }
 
     class Session:
@@ -85,6 +88,7 @@ def test_agent_hold_preserves_active_manual_battery_override():
 
     assert response["action"] == "hold"
     assert response["override"]["mode"] == "force_discharge"
+    assert response["override"]["override_soc_limits"] is True
     assert response["override"]["preserved"] is True
     assert len(session.statements) == 1
 

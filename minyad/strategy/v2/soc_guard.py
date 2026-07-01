@@ -32,11 +32,19 @@ class SoCGuard:
             return self._floor_schedule.value_at(now)
         return plan.effective_soc_floor
 
-    def apply(self, setpoint_w: int, state: ExecutorState, plan: DayPlan, now: datetime | None = None) -> int:
-        adjusted, _reason = self.apply_with_reason(setpoint_w, state, plan, now)
+    def apply(self, setpoint_w: int, state: ExecutorState, plan: DayPlan, now: datetime | None = None, *, skip_soc_limits: bool = False) -> int:
+        adjusted, _reason = self.apply_with_reason(setpoint_w, state, plan, now, skip_soc_limits=skip_soc_limits)
         return adjusted
 
-    def apply_with_reason(self, setpoint_w: int, state: ExecutorState, plan: DayPlan, now: datetime | None = None) -> tuple[int, str | None]:
+    def apply_with_reason(
+        self,
+        setpoint_w: int,
+        state: ExecutorState,
+        plan: DayPlan,
+        now: datetime | None = None,
+        *,
+        skip_soc_limits: bool = False,
+    ) -> tuple[int, str | None]:
         now = now or datetime.now(timezone.utc)
         if state.bridge_last_seen is not None:
             last_seen = state.bridge_last_seen
@@ -47,6 +55,8 @@ class SoCGuard:
                 return 0, f"guard: bridge stale ({age_seconds:.0f}s > {self.settings.bridge_stale_seconds}s)"
         if state.battery_voltage is not None and state.battery_voltage < self.settings.voltage_floor_v:
             return 0, f"guard: battery voltage low ({state.battery_voltage:.1f}V < {self.settings.voltage_floor_v:.1f}V)"
+        if skip_soc_limits:
+            return int(setpoint_w), None
         if state.battery_soc is not None:
             band = self.settings.soc_hysteresis_pct
             soc = state.battery_soc

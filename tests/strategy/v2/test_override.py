@@ -44,6 +44,34 @@ def test_force_charge_clamps_requested_watts_to_effective_limit():
     assert result == 1440
 
 
+def test_force_charge_can_override_soc_ceiling_for_one_cycle():
+    manager = OverrideManager(Settings(initial={"battery.max_charge_w": "1440", "strategy.jitter_w": "30"}))
+    asyncio.run(manager.apply_payload({"mode": "force_charge", "watts": 700, "override_soc_limits": True}))
+
+    adjusted, reason = asyncio.run(manager.apply_with_reason(0, ExecutorState(0, battery_soc=95, battery_power_w=-600), plan()))
+    assert adjusted == 700
+    assert reason == "override: force_charge (SoC limit override active)"
+    assert manager.bypasses_soc_limits()
+
+    adjusted, reason = asyncio.run(manager.apply_with_reason(0, ExecutorState(0, battery_soc=95, battery_power_w=0), plan()))
+    assert adjusted == 0
+    assert reason == "override: expired after one charge/discharge cycle"
+    assert not manager.bypasses_soc_limits()
+
+
+def test_force_discharge_can_override_soc_floor_for_one_cycle():
+    manager = OverrideManager(Settings(initial={"battery.max_discharge_w": "1500", "strategy.jitter_w": "30"}))
+    asyncio.run(manager.apply_payload({"mode": "force_discharge", "watts": 900, "override_soc_limits": True}))
+
+    adjusted, reason = asyncio.run(manager.apply_with_reason(0, ExecutorState(0, battery_soc=15, battery_power_w=700), plan()))
+    assert adjusted == -900
+    assert reason == "override: force_discharge (SoC limit override active)"
+
+    adjusted, reason = asyncio.run(manager.apply_with_reason(0, ExecutorState(0, battery_soc=15, battery_power_w=-100), plan()))
+    assert adjusted == 0
+    assert reason == "override: expired after one charge/discharge cycle"
+
+
 def test_legacy_force_on_alias_charges_under_v2():
     manager = OverrideManager(Settings(initial={"battery.max_charge_w": "1440"}))
     asyncio.run(manager.apply_payload({"mode": "force_on", "watts": 700}))
