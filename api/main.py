@@ -1452,11 +1452,17 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
             LOGGER.exception("Unable to fetch retained MQTT status snapshot")
     else:
         LOGGER.debug("battery_status: cache complete, skipping retained fetch")
-    override = await session.execute(text("select mode from battery_override where id = 1"))
+    override = await session.execute(text("""
+        select mode, coalesce(override_soc_limits, false) as override_soc_limits
+        from battery_override
+        where id = 1
+    """))
+    override_row = override.mappings().first()
     control_state = str(payload.get("state") or "IDLE")
     payload["control_state"] = control_state
     payload["state"] = control_state
-    payload["override_mode"] = override.scalar_one_or_none() or "none"
+    payload["override_mode"] = override_row["mode"] if override_row else "none"
+    payload["override_soc_limits"] = bool(override_row["override_soc_limits"]) if override_row else False
     for key in ("soc", "soh", "power_w", "charge_i"):
         if key in payload:
             payload[key] = coerce_int_status_value(key, payload[key])
