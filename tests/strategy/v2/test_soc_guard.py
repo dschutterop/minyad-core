@@ -28,6 +28,14 @@ def test_charge_blocked_at_ceiling():
     assert guard.apply(500, ExecutorState(0, battery_soc=90), plan()) == 0
 
 
+def test_soc_limit_bypass_keeps_non_soc_guards_active():
+    guard = SoCGuard(Settings())
+    now = datetime(2026, 6, 27, 12, tzinfo=timezone.utc)
+    stale = ExecutorState(0, battery_soc=90, bridge_last_seen=now - timedelta(seconds=181))
+    assert guard.apply(500, stale, plan(), now, skip_soc_limits=True) == 0
+    assert guard.apply(500, ExecutorState(0, battery_soc=90), plan(), now, skip_soc_limits=True) == 500
+
+
 def test_bridge_stale_suppresses_setpoint():
     guard = SoCGuard(Settings())
     now = datetime(2026, 6, 27, 12, tzinfo=timezone.utc)

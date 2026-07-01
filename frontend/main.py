@@ -1136,8 +1136,8 @@ def battery_control_body() -> str:
         await fetch('/api/battery/override',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
         loadBatteryStatus();
       }
-      function forceCharge(){ const watts = Number(prompt('Charge watts?')); if(watts) sendOverride({mode:'force_charge', watts}); }
-      function forceDischarge(){ const watts = Number(prompt('Discharge watts naar huis/net via GoodWe bridge?')); if(watts) sendOverride({mode:'force_discharge', watts}); }
+      function forceCharge(){ const watts = Number(prompt('Charge watts?')); if(watts) sendOverride({mode:'force_charge', watts, override_soc_limits:confirm('SOC limit voor één charge-cyclus overriden?')}); }
+      function forceDischarge(){ const watts = Number(prompt('Discharge watts naar huis/net via GoodWe bridge?')); if(watts) sendOverride({mode:'force_discharge', watts, override_soc_limits:confirm('SOC limit voor één discharge-cyclus overriden?')}); }
       async function resumeNormal(){ if(confirm('Resume normal hysteresis control?')){ await fetch('/api/battery/override',{method:'DELETE'}); loadBatteryStatus(); } }
       loadBatteryStatus(); setInterval(loadBatteryStatus, 10000);
     </script>

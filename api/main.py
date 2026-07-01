@@ -694,6 +694,7 @@ class BatteryOverrideRequest(BaseModel):
     mode: Literal["none", "force_on", "force_charge", "force_off", "force_idle", "force_discharge", "pause"]
     watts: int | None = Field(default=None, ge=0)
     duration_seconds: int | None = Field(default=None, ge=1)
+    override_soc_limits: bool = False
 
     @model_validator(mode="after")
     def validate_required_fields(self) -> "BatteryOverrideRequest":
@@ -1882,7 +1883,8 @@ def _normalize_battery_override_mode(mode: str | None) -> str:
 
 async def current_battery_override(session: AsyncSession) -> dict[str, Any] | None:
     row = (await session.execute(text("""
-        select mode, watts, duration_seconds, expires_at
+        select mode, watts, duration_seconds, expires_at,
+               coalesce(override_soc_limits, false) as override_soc_limits
         from battery_override
         where id = 1
     """))).mappings().first()
@@ -1899,6 +1901,7 @@ async def current_battery_override(session: AsyncSession) -> dict[str, Any] | No
         "watts": row["watts"],
         "duration_seconds": row["duration_seconds"],
         "expires_at": expires_at.isoformat() if expires_at else None,
+        "override_soc_limits": bool(row["override_soc_limits"]),
         "preserved": True,
     }
 
@@ -2060,9 +2063,9 @@ async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSe
         soc_value = float(soc) if soc not in (None, "") else None
     except (TypeError, ValueError):
         soc_value = None
-    if mode == "force_discharge" and soc_value is not None and soc_value <= soc_floor:
+    if not request.override_soc_limits and mode == "force_discharge" and soc_value is not None and soc_value <= soc_floor:
         raise HTTPException(status_code=422, detail=f"discharge blocked because SoC {soc_value:g}% is at or below configured floor {soc_floor}%")
-    if mode == "force_charge" and soc_value is not None and soc_value >= soc_ceiling:
+    if not request.override_soc_limits and mode == "force_charge" and soc_value is not None and soc_value >= soc_ceiling:
         raise HTTPException(status_code=422, detail=f"charge blocked because SoC {soc_value:g}% is at or above configured ceiling {soc_ceiling}%")
     configured_max_w = int(settings.get("max_charge_w", 0))
     hardware_max_w = int(settings.get("max_charge_a", 30)) * int(settings.get("nominal_v", 48))
@@ -2075,11 +2078,18 @@ async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSe
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=request.duration_seconds) if request.duration_seconds else None
     await session.execute(
         text("""
-            insert into battery_override (id, mode, watts, duration_seconds, expires_at, updated_at)
-            values (1, :mode, :watts, :duration_seconds, :expires_at, now())
-            on conflict (id) do update set mode=:mode, watts=:watts, duration_seconds=:duration_seconds, expires_at=:expires_at, updated_at=now()
+            insert into battery_override (id, mode, watts, duration_seconds, expires_at, override_soc_limits, updated_at)
+            values (1, :mode, :watts, :duration_seconds, :expires_at, :override_soc_limits, now())
+            on conflict (id) do update set mode=:mode, watts=:watts, duration_seconds=:duration_seconds,
+                expires_at=:expires_at, override_soc_limits=:override_soc_limits, updated_at=now()
         """),
-        {"mode": mode, "watts": request.watts, "duration_seconds": request.duration_seconds, "expires_at": expires_at},
+        {
+            "mode": mode,
+            "watts": request.watts,
+            "duration_seconds": request.duration_seconds,
+            "expires_at": expires_at,
+            "override_soc_limits": request.override_soc_limits,
+        },
     )
     await session.commit()
     payload = request.model_dump()
@@ -2090,7 +2100,7 @@ async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSe
 
 @app.delete("/battery/override", dependencies=MUTATION_AUTH)
 async def clear_battery_override(session: AsyncSession = Depends(get_session)) -> dict[str, str]:
-    await session.execute(text("update battery_override set mode='none', watts=null, duration_seconds=null, expires_at=null, updated_at=now() where id=1"))
+    await session.execute(text("update battery_override set mode='none', watts=null, duration_seconds=null, expires_at=null, override_soc_limits=false, updated_at=now() where id=1"))
     await session.commit()
     mqtt.client.publish("minyad/control/override", json.dumps({"mode": "none"}), qos=0, retain=False)
     return {"status": "ok", "mode": "none"}
