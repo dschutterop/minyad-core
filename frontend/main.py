@@ -277,7 +277,12 @@ LANGUAGE_BOOT_SCRIPT = """
       'hourly points': 'uurpunten',
       'Health': 'Status',
       'Last checked': 'Laatst gecontroleerd',
-      'Raw health payload': 'Ruwe statuspayload',
+      'Refresh now': 'Nu vernieuwen',
+      'Service': 'Service',
+      'Detail': 'Detail',
+      'Endpoint': 'Endpoint',
+      'Last seen': 'Laatst gezien',
+      'No service health checks returned.': 'Geen servicestatussen ontvangen.',
       'Last decision': 'Laatste besluit',
       'Setpoint': 'Setpoint',
       'Confidence': 'Vertrouwen',
@@ -422,6 +427,7 @@ html[data-theme=light] .mailbox-panel{background:#fff;border-color:rgba(74,98,11
 
 .agent-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.agent-stat{background:#fff;border:1px solid rgba(74,98,118,.18);border-radius:12px;padding:16px}.agent-stat b{display:block;font-family:var(--mono);font-size:26px}.agent-layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);gap:16px}.agent-list{display:grid;gap:10px}.agent-decision,.agent-message-card{background:#fff;border:1px solid rgba(74,98,118,.18);border-left:4px solid var(--steel);border-radius:12px;padding:14px}.agent-decision.charge{border-left-color:var(--store)}.agent-decision.discharge{border-left-color:var(--produce)}.agent-decision.hold{border-left-color:var(--steel)}.agent-decision header,.agent-message-card header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.agent-meta{font-family:var(--mono);font-size:11px;color:var(--steel);letter-spacing:.08em;text-transform:uppercase}.agent-reason{white-space:pre-wrap;line-height:1.45}.agent-controls{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.agent-controls button{border:1px solid rgba(74,98,118,.25);background:#fff;border-radius:999px;padding:10px 14px;cursor:pointer}.agent-controls button.active{background:var(--panel);color:var(--p-ink)}.agent-compose-toggle{width:100%;border:1px solid rgba(74,98,118,.25);background:var(--panel);color:var(--p-ink);border-radius:12px;padding:13px 16px;cursor:pointer;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:12px}.agent-compose-toggle:after{content:"+";font-size:18px}.agent-compose-toggle[aria-expanded="true"]:after{content:"–"}.agent-compose-panel[hidden]{display:none}.agent-compose-panel{margin-top:12px}.agent-compose{display:grid;grid-template-columns:1fr;gap:10px}.agent-compose textarea{width:100%;min-height:120px;margin-top:8px;border:1px solid rgba(74,98,118,.25);background:#fff;padding:11px 12px;font:inherit;color:var(--ink)}.agent-compose button[type=submit]{border:1px solid rgba(74,98,118,.25);background:#fff;border-radius:999px;padding:10px 14px;cursor:pointer}.agent-snapshot{max-height:260px}.agent-empty{border:1px dashed rgba(74,98,118,.28);border-radius:12px;padding:24px;text-align:center;color:var(--steel);font-family:var(--mono)}html[data-theme=dark] .agent-stat,html[data-theme=dark] .agent-decision,html[data-theme=dark] .agent-message-card,html[data-theme=dark] .agent-controls button,html[data-theme=dark] .agent-compose textarea,html[data-theme=dark] .agent-compose button[type=submit]{background:#101b24;color:var(--ink);border-color:rgba(184,210,228,.14)}html[data-theme=dark] .agent-controls button.active{background:#E6EDF2;color:#071017}@media(max-width:900px){.agent-hero{grid-template-columns:repeat(2,1fr)}.agent-layout{grid-template-columns:1fr}}
 .report-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0}.report-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.report-actions button{border:1px solid rgba(74,98,118,.25);background:#fff;border-radius:999px;padding:9px 13px;cursor:pointer}.report-actions button:disabled{opacity:.45;cursor:not-allowed}.report-table-wrap{overflow:auto;border:1px solid rgba(74,98,118,.18);border-radius:12px;background:#fff}.report-table{width:100%;border-collapse:collapse;min-width:1080px}.report-table th,.report-table td{padding:10px 12px;border-bottom:1px solid rgba(74,98,118,.12);text-align:left;vertical-align:top}.report-table th{position:sticky;top:0;background:#fff;color:var(--steel);font:700 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase}.report-table td{font-family:var(--mono);font-size:12px}.report-reason{font-family:var(--sans)!important;min-width:300px;max-width:520px;white-space:normal;line-height:1.35}.report-action{display:inline-flex;border-radius:999px;padding:4px 8px;font:700 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;background:rgba(74,98,118,.12);color:var(--steel)}.report-action.charge{background:rgba(216,155,42,.16);color:var(--store)}.report-action.discharge{background:rgba(46,156,98,.16);color:var(--produce)}.report-action.hold{background:rgba(74,98,118,.12);color:var(--steel)}.report-empty{padding:24px;text-align:center;color:var(--steel);font-family:var(--mono)}html[data-theme=dark] .report-actions button,html[data-theme=dark] .report-table-wrap,html[data-theme=dark] .report-table th{background:#101b24;color:var(--ink);border-color:rgba(184,210,228,.14)}html[data-theme=dark] .report-table th,html[data-theme=dark] .report-table td{border-bottom-color:rgba(184,210,228,.1)}
+.health-shell{display:grid;gap:16px}.health-summary{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}.health-summary-main{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.health-updated{color:var(--steel);font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase}.health-actions{display:flex;align-items:center;gap:10px}.health-refresh{border:1px solid rgba(74,98,118,.25);background:#fff;color:var(--ink);border-radius:8px;padding:10px 12px;cursor:pointer;font:700 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase}.health-refresh:hover,.health-refresh:focus-visible{background:rgba(237,241,244,.86);outline:none}.health-table-wrap{overflow:auto;border:1px solid rgba(74,98,118,.18);border-radius:12px;background:#fff}.health-table{width:100%;min-width:760px;border-collapse:collapse}.health-table th,.health-table td{padding:13px 14px;border-bottom:1px solid rgba(74,98,118,.12);text-align:left;vertical-align:middle}.health-table th{background:#F8FAFC;color:var(--steel);font:700 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase}.health-table tr:last-child td{border-bottom:0}.health-service{font-weight:700}.health-detail{color:rgba(21,32,42,.72);line-height:1.35}.health-meta{font-family:var(--mono);font-size:12px;color:var(--steel);font-variant-numeric:tabular-nums}.health-status{display:inline-flex;align-items:center;gap:8px;min-width:70px;border:1px solid currentColor;border-radius:999px;padding:7px 10px;font:800 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase}.health-status i{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor}.health-ok{color:var(--produce)}.health-nok{color:var(--import)}.health-warn{color:var(--store)}.health-empty{padding:24px;text-align:center;color:var(--steel);font-family:var(--mono)}html[data-theme=dark] .health-refresh,html[data-theme=dark] .health-table-wrap{background:#101b24;color:var(--ink);border-color:rgba(184,210,228,.14)}html[data-theme=dark] .health-table th{background:#0A1016;color:var(--steel);border-bottom-color:rgba(184,210,228,.12)}html[data-theme=dark] .health-table td{border-bottom-color:rgba(184,210,228,.10)}html[data-theme=dark] .health-detail{color:rgba(230,237,242,.72)}html[data-theme=dark] .health-refresh:hover,html[data-theme=dark] .health-refresh:focus-visible{background:#162631}@media(max-width:720px){.health-summary{align-items:flex-start}.health-table{min-width:640px}.health-table th,.health-table td{padding:11px 12px}.health-shell .page-title{font-size:clamp(38px,12vw,52px)}}
 """
 
 BRAND_CSS += """
@@ -833,33 +839,75 @@ def solar_body() -> str:
 
 def health_body() -> str:
     return """
-    <section class='card'>
-      <div style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>
-        <span class='status-pill' id='overall-pill'><i></i><span id='overall-status'>Loading</span></span>
-        <span class='scale-label'>Last checked <span id='health-checked'>--</span></span>
-        <button class='secondary' onclick='loadHealth()'>Refresh now</button>
-      </div>
-    </section>
-    <section class='health-grid' id='health-grid' style='display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:18px'></section>
-    <section class='card' style='margin-top:18px'>
-      <h2>Raw health payload</h2>
-      <pre id='health-raw'>Loading...</pre>
-    </section>
+    <div class='health-shell'>
+      <section class='card'>
+        <span class='kicker'>Health</span>
+        <h1 class='page-title'>Health</h1>
+        <div class='health-summary'>
+          <div class='health-summary-main'>
+            <span class='health-status health-warn' id='overall-pill'><i></i><span id='overall-status'>--</span></span>
+            <span class='health-updated'>Last checked <span id='health-checked'>--</span></span>
+          </div>
+          <div class='health-actions'>
+            <button type='button' class='health-refresh' onclick='loadHealth()'>Refresh now</button>
+          </div>
+        </div>
+      </section>
+      <section class='health-table-wrap' aria-label='Service health status'>
+        <table class='health-table'>
+          <thead>
+            <tr>
+              <th scope='col'>Service</th>
+              <th scope='col'>Status</th>
+              <th scope='col'>Detail</th>
+              <th scope='col'>Endpoint</th>
+              <th scope='col'>Last seen</th>
+            </tr>
+          </thead>
+          <tbody id='health-rows'>
+            <tr><td colspan='5' class='health-empty'>Loading...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
     <script>
       const esc=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-      const statusClass=s=>s==='ok'?'produce-c flash':(s==='error'?'import-c flash':'store-c flash');
-      function setOverall(status){const pill=document.getElementById('overall-pill'); pill.className='status-pill '+statusClass(status); document.getElementById('overall-status').textContent=status.toUpperCase();}
-      function componentCard(item){
-        const facts=Object.entries(item).filter(([k])=>!['name','status','detail'].includes(k)).map(([k,v])=>`<div><span class='scale-label'>${esc(k.replaceAll('_',' '))}</span><br><strong>${esc(typeof v==='object'?JSON.stringify(v):v)}</strong></div>`).join('');
-        return `<article class='card'><div class='tile-head'><span class='tile-name'>${esc(item.name)}</span><span class='status-pill ${statusClass(item.status)}'><i></i>${esc(item.status)}</span></div><p>${esc(item.detail)}</p><div class='grid' style='margin-top:12px'>${facts}</div></article>`;
+      const fmtTime=value=>{
+        if(!value)return '--';
+        const date=new Date(value);
+        return Number.isNaN(date.getTime())?String(value):date.toLocaleString();
+      };
+      const statusText=status=>status==='ok'?'OK':'NOK';
+      const statusClass=status=>status==='ok'?'health-ok':status==='warning'?'health-warn':'health-nok';
+      function setOverall(status){
+        const pill=document.getElementById('overall-pill');
+        pill.className='health-status '+statusClass(status);
+        document.getElementById('overall-status').textContent=statusText(status);
+      }
+      function row(item){
+        const status=item.status||'error';
+        const lastSeen=item.last_seen||item.generated_at||'';
+        return `<tr>
+          <td class='health-service'>${esc(item.name||'Unknown service')}</td>
+          <td><span class='health-status ${statusClass(status)}'><i></i>${statusText(status)}</span></td>
+          <td class='health-detail'>${esc(item.detail||'--')}</td>
+          <td class='health-meta'>${esc(item.endpoint||'--')}</td>
+          <td class='health-meta'>${esc(fmtTime(lastSeen))}</td>
+        </tr>`;
       }
       async function loadHealth(){
         try{
           const res=await fetch('/api/health/status'); if(!res.ok) throw new Error('Health request failed ('+res.status+')');
-          const data=await res.json(); setOverall(data.status); document.getElementById('health-checked').textContent=new Date(data.generated_at).toLocaleString();
-          document.getElementById('health-grid').innerHTML=(data.components||[]).map(componentCard).join('');
-          document.getElementById('health-raw').textContent=JSON.stringify(data,null,2);
-        }catch(e){setOverall('error'); document.getElementById('health-grid').innerHTML=`<div class='card'><p class='error'>${esc(e.message||'Unable to load health')}</p></div>`;}
+          const data=await res.json();
+          const components=data.components||[];
+          setOverall(data.status);
+          document.getElementById('health-checked').textContent=fmtTime(data.generated_at);
+          document.getElementById('health-rows').innerHTML=components.length?components.map(row).join(''):`<tr><td colspan='5' class='health-empty'>No service health checks returned.</td></tr>`;
+        }catch(e){
+          setOverall('error');
+          document.getElementById('health-checked').textContent=fmtTime(new Date().toISOString());
+          document.getElementById('health-rows').innerHTML=`<tr><td colspan='5' class='health-empty error'>${esc(e.message||'Unable to load health')}</td></tr>`;
+        }
       }
       loadHealth(); setInterval(loadHealth, 15000);
     </script>
