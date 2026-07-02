@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -148,3 +149,42 @@ def test_trade_settings_reject_non_entsoe_hosts_from_mqtt(value):
     store.apply_mqtt(f"{collector.MQTT_TOPICS.settings_prefix}/entsoe_api_url", value)
 
     assert store.get().entsoe_api_url == collector.DAY_AHEAD_DEFAULTS.entsoe_api_url
+
+
+def test_publish_prices_also_publishes_normalized_price_vector_signal():
+    collector = _load_collector()
+
+    class Mqtt:
+        def __init__(self):
+            self.messages = []
+
+        def publish(self, topic, payload, retain=False):
+            self.messages.append((topic, payload, retain))
+
+    mqtt = Mqtt()
+    collector.publish_prices(
+        mqtt,
+        [
+            {
+                "date": "2026-07-03",
+                "hour": "10",
+                "starts_at": "2026-07-03T10:00:00+02:00",
+                "price_eur_kwh": 0.31,
+            }
+        ],
+    )
+
+    payloads = {topic: payload for topic, payload, _ in mqtt.messages}
+    signal = json.loads(payloads["minyad/market/signals"])
+
+    assert signal["id"] == "minyad-trade:price-vector:2026-07-03"
+    assert signal["type"] == "price_vector"
+    assert signal["source"] == "minyad-trade"
+    assert signal["payload"]["slot_seconds"] == 900
+    assert [slot["start"] for slot in signal["payload"]["slots"]] == [
+        "2026-07-03T10:00:00+02:00",
+        "2026-07-03T10:15:00+02:00",
+        "2026-07-03T10:30:00+02:00",
+        "2026-07-03T10:45:00+02:00",
+    ]
+    assert all(slot["price_import_eur_kwh"] == 0.31 for slot in signal["payload"]["slots"])
