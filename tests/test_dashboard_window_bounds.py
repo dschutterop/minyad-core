@@ -30,3 +30,39 @@ def test_non_day_dashboard_windows_stay_rolling(monkeypatch):
     assert start == datetime(2026, 6, 23, 9, 30, tzinfo=timezone.utc)
     assert end == now
     assert now_ == now
+
+
+def test_calendar_week_offset_uses_local_monday_to_sunday(monkeypatch):
+    monkeypatch.setenv("MINYAD_TIMEZONE", "Europe/Amsterdam")
+
+    now = datetime(2026, 6, 23, 10, 30, tzinfo=timezone.utc)
+
+    start, end, now_ = dashboard_window_bounds("week", timedelta(weeks=1), now, period_offset=-1)
+
+    assert start == datetime(2026, 6, 14, 22, 0, tzinfo=timezone.utc)
+    assert end == datetime(2026, 6, 21, 21, 59, 59, tzinfo=timezone.utc)
+    assert now_ == end
+
+
+def test_calendar_month_offset_uses_full_local_month(monkeypatch):
+    monkeypatch.setenv("MINYAD_TIMEZONE", "Europe/Amsterdam")
+
+    now = datetime(2026, 6, 23, 10, 30, tzinfo=timezone.utc)
+
+    start, end, now_ = dashboard_window_bounds("month", timedelta(days=31), now, period_offset=-1)
+
+    assert start == datetime(2026, 4, 30, 22, 0, tzinfo=timezone.utc)
+    assert end == datetime(2026, 5, 31, 21, 59, 59, tzinfo=timezone.utc)
+    assert now_ == end
+
+
+def test_current_calendar_month_clips_query_at_now(monkeypatch):
+    monkeypatch.setenv("MINYAD_TIMEZONE", "Europe/Amsterdam")
+
+    now = datetime(2026, 6, 23, 10, 30, tzinfo=timezone.utc)
+
+    start, end, now_ = dashboard_window_bounds("month", timedelta(days=31), now, period_offset=0)
+
+    assert start == datetime(2026, 5, 31, 22, 0, tzinfo=timezone.utc)
+    assert end == datetime(2026, 6, 30, 21, 59, 59, tzinfo=timezone.utc)
+    assert now_ == now

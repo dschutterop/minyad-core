@@ -1550,16 +1550,51 @@ WINDOWS = {
 }
 
 
-def dashboard_window_bounds(window: str, duration: timedelta, now: datetime | None = None) -> tuple[datetime, datetime, datetime]:
+def _add_months(value: datetime, months: int) -> datetime:
+    month_index = (value.month - 1) + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    return value.replace(year=year, month=month)
+
+
+def dashboard_window_bounds(
+    window: str,
+    duration: timedelta,
+    now: datetime | None = None,
+    period_offset: int | None = None,
+) -> tuple[datetime, datetime, datetime]:
     now_ = now or datetime.now(timezone.utc)
     if now_.tzinfo is None:
         now_ = now_.replace(tzinfo=timezone.utc)
     now_ = now_.astimezone(timezone.utc)
+    dashboard_tz = ZoneInfo(os.getenv("MINYAD_TIMEZONE", "Europe/Amsterdam"))
+    local_now = now_.astimezone(dashboard_tz)
+
+    if period_offset is not None and window in {"day", "week", "month", "year"}:
+        if window == "day":
+            local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=period_offset)
+            local_next = local_start + timedelta(days=1)
+        elif window == "week":
+            local_week = local_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=local_now.weekday())
+            local_start = local_week + timedelta(weeks=period_offset)
+            local_next = local_start + timedelta(weeks=1)
+        elif window == "month":
+            local_month = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            local_start = _add_months(local_month, period_offset)
+            local_next = _add_months(local_start, 1)
+        else:
+            local_year = local_now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            local_start = _add_months(local_year, period_offset * 12)
+            local_next = _add_months(local_start, 12)
+        local_end = local_next - timedelta(seconds=1)
+        start = local_start.astimezone(timezone.utc)
+        end = local_end.astimezone(timezone.utc)
+        query_until = min(now_, end)
+        return start, end, query_until
+
     if window != "day":
         return now_ - duration, now_, now_
 
-    dashboard_tz = ZoneInfo(os.getenv("MINYAD_TIMEZONE", "Europe/Amsterdam"))
-    local_now = now_.astimezone(dashboard_tz)
     local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     local_end = local_now.replace(hour=23, minute=59, second=59, microsecond=0)
     return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc), now_
@@ -1704,10 +1739,14 @@ def extrapolate_battery_curve(start: datetime, end: datetime, step_seconds: int,
 
 
 @app.get("/dashboard/curves")
-async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month", "year"] = "day", session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def dashboard_curves(
+    window: Literal["5m", "hour", "day", "week", "month", "year"] = "day",
+    offset: int | None = Query(default=None, ge=-120, le=0),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
     await ensure_recent_solar_forecast(session)
     duration, step_seconds, table_name = WINDOWS[window]
-    start, end, now_ = dashboard_window_bounds(window, duration)
+    start, end, now_ = dashboard_window_bounds(window, duration, period_offset=offset)
     if table_name == "power_curve_points":
         bucket = _bucket_expr("bucket_start", step_seconds)
         source_filter = "bucket_start >= :start and bucket_start <= :now_"
@@ -1754,6 +1793,7 @@ async def dashboard_curves(window: Literal["5m", "hour", "day", "week", "month",
 
     return {
         "window": window,
+        "period_offset": offset,
         "granularity_seconds": step_seconds,
         "start": start.isoformat(),
         "end": end.isoformat(),
