@@ -16,7 +16,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
+try:
+    import requests
+except ModuleNotFoundError:  # pragma: no cover - exercised indirectly by import-only tests
+    requests = None
 from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
 
@@ -178,7 +181,37 @@ def publish_prices(mqtt: MinyadMqttClient, prices: list[dict[str, Any]]) -> None
     mqtt.publish(f"{prefix}/{MQTT_TOPICS.day_ahead_full_suffix}", full_payload, retain=True)
     for point in prices:
         mqtt.publish(f"{prefix}/{point['hour']}", point["price_eur_kwh"], retain=True)
+    mqtt.publish("minyad/market/signals", json.dumps(_price_vector_signal(day, prices), separators=(",", ":")), retain=True)
     LOGGER.info("Published %d day-ahead price points for %s", len(prices), day)
+
+
+def _price_vector_signal(day: str, prices: list[dict[str, Any]]) -> dict[str, Any]:
+    starts = [datetime.fromisoformat(str(point["starts_at"]).replace("Z", "+00:00")) for point in prices]
+    valid_from = min(starts)
+    valid_until = max(starts) + timedelta(hours=1)
+    created_at = datetime.now(timezone.utc).astimezone(AMSTERDAM_TZ)
+    return {
+        "id": f"minyad-trade:price-vector:{day}",
+        "source": "minyad-trade",
+        "type": "price_vector",
+        "created_at": created_at.isoformat(),
+        "valid_from": valid_from.isoformat(),
+        "valid_until": valid_until.isoformat(),
+        "priority": 50,
+        "hard": False,
+        "payload": {
+            "slot_seconds": 900,
+            "slots": [
+                {
+                    "start": (start + timedelta(minutes=15 * quarter)).isoformat(),
+                    "price_import_eur_kwh": float(point["price_eur_kwh"]),
+                    "price_export_eur_kwh": 0.0,
+                }
+                for point, start in zip(prices, starts, strict=False)
+                for quarter in range(4)
+            ],
+        },
+    }
 
 
 def collect_once(client: Any, mqtt: MinyadMqttClient, settings: DayAheadSettings, target_day: datetime) -> None:

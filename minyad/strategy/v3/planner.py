@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -246,6 +247,9 @@ class RollingPlanner:
     def on_prices(self, day: str, points: list[dict[str, Any]]) -> None:
         self.price_store.set_from_entsoe(day, points)
 
+    def on_market_signal(self, payload: dict[str, Any] | list[dict[str, Any]], *, now: datetime | None = None) -> None:
+        self.price_store.set_market_signal(payload, now=now)
+
     def current_plan(self, now: datetime, soc_now_pct: float = 50.0) -> SlotPlan:
         if self.plan is None:
             return build_fallback_plan(now, soc_now_pct, self.settings, tz=self.tz)
@@ -290,25 +294,26 @@ class RollingPlanner:
         else:
             load_forecast = [settings.consumption_fallback_w] * horizon_slots
 
-        price_import, price_export = self.price_store.price_vectors_for(
+        market_inputs = self.price_store.planner_inputs_for(
             horizon_start,
             horizon_slots,
             slot_seconds,
             fixed_import=settings.fixed_price_import,
             fixed_export=settings.fixed_price_export,
+            now=now,
         )
 
         friday_sunset_at = await self._friday_sunset_in_horizon(horizon_start, slot_seconds, horizon_slots)
 
-        return solve_slot_plan(
+        plan = solve_slot_plan(
             horizon_start=horizon_start,
             slot_seconds=slot_seconds,
             horizon_slots=horizon_slots,
             soc_now_pct=soc_now_pct,
             pv_forecast_w=pv_forecast,
             load_forecast_w=load_forecast,
-            price_import=price_import,
-            price_export=price_export,
+            price_import=market_inputs.price_import,
+            price_export=market_inputs.price_export,
             capacity_wh=settings.capacity_wh,
             max_charge_w=settings.effective_max_charge_w,
             max_discharge_w=settings.max_discharge_w,
@@ -325,6 +330,13 @@ class RollingPlanner:
             generated_at=now,
             tz=self.tz,
         )
+        if market_inputs.market_signal_ids or market_inputs.constraint_reasons:
+            plan = replace(
+                plan,
+                market_signal_ids=market_inputs.market_signal_ids,
+                constraint_reasons=market_inputs.constraint_reasons,
+            )
+        return plan
 
     async def _friday_sunset_in_horizon(self, horizon_start: datetime, slot_seconds: int, horizon_slots: int) -> datetime | None:
         seen_dates: set[date] = set()
@@ -436,4 +448,6 @@ def _plan_to_json(plan: SlotPlan) -> dict[str, Any]:
         "friday_full_cycle": plan.friday_full_cycle,
         "solver_status": plan.solver_status,
         "pv_calibration_factor": plan.pv_calibration_factor,
+        **({"market_signal_ids": plan.market_signal_ids} if plan.market_signal_ids else {}),
+        **({"constraint_reasons": plan.constraint_reasons} if plan.constraint_reasons else {}),
     }

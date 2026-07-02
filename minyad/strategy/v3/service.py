@@ -100,6 +100,7 @@ class StrategyService:
             "minyad/grid/net_power_w",
             "minyad/battery/+",
             "minyad/solar/production_w",
+            "minyad/market/signals",
             "minyad/trade/prices/da/+/full",
             "minyad/control/override",
             "minyad/strategy/reload",
@@ -168,6 +169,14 @@ class StrategyService:
             self.planner.on_prices(day, points)
             await self.recalculate_plan()
             return
+        if topic == "minyad/market/signals":
+            try:
+                signal_payload = json.loads(decoded)
+            except json.JSONDecodeError:
+                return
+            self.planner.on_market_signal(signal_payload, now=datetime.now(timezone.utc))
+            await self.recalculate_plan()
+            return
         if topic == "minyad/solar/production_w":
             try:
                 self._pv_raw_w = int(float(decoded))
@@ -230,6 +239,20 @@ class StrategyService:
 
         exec_state = _replace(self.state, pv_now_w=self._effective_pv_now_w(now))
         decision = self.executor.tick(exec_state, plan, tracker_result)
+        if plan.market_signal_ids or plan.constraint_reasons:
+            decision = StrategyDecision(
+                decision.timestamp,
+                decision.setpoint_w,
+                decision.soc,
+                decision.net_grid_w,
+                decision.bias_w,
+                decision.floor_dyn_pct,
+                decision.ceil_dyn_pct,
+                decision.reason,
+                decision.solver_status,
+                plan.market_signal_ids,
+                plan.constraint_reasons,
+            )
         raw_setpoint = decision.setpoint_w
 
         setpoint, override_reason = await self.overrides.apply_with_reason(
@@ -257,6 +280,8 @@ class StrategyService:
                 decision.ceil_dyn_pct,
                 f"{decision.reason}{adjustment_reason}",
                 decision.solver_status,
+                decision.market_signal_ids,
+                decision.constraint_reasons,
             )
 
         setpoint_changed = self.last_decision is None or setpoint != self.last_decision.setpoint_w
@@ -414,6 +439,8 @@ def _plan_payload(plan: SlotPlan) -> dict[str, Any]:
         "friday_full_cycle": plan.friday_full_cycle,
         "solver_status": plan.solver_status,
         "pv_calibration_factor": plan.pv_calibration_factor,
+        **({"market_signal_ids": plan.market_signal_ids} if plan.market_signal_ids else {}),
+        **({"constraint_reasons": plan.constraint_reasons} if plan.constraint_reasons else {}),
     }
 
 
@@ -430,6 +457,8 @@ def _decision_payload(decision: StrategyDecision | None, tracker_result: Tracker
         "ceil_dyn_pct": decision.ceil_dyn_pct,
         "reason": decision.reason,
         "solver_status": decision.solver_status,
+        **({"market_signal_ids": decision.market_signal_ids} if decision.market_signal_ids else {}),
+        **({"constraint_reasons": decision.constraint_reasons} if decision.constraint_reasons else {}),
     }
 
 

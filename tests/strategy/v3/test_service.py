@@ -97,6 +97,39 @@ def test_primary_mode_publishes_the_real_setpoint_topic():
     assert "minyad/strategy3/setpoint_w" not in topics
 
 
+def test_invariant_22_market_signal_in_shadow_mode_does_not_dispatch():
+    svc = make_service(shadow_mode=True)
+    seen = {}
+
+    def on_market_signal(payload, now=None):
+        seen["payload"] = payload
+
+    async def recalculate_plan():
+        seen["recalculated"] = True
+
+    svc.planner.on_market_signal = on_market_signal
+    svc.recalculate_plan = recalculate_plan
+
+    signal_payload = {
+        "id": "sig-1",
+        "source": "minyad-trade",
+        "type": "price_vector",
+        "created_at": "2026-07-03T09:45:00+02:00",
+        "valid_from": "2026-07-03T10:00:00+02:00",
+        "valid_until": "2026-07-03T11:00:00+02:00",
+        "priority": 50,
+        "hard": False,
+        "payload": {"slot_seconds": 900, "slots": []},
+    }
+
+    asyncio.run(svc.handle_message("minyad/market/signals", json_dumps(signal_payload).encode()))
+
+    assert seen["payload"] == signal_payload
+    assert seen["recalculated"] is True
+    assert all(not topic.startswith("minyad/control/") for topic, _, _ in svc.mqtt.published)
+    assert all(topic != "minyad/strategy/setpoint_w" for topic, _, _ in svc.mqtt.published)
+
+
 def test_invariant_14_tick_lock_serializes_concurrent_ticks():
     svc = make_service(shadow_mode=True)
     order: list[str] = []
@@ -113,3 +146,9 @@ def test_invariant_14_tick_lock_serializes_concurrent_ticks():
 
     asyncio.run(run())
     assert order == ["start", "end", "start", "end"]
+
+
+def json_dumps(value):
+    import json
+
+    return json.dumps(value)

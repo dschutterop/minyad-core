@@ -35,6 +35,8 @@ class SlotPlan:
     friday_full_cycle: bool = False
     solver_status: str = "Optimal"
     pv_calibration_factor: float = 0.0
+    market_signal_ids: list[str] = field(default_factory=list)
+    constraint_reasons: list[str] = field(default_factory=list)
 
     def slot_containing(self, now: datetime) -> Slot | None:
         for slot in self.slots:
@@ -93,3 +95,5 @@ class StrategyDecision:
     ceil_dyn_pct: float
     reason: str
     solver_status: str
+    market_signal_ids: list[str] = field(default_factory=list)
+    constraint_reasons: list[str] = field(default_factory=list)

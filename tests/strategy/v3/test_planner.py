@@ -1,9 +1,10 @@
+import asyncio
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from minyad.strategy.v3.planner import PlannerSolveError, build_fallback_plan, solve_slot_plan
+from minyad.strategy.v3.planner import PlannerSolveError, RollingPlanner, build_fallback_plan, solve_slot_plan
 from minyad.strategy.v3.constants import Settings
 
 TZ = ZoneInfo("Europe/Amsterdam")
@@ -110,3 +111,50 @@ def test_fallback_plan_is_friday_aware():
     settings = Settings()
     plan = build_fallback_plan(friday_noon, 50.0, settings, tz=TZ)
     assert plan.friday_full_cycle is True
+
+
+def test_invariant_20_plan_contains_market_trace_metadata_when_signal_used():
+    asyncio.run(_run_market_trace_metadata_test())
+
+
+async def _run_market_trace_metadata_test():
+    now = datetime(2026, 7, 1, 10, 0, tzinfo=TZ)
+
+    async def ghi_fetcher(**kwargs):
+        return [(now + timedelta(hours=i), 0.0) for i in range(8)]
+
+    async def sunset_fetcher(target_date):
+        return datetime.combine(target_date, datetime.min.time(), TZ).replace(hour=21)
+
+    settings = Settings(initial={"strategy3.horizon_slots": "4"})
+    planner = RollingPlanner(settings, ghi_fetcher=ghi_fetcher, sunset_fetcher=sunset_fetcher)
+    planner.on_market_signal(
+        {
+            "id": "price-signal-1",
+            "source": "minyad-trade",
+            "type": "price_vector",
+            "created_at": "2026-07-01T09:45:00+02:00",
+            "valid_from": "2026-07-01T10:00:00+02:00",
+            "valid_until": "2026-07-01T11:00:00+02:00",
+            "priority": 50,
+            "hard": False,
+            "payload": {
+                "slot_seconds": 900,
+                "slots": [
+                    {
+                        "start": f"2026-07-01T10:{minute:02d}:00+02:00",
+                        "price_import_eur_kwh": 0.12,
+                        "price_export_eur_kwh": 0.0,
+                    }
+                    for minute in (0, 15, 30, 45)
+                ],
+            },
+        },
+        now=now,
+    )
+
+    plan = await planner.recalculate(now, 50.0)
+
+    assert plan.market_signal_ids == ["price-signal-1"]
+    assert plan.constraint_reasons == ["price_vector:minyad-trade"]
+    assert [slot.price_import for slot in plan.slots] == [0.12, 0.12, 0.12, 0.12]
