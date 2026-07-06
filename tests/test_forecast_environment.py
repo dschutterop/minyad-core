@@ -24,11 +24,3 @@ def test_forecast_installation_values_come_from_environment(monkeypatch) -> None
     assert module.LATITUDE == 52.123
     assert module.LONGITUDE == 5.456
     assert module.PEAK_W == 7200
-
-
-def test_api_installation_values_use_environment_names() -> None:
-    source = (ROOT / "api" / "main.py").read_text()
-
-    assert 'os.getenv("FORECAST_LATITUDE"' in source
-    assert 'os.getenv("FORECAST_LONGITUDE"' in source
-    assert 'os.getenv("SOLAR_PEAK_W"' in source

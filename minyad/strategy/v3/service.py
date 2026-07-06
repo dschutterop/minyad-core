@@ -8,7 +8,7 @@ import logging
 import os
 import signal
 from dataclasses import asdict, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -21,10 +21,11 @@ from shared.db import AsyncSessionLocal
 from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
 
-from minyad.strategy.v2.consumption_profile import load_consumption_profile
+from .consumption_profile import load_baseline_consumption_profile
 
 from .constants import Settings
 from .executor import StrategyExecutor
+from . import forecast_accuracy
 from .models import ExecutorState, SlotPlan, StrategyDecision, TrackerResult
 from .override import OverrideManager
 from .planner import RollingPlanner
@@ -37,6 +38,11 @@ configure_container_logging(getattr(logging, os.getenv("LOG_LEVEL", "INFO").uppe
 LOGGER = logging.getLogger(__name__)
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 PV_STALE_SECONDS = 300
+# Cross-service secret, same pattern as MINYAD_API_SECRET/VESPER_API_SECRET already used the
+# other way around (Vesper polling Minyad's surplus endpoint) — env var, not a settings-table
+# row, since it's a shared credential rather than a tunable parameter.
+VESPER_API_URL = os.getenv("VESPER_API_URL", "")
+VESPER_API_SECRET = os.getenv("VESPER_API_SECRET", "")
 
 
 def _truthy(value: str) -> bool:
@@ -92,6 +98,7 @@ class StrategyService:
         self.loop = asyncio.get_running_loop()
         await self.settings.load()
         await self.overrides.load()
+        await self.planner.load_pv_calibration_factors()
         await self.refresh_consumption_profile()
         await self.recalculate_plan()
         self._start_scheduler()
@@ -130,6 +137,14 @@ class StrategyService:
             id="strategy3_daily_calibration",
             replace_existing=True,
         )
+        self.scheduler.add_job(
+            self._run_daily_forecast_accuracy,
+            "cron",
+            hour=1,
+            minute=0,
+            id="strategy3_daily_forecast_accuracy",
+            replace_existing=True,
+        )
         self.scheduler.start()
 
     def _run_recalculate_plan(self) -> None:
@@ -139,6 +154,13 @@ class StrategyService:
     def _run_daily_calibration(self) -> None:
         if self.loop is not None:
             self.loop.call_soon_threadsafe(asyncio.create_task, self.planner.daily_calibration(datetime.now(AMSTERDAM)))
+
+    def _run_daily_forecast_accuracy(self) -> None:
+        if self.loop is not None:
+            yesterday = (datetime.now(AMSTERDAM) - timedelta(days=1)).date()
+            self.loop.call_soon_threadsafe(
+                asyncio.create_task, forecast_accuracy.run_daily_accuracy_job(AsyncSessionLocal, yesterday, tz=AMSTERDAM)
+            )
 
     def _on_mqtt(self, topic: str, payload: bytes) -> None:
         if self.loop is None:
@@ -218,8 +240,10 @@ class StrategyService:
 
     async def refresh_consumption_profile(self) -> None:
         try:
-            profile = await load_consumption_profile(
+            profile = await load_baseline_consumption_profile(
                 AsyncSessionLocal,
+                vesper_api_url=VESPER_API_URL or None,
+                vesper_api_key=VESPER_API_SECRET or None,
                 lookback_days=self.settings.consumption_lookback_days,
                 fallback_w=self.settings.consumption_fallback_w,
             )
@@ -423,6 +447,7 @@ def _plan_payload(plan: SlotPlan) -> dict[str, Any]:
         "generated_at": plan.generated_at.isoformat(),
         "valid_from": plan.valid_from.isoformat(),
         "slot_seconds": plan.slot_seconds,
+        "soc_start_pct": plan.soc_start_pct,
         "slots": [
             {
                 "start": slot.start.isoformat(),
@@ -431,6 +456,9 @@ def _plan_payload(plan: SlotPlan) -> dict[str, Any]:
                 "planned_export_w": slot.planned_export_w,
                 "pv_forecast_w": slot.pv_forecast_w,
                 "load_forecast_w": slot.load_forecast_w,
+                "curtailment_w": slot.curtailment_w,
+                "price_source": slot.price_source,
+                "cloud_cover_pct": slot.cloud_cover_pct,
                 "price_import": slot.price_import,
                 "price_export": slot.price_export,
             }
@@ -439,6 +467,7 @@ def _plan_payload(plan: SlotPlan) -> dict[str, Any]:
         "friday_full_cycle": plan.friday_full_cycle,
         "solver_status": plan.solver_status,
         "pv_calibration_factor": plan.pv_calibration_factor,
+        "plan_schema": plan.plan_schema,
         **({"market_signal_ids": plan.market_signal_ids} if plan.market_signal_ids else {}),
         **({"constraint_reasons": plan.constraint_reasons} if plan.constraint_reasons else {}),
     }

@@ -37,6 +37,7 @@ class PlannerMarketInputs:
     objective_adjustments: list[dict[str, Any]]
     signal_ids_by_slot: list[list[str]]
     constraint_reasons_by_slot: list[list[str]]
+    price_source_by_slot: list[str] = field(default_factory=list)
 
     @property
     def market_signal_ids(self) -> list[str]:
@@ -148,6 +149,7 @@ class PriceStore:
         export_vec = [fixed_export] * horizon_slots
         signal_ids_by_slot: list[list[str]] = [[] for _ in range(horizon_slots)]
         reasons_by_slot: list[list[str]] = [[] for _ in range(horizon_slots)]
+        price_source_by_slot: list[str] = ["fallback"] * horizon_slots
 
         active_signals = self._active_price_vector_signals(now or horizon_start)
         if active_signals:
@@ -160,9 +162,10 @@ class PriceStore:
                 export_vec,
                 signal_ids_by_slot,
                 reasons_by_slot,
+                price_source_by_slot,
             )
         else:
-            self._apply_legacy_prices(horizon_start, horizon_slots, slot_seconds, import_vec)
+            self._apply_legacy_prices(horizon_start, horizon_slots, slot_seconds, import_vec, price_source_by_slot)
 
         return PlannerMarketInputs(
             price_import=import_vec,
@@ -176,6 +179,7 @@ class PriceStore:
             objective_adjustments=[{} for _ in range(horizon_slots)],
             signal_ids_by_slot=signal_ids_by_slot,
             constraint_reasons_by_slot=reasons_by_slot,
+            price_source_by_slot=price_source_by_slot,
         )
 
     def price_vectors_for(
@@ -218,6 +222,7 @@ class PriceStore:
         export_vec: list[float],
         signal_ids_by_slot: list[list[str]],
         reasons_by_slot: list[list[str]],
+        price_source_by_slot: list[str],
     ) -> None:
         for index in range(horizon_slots):
             slot_start = horizon_start + timedelta(seconds=slot_seconds * index)
@@ -230,14 +235,23 @@ class PriceStore:
                 import_vec[index], export_vec[index] = prices
                 signal_ids_by_slot[index].append(signal.signal_id)
                 reasons_by_slot[index].append(signal.reason)
+                price_source_by_slot[index] = "market_signal"
                 break
 
-    def _apply_legacy_prices(self, horizon_start: datetime, horizon_slots: int, slot_seconds: int, import_vec: list[float]) -> None:
+    def _apply_legacy_prices(
+        self,
+        horizon_start: datetime,
+        horizon_slots: int,
+        slot_seconds: int,
+        import_vec: list[float],
+        price_source_by_slot: list[str],
+    ) -> None:
         for i in range(horizon_slots):
             slot_start = horizon_start + timedelta(seconds=slot_seconds * i)
             price = self._legacy_price_at(slot_start)
             if price is not None:
                 import_vec[i] = price
+                price_source_by_slot[i] = "entsoe"
 
     def _legacy_price_at(self, moment: datetime) -> float | None:
         points = self._points_by_day.get(moment.date().isoformat())

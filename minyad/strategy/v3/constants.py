@@ -49,6 +49,13 @@ DEFAULTS: dict[str, str] = {
     "strategy3.pv_calibration_factor": "7.0",
     "strategy3.consumption_lookback_days": "14",
     "strategy3.consumption_fallback_w": "300",
+    # Site config (dashboard_forecast_v1 spec 7): single source of truth for coordinates
+    # and panel/inverter ratings, replacing duplicated hardcoded values in api/main.py
+    # and minyad/strategy/v3/forecast_client.py.
+    "site.latitude": "51.9788",
+    "site.longitude": "4.3158",
+    "site.pv_peak_w": "5000",
+    "site.inverter_ac_max_w": "4600",
 }
 
 
@@ -251,3 +258,19 @@ class Settings:
     @property
     def consumption_fallback_w(self) -> float:
         return self.float("strategy3.consumption_fallback_w")
+
+    @property
+    def latitude(self) -> float:
+        return self.float("site.latitude")
+
+    @property
+    def longitude(self) -> float:
+        return self.float("site.longitude")
+
+    @property
+    def pv_peak_w(self) -> float:
+        return self.float("site.pv_peak_w")
+
+    @property
+    def inverter_ac_max_w(self) -> float:
+        return self.float("site.inverter_ac_max_w")

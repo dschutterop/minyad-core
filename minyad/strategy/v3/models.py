@@ -18,6 +18,9 @@ class Slot:
     price_export: float
     charge_w: int = 0
     discharge_w: int = 0
+    curtailment_w: int = 0
+    price_source: str = "fallback"
+    cloud_cover_pct: float | None = None
 
     @property
     def surplus_w(self) -> int:
@@ -37,6 +40,7 @@ class SlotPlan:
     pv_calibration_factor: float = 0.0
     market_signal_ids: list[str] = field(default_factory=list)
     constraint_reasons: list[str] = field(default_factory=list)
+    plan_schema: int = 2
 
     def slot_containing(self, now: datetime) -> Slot | None:
         for slot in self.slots:

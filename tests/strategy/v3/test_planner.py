@@ -4,6 +4,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from minyad.strategy.v2.consumption_profile import ConsumptionProfile
+from minyad.strategy.v3.consumption_profile import HouseholdLoadProfile
 from minyad.strategy.v3.planner import PlannerSolveError, RollingPlanner, build_fallback_plan, solve_slot_plan
 from minyad.strategy.v3.constants import Settings
 
@@ -117,13 +119,98 @@ def test_invariant_20_plan_contains_market_trace_metadata_when_signal_used():
     asyncio.run(_run_market_trace_metadata_test())
 
 
+def test_pv_forecast_uses_per_hour_calibration_factor():
+    asyncio.run(_run_pv_per_hour_factor_test())
+
+
+async def _run_pv_per_hour_factor_test():
+    now = datetime(2026, 7, 1, 10, 0, tzinfo=TZ)  # exactly on the hour, local time
+
+    async def ghi_fetcher(**kwargs):
+        return [(now + timedelta(hours=i), 100.0) for i in range(-1, 4)]
+
+    async def sunset_fetcher(target_date, **kwargs):
+        return datetime.combine(target_date, datetime.min.time(), TZ).replace(hour=21)
+
+    # 8 slots of 15 minutes = two full hours: 10:00-11:00 then 11:00-12:00.
+    settings = Settings(initial={"strategy3.horizon_slots": "8"})
+    planner = RollingPlanner(settings, ghi_fetcher=ghi_fetcher, sunset_fetcher=sunset_fetcher)
+    factors = list(planner.pv_calibration_factors)
+    factors[10] = 5.0
+    factors[11] = 1.0
+    planner.pv_calibration_factors = factors
+
+    plan = await planner.recalculate(now, 50.0)
+
+    hour_10_slots = plan.slots[:4]
+    hour_11_slots = plan.slots[4:]
+    assert all(slot.pv_forecast_w == 500 for slot in hour_10_slots)
+    assert all(slot.pv_forecast_w == 100 for slot in hour_11_slots)
+
+
+def test_load_forecast_applies_temperature_correction():
+    asyncio.run(_run_load_temperature_correction_test())
+
+
+async def _run_load_temperature_correction_test():
+    now = datetime(2026, 7, 1, 14, 0, tzinfo=TZ)  # Wednesday afternoon
+
+    async def ghi_fetcher(**kwargs):
+        return [(now + timedelta(hours=i), 0.0) for i in range(-1, 4)]
+
+    async def sunset_fetcher(target_date, **kwargs):
+        return datetime.combine(target_date, datetime.min.time(), TZ).replace(hour=21)
+
+    async def temperature_fetcher(**kwargs):
+        return [(now + timedelta(hours=i), 30.0) for i in range(-1, 4)]  # flat 30 degC forecast
+
+    settings = Settings(initial={"strategy3.horizon_slots": "4"})
+    planner = RollingPlanner(
+        settings, ghi_fetcher=ghi_fetcher, sunset_fetcher=sunset_fetcher, temperature_fetcher=temperature_fetcher
+    )
+    # horizon covers slots 56-59 (14:00-14:59, 4 x 15-min slots)
+    weekday = ConsumptionProfile(slot_watts={56: 500.0, 57: 500.0, 58: 500.0, 59: 500.0}, tz=TZ, fallback_w=300.0)
+    weekend = ConsumptionProfile(slot_watts={56: 500.0, 57: 500.0, 58: 500.0, 59: 500.0}, tz=TZ, fallback_w=300.0)
+    planner.set_consumption_profile(
+        HouseholdLoadProfile(weekday=weekday, weekend=weekend, temp_betas={"afternoon": 20.0}, t_ref_c=22.0, tz=TZ)
+    )
+
+    plan = await planner.recalculate(now, 50.0)
+
+    # 500 W base + 20 W/degC * (30 - 22) degC = 660 W
+    assert all(slot.load_forecast_w == 660 for slot in plan.slots)
+
+
+def test_pv_forecast_clipped_to_inverter_ac_max_w():
+    asyncio.run(_run_pv_clipping_test())
+
+
+async def _run_pv_clipping_test():
+    now = datetime(2026, 7, 1, 12, 0, tzinfo=TZ)
+
+    async def ghi_fetcher(**kwargs):
+        return [(now + timedelta(hours=i), 1000.0) for i in range(-1, 2)]
+
+    async def sunset_fetcher(target_date, **kwargs):
+        return datetime.combine(target_date, datetime.min.time(), TZ).replace(hour=21)
+
+    settings = Settings(initial={"strategy3.horizon_slots": "4", "site.inverter_ac_max_w": "3000"})
+    planner = RollingPlanner(settings, ghi_fetcher=ghi_fetcher, sunset_fetcher=sunset_fetcher)
+    planner.pv_calibration_factors = [10.0] * 24  # 1000 W/m2 * 10.0 = 10000 W unclipped
+
+    plan = await planner.recalculate(now, 50.0)
+
+    assert all(slot.pv_forecast_w <= 3000 for slot in plan.slots)
+    assert max(slot.pv_forecast_w for slot in plan.slots) == 3000
+
+
 async def _run_market_trace_metadata_test():
     now = datetime(2026, 7, 1, 10, 0, tzinfo=TZ)
 
     async def ghi_fetcher(**kwargs):
         return [(now + timedelta(hours=i), 0.0) for i in range(8)]
 
-    async def sunset_fetcher(target_date):
+    async def sunset_fetcher(target_date, **kwargs):
         return datetime.combine(target_date, datetime.min.time(), TZ).replace(hour=21)
 
     settings = Settings(initial={"strategy3.horizon_slots": "4"})

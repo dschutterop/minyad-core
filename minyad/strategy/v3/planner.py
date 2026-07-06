@@ -12,13 +12,14 @@ from zoneinfo import ZoneInfo
 import pulp
 from sqlalchemy import text
 
-from minyad.strategy.v2.consumption_profile import ConsumptionProfile
 from minyad.strategy.v2.planner import is_lifepo4_full_cycle_day
 
 from .constants import Settings
+from .consumption_profile import HouseholdLoadProfile
 from .models import Slot, SlotPlan
 from .price_client import PriceStore
 from . import forecast_client
+from . import pv_uncertainty
 
 LOGGER = logging.getLogger(__name__)
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
@@ -64,6 +65,8 @@ def solve_slot_plan(
     pv_calibration_factor: float,
     generated_at: datetime,
     tz: ZoneInfo = AMSTERDAM,
+    price_source: list[str] | None = None,
+    cloud_cover_pct: list[float | None] | None = None,
 ) -> SlotPlan:
     """Solve the spec-3.5 linear program and return a :class:`SlotPlan`.
 
@@ -156,6 +159,9 @@ def solve_slot_plan(
     if status != "Optimal":
         raise PlannerSolveError(status)
 
+    price_source_vec = price_source if price_source is not None else ["fallback"] * n
+    cloud_cover_vec = cloud_cover_pct if cloud_cover_pct is not None else [None] * n
+
     slots: list[Slot] = []
     for t in range(n):
         ch_val = ch[t].value() or 0.0
@@ -172,6 +178,9 @@ def solve_slot_plan(
                 load_forecast_w=int(round(load_forecast_w[t])),
                 charge_w=int(round(ch_val)),
                 discharge_w=int(round(dis_val)),
+                curtailment_w=int(round(curtail[t].value() or 0.0)),
+                price_source=price_source_vec[t],
+                cloud_cover_pct=cloud_cover_vec[t],
                 price_import=price_import[t],
                 price_export=price_export[t],
             )
@@ -230,19 +239,48 @@ class RollingPlanner:
         tz: ZoneInfo = AMSTERDAM,
         ghi_fetcher: Any | None = None,
         sunset_fetcher: Any | None = None,
+        temperature_fetcher: Any | None = None,
+        cloud_cover_fetcher: Any | None = None,
     ) -> None:
         self.settings = settings
         self.db_session_factory = db_session_factory
         self.tz = tz
         self._ghi_fetcher = ghi_fetcher or forecast_client.fetch_ghi_hourly
         self._sunset_fetcher = sunset_fetcher or forecast_client.fetch_sunset
+        self._temperature_fetcher = temperature_fetcher or forecast_client.fetch_temperature_hourly
+        self._cloud_cover_fetcher = cloud_cover_fetcher or forecast_client.fetch_cloud_cover_hourly
         self.price_store = PriceStore()
-        self.consumption_profile: ConsumptionProfile | None = None
+        self.consumption_profile: HouseholdLoadProfile | None = None
         self.plan: SlotPlan | None = None
         self._last_fallback_logged = False
+        # Bootstrap: flat 24-hour vector from the scalar default until the first
+        # daily_calibration() run (or load_pv_calibration_factors() at startup) replaces it
+        # with real per-hour data (dashboard_forecast_v1 spec 4.3).
+        self.pv_calibration_factors: list[float] = [settings.pv_calibration_factor] * forecast_client.PV_CALIBRATION_HOURS
 
-    def set_consumption_profile(self, profile: ConsumptionProfile) -> None:
+    def set_consumption_profile(self, profile: HouseholdLoadProfile) -> None:
         self.consumption_profile = profile
+
+    async def load_pv_calibration_factors(self) -> None:
+        """Load the most recently computed per-hour factor vector at startup (spec 4.3.4)."""
+        if self.db_session_factory is None:
+            return
+        async with self.db_session_factory() as session:
+            latest_date = (
+                await session.execute(text("select max(calibration_date) from pv_calibration_history"))
+            ).scalar_one_or_none()
+            if latest_date is None:
+                return
+            rows = (
+                await session.execute(
+                    text("select hour_of_day, factor from pv_calibration_history where calibration_date = :d"),
+                    {"d": latest_date},
+                )
+            ).all()
+        factors = list(self.pv_calibration_factors)
+        for hour, factor in rows:
+            factors[hour] = float(factor)
+        self.pv_calibration_factors = factors
 
     def on_prices(self, day: str, points: list[dict[str, Any]]) -> None:
         self.price_store.set_from_entsoe(day, points)
@@ -279,18 +317,44 @@ class RollingPlanner:
         slot_seconds = settings.plan_interval_min * 60
         horizon_start = _slot_floor(now, slot_seconds)
 
-        ghi_points = await self._maybe_await(self._ghi_fetcher(past_days=1, forecast_days=2))
-        pv_forecast = [
-            forecast_client.interpolate_ghi(ghi_points, horizon_start + timedelta(seconds=slot_seconds * t))
-            * settings.pv_calibration_factor
-            for t in range(horizon_slots)
-        ]
+        ghi_points = await self._maybe_await(
+            self._ghi_fetcher(lat=settings.latitude, lon=settings.longitude, past_days=1, forecast_days=2)
+        )
+        try:
+            cloud_cover_points = await self._maybe_await(
+                self._cloud_cover_fetcher(lat=settings.latitude, lon=settings.longitude, past_days=1, forecast_days=2)
+            )
+        except Exception:
+            # The P10-P90 band (spec 4.4) is purely informational for the dashboard — a missed
+            # cloud-cover fetch should leave cloud_cover_pct unset per slot, not fail the plan.
+            LOGGER.warning("Unable to fetch cloud cover forecast; PV uncertainty band will be unavailable", exc_info=True)
+            cloud_cover_points = []
+        pv_forecast = []
+        cloud_cover_pct: list[float | None] = []
+        for t in range(horizon_slots):
+            slot_start = horizon_start + timedelta(seconds=slot_seconds * t)
+            hour_local = slot_start.astimezone(self.tz).hour
+            ghi_w_m2 = forecast_client.interpolate_ghi(ghi_points, slot_start)
+            # Per-hour calibration factor (spec 4.3.1) with an inverter AC clipping guard
+            # (spec 4.3.2) — a real inverter can't output more than its rated AC max regardless
+            # of how much DC power the panels could otherwise deliver.
+            pv_forecast.append(min(ghi_w_m2 * self.pv_calibration_factors[hour_local], settings.inverter_ac_max_w))
+            cloud_cover_pct.append(forecast_client.interpolate_ghi(cloud_cover_points, slot_start) if cloud_cover_points else None)
 
         if self.consumption_profile is not None:
-            load_forecast = [
-                self.consumption_profile.expected_w(horizon_start + timedelta(seconds=slot_seconds * t))
-                for t in range(horizon_slots)
-            ]
+            try:
+                temp_points = await self._maybe_await(self._temperature_fetcher(past_days=1, forecast_days=2))
+            except Exception:
+                # Temperature correction (spec 4.2.2) is an enhancement, not a dependency —
+                # fall back to the profile's plain per-slot expectation rather than failing the
+                # whole plan build over a missed forecast fetch.
+                LOGGER.warning("Unable to fetch temperature forecast; skipping temperature correction", exc_info=True)
+                temp_points = []
+            load_forecast = []
+            for t in range(horizon_slots):
+                slot_start = horizon_start + timedelta(seconds=slot_seconds * t)
+                temperature_c = forecast_client.interpolate_ghi(temp_points, slot_start) if temp_points else None
+                load_forecast.append(self.consumption_profile.expected_w(slot_start, temperature_c=temperature_c))
         else:
             load_forecast = [settings.consumption_fallback_w] * horizon_slots
 
@@ -326,9 +390,13 @@ class RollingPlanner:
             soc_floor_pct=settings.soc_floor,
             soc_ceiling_pct=settings.soc_ceiling,
             friday_sunset_at=friday_sunset_at,
-            pv_calibration_factor=settings.pv_calibration_factor,
+            # SlotPlan.pv_calibration_factor is now purely a telemetry summary (mean of the
+            # per-hour vector actually used above); nothing downstream reads it for forecasting.
+            pv_calibration_factor=sum(self.pv_calibration_factors) / len(self.pv_calibration_factors),
             generated_at=now,
             tz=self.tz,
+            price_source=market_inputs.price_source_by_slot,
+            cloud_cover_pct=cloud_cover_pct,
         )
         if market_inputs.market_signal_ids or market_inputs.constraint_reasons:
             plan = replace(
@@ -347,13 +415,15 @@ class RollingPlanner:
                 continue
             seen_dates.add(local_date)
             try:
-                return await self._maybe_await(self._sunset_fetcher(local_date))
+                return await self._maybe_await(
+                    self._sunset_fetcher(local_date, lat=self.settings.latitude, lon=self.settings.longitude)
+                )
             except Exception:  # noqa: BLE001 - fall back to the fixed local sunset estimate
                 return forecast_client.fallback_sunset(local_date)
         return None
 
     async def daily_calibration(self, now: datetime) -> None:
-        """Recompute strategy3.pv_calibration_factor from the last 14 days (spec 3.3)."""
+        """Recompute per-hour PV calibration factors from the last 14 days (spec 4.3)."""
         if self.db_session_factory is None:
             return
         start = now - timedelta(days=PV_CALIBRATION_LOOKBACK_DAYS)
@@ -374,23 +444,113 @@ class RollingPlanner:
         if len(rows) < PV_CALIBRATION_MIN_DAYS * 96:
             return
         try:
-            ghi_points = await self._maybe_await(self._ghi_fetcher(past_days=PV_CALIBRATION_LOOKBACK_DAYS, forecast_days=0))
+            ghi_points = await self._maybe_await(
+                self._ghi_fetcher(
+                    lat=self.settings.latitude,
+                    lon=self.settings.longitude,
+                    past_days=PV_CALIBRATION_LOOKBACK_DAYS,
+                    forecast_days=0,
+                )
+            )
         except Exception:
-            LOGGER.exception("PV calibration: could not fetch historical irradiance; keeping previous factor")
+            LOGGER.exception("PV calibration: could not fetch historical irradiance; keeping previous factors")
             return
 
-        actual_wh = 0.0
-        ghi_wh = 0.0
+        samples: list[tuple[int, float, float]] = []
         for bucket_start, power_w in rows:
             if power_w is None or bucket_start is None:
                 continue
             if bucket_start.tzinfo is None:
                 bucket_start = bucket_start.replace(tzinfo=timezone.utc)
-            actual_wh += max(0.0, float(power_w)) * 0.25
-            ghi_wh += forecast_client.interpolate_ghi(ghi_points, bucket_start) * 0.25
+            ghi_w_m2 = forecast_client.interpolate_ghi(ghi_points, bucket_start)
+            hour_local = bucket_start.astimezone(self.tz).hour
+            samples.append((hour_local, max(0.0, float(power_w)), ghi_w_m2))
 
-        new_factor = forecast_client.calibrate_pv_factor(actual_wh, ghi_wh, self.settings.pv_calibration_factor)
-        await self.settings.set("strategy3.pv_calibration_factor", new_factor)
+        new_factors = forecast_client.calibrate_pv_factors(samples, self.pv_calibration_factors)
+        self.pv_calibration_factors = new_factors
+        await self._persist_pv_calibration(now, new_factors)
+        # Keep the scalar settings value in step as a coarse telemetry/debug summary; nothing
+        # in the forecasting path reads it anymore (see _build_plan and solve_slot_plan above).
+        await self.settings.set("strategy3.pv_calibration_factor", sum(new_factors) / len(new_factors))
+
+        try:
+            cloud_cover_points = await self._maybe_await(
+                self._cloud_cover_fetcher(
+                    lat=self.settings.latitude,
+                    lon=self.settings.longitude,
+                    past_days=PV_CALIBRATION_LOOKBACK_DAYS,
+                    forecast_days=0,
+                )
+            )
+        except Exception:
+            LOGGER.warning("PV uncertainty band: could not fetch historical cloud cover; skipping band update", exc_info=True)
+            cloud_cover_points = []
+        if cloud_cover_points:
+            actual_rows = [
+                (bucket_start if bucket_start.tzinfo else bucket_start.replace(tzinfo=timezone.utc), max(0.0, float(power_w)))
+                for bucket_start, power_w in rows
+                if power_w is not None and bucket_start is not None
+            ]
+            ratios_by_class = pv_uncertainty.collect_pv_ratio_samples(
+                actual_rows, ghi_points, cloud_cover_points, new_factors, self.tz
+            )
+            bands = pv_uncertainty.compute_uncertainty_bands(ratios_by_class)
+            await self._persist_pv_uncertainty_bands(now, bands)
+
+    async def _persist_pv_calibration(self, now: datetime, factors: list[float]) -> None:
+        if self.db_session_factory is None:
+            return
+        calibration_date = now.astimezone(self.tz).date()
+        async with self.db_session_factory() as session:
+            for hour, factor in enumerate(factors):
+                await session.execute(
+                    text(
+                        """
+                        insert into pv_calibration_history (calibration_date, hour_of_day, factor)
+                        values (:calibration_date, :hour, :factor)
+                        on conflict (calibration_date, hour_of_day) do update set factor = excluded.factor
+                        """
+                    ),
+                    {"calibration_date": calibration_date, "hour": hour, "factor": factor},
+                )
+            # Housekeeping retention; far longer than the 14-28 day lookback this feeds, kept
+            # mainly for the debugging use case in spec 4.3.4 ("why does it expect less at 17:00").
+            await session.execute(
+                text("delete from pv_calibration_history where calibration_date < :cutoff"),
+                {"cutoff": calibration_date - timedelta(days=180)},
+            )
+            await session.commit()
+
+    async def _persist_pv_uncertainty_bands(self, now: datetime, bands: dict[str, dict[str, Any]]) -> None:
+        if self.db_session_factory is None or not bands:
+            return
+        calibration_date = now.astimezone(self.tz).date()
+        async with self.db_session_factory() as session:
+            for cloud_class, stats in bands.items():
+                await session.execute(
+                    text(
+                        """
+                        insert into pv_uncertainty_bands (calibration_date, cloud_class, p10_multiplier, p90_multiplier, sample_count)
+                        values (:calibration_date, :cloud_class, :p10, :p90, :sample_count)
+                        on conflict (calibration_date, cloud_class) do update set
+                          p10_multiplier = excluded.p10_multiplier,
+                          p90_multiplier = excluded.p90_multiplier,
+                          sample_count = excluded.sample_count
+                        """
+                    ),
+                    {
+                        "calibration_date": calibration_date,
+                        "cloud_class": cloud_class,
+                        "p10": stats["p10_multiplier"],
+                        "p90": stats["p90_multiplier"],
+                        "sample_count": stats["sample_count"],
+                    },
+                )
+            await session.execute(
+                text("delete from pv_uncertainty_bands where calibration_date < :cutoff"),
+                {"cutoff": calibration_date - timedelta(days=180)},
+            )
+            await session.commit()
 
     async def _persist(self, plan: SlotPlan) -> None:
         if self.db_session_factory is None:
@@ -400,8 +560,8 @@ class RollingPlanner:
             await session.execute(
                 text(
                     """
-                    insert into slot_plans (generated_at, valid_from, slot_seconds, payload, solver_status)
-                    values (:generated_at, :valid_from, :slot_seconds, cast(:payload as jsonb), :solver_status)
+                    insert into slot_plans (generated_at, valid_from, slot_seconds, payload, solver_status, strategy_version)
+                    values (:generated_at, :valid_from, :slot_seconds, cast(:payload as jsonb), :solver_status, :strategy_version)
                     """
                 ),
                 {
@@ -410,10 +570,12 @@ class RollingPlanner:
                     "slot_seconds": plan.slot_seconds,
                     "payload": json.dumps(payload),
                     "solver_status": plan.solver_status,
+                    "strategy_version": "v3",
                 },
             )
+            # Retention per dashboard_forecast_v1 spec 5.1 (plan vintages for the history "plan @ tijdstip" view).
             await session.execute(
-                text("delete from slot_plans where created_at < now() - interval '30 days'")
+                text("delete from slot_plans where created_at < now() - interval '90 days'")
             )
             await session.commit()
 
@@ -429,6 +591,7 @@ def _plan_to_json(plan: SlotPlan) -> dict[str, Any]:
         "generated_at": plan.generated_at.isoformat(),
         "valid_from": plan.valid_from.isoformat(),
         "slot_seconds": plan.slot_seconds,
+        "soc_start_pct": plan.soc_start_pct,
         "slots": [
             {
                 "start": slot.start.isoformat(),
@@ -439,6 +602,9 @@ def _plan_to_json(plan: SlotPlan) -> dict[str, Any]:
                 "load_forecast_w": slot.load_forecast_w,
                 "charge_w": slot.charge_w,
                 "discharge_w": slot.discharge_w,
+                "curtailment_w": slot.curtailment_w,
+                "price_source": slot.price_source,
+                "cloud_cover_pct": slot.cloud_cover_pct,
                 "surplus_w": slot.surplus_w,
                 "price_import": slot.price_import,
                 "price_export": slot.price_export,
@@ -448,6 +614,7 @@ def _plan_to_json(plan: SlotPlan) -> dict[str, Any]:
         "friday_full_cycle": plan.friday_full_cycle,
         "solver_status": plan.solver_status,
         "pv_calibration_factor": plan.pv_calibration_factor,
+        "plan_schema": plan.plan_schema,
         **({"market_signal_ids": plan.market_signal_ids} if plan.market_signal_ids else {}),
         **({"constraint_reasons": plan.constraint_reasons} if plan.constraint_reasons else {}),
     }
