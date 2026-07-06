@@ -1615,7 +1615,7 @@ def interpolate_points(points: list[dict[str, Any]], step_seconds: int) -> list[
 
 async def latest_slot_plan(session: AsyncSession) -> dict[str, Any] | None:
     row = (await session.execute(text("""
-        select generated_at, valid_from, slot_seconds, payload
+        select generated_at, valid_from, slot_seconds, payload, solver_status
         from slot_plans
         order by generated_at desc
         limit 1
@@ -1778,7 +1778,13 @@ async def dashboard_curves(
         if generated_at.tzinfo is None:
             generated_at = generated_at.replace(tzinfo=timezone.utc)
         plan_generated_at = generated_at.isoformat()
-        if generated_at > datetime.now(timezone.utc) - timedelta(minutes=PLAN_STALE_MINUTES):
+        is_fresh = generated_at > datetime.now(timezone.utc) - timedelta(minutes=PLAN_STALE_MINUTES)
+        # A FALLBACK plan (solver couldn't produce a real solution, e.g. Open-Meteo was
+        # unreachable) is a flat pv_forecast_w=0/load_forecast_w=0 hold — persisted with a fresh
+        # generated_at like any other plan, so freshness alone can't tell it apart from a real
+        # forecast. Treat it the same as "no plan": never show a fabricated flat-zero line.
+        is_real_plan = plan_row.get("solver_status") != "FALLBACK"
+        if is_fresh and is_real_plan:
             plan_status = "ok"
             battery_conf = await battery_settings(session)
             capacity_wh = float(battery_conf.get("capacity_wh", 10240))
@@ -1791,8 +1797,10 @@ async def dashboard_curves(
             uncertainty_bands = await latest_pv_uncertainty_bands(session)
             curves, price_source_points = build_plan_curves(plan_row["payload"], capacity_wh, soc_now, now_, end, uncertainty_bands)
             curves = {key: interpolate_points(points, step_seconds) for key, points in curves.items()}
-        else:
+        elif not is_fresh:
             plan_status = "stale"
+        else:
+            plan_status = "fallback"
 
     return {
         "window": window,
@@ -1871,6 +1879,10 @@ async def api_forecast(hours_ahead: int = 12, session: AsyncSession = Depends(ge
         plan_generated_at = plan_generated_at.replace(tzinfo=timezone.utc)
     if plan_generated_at is None or plan_generated_at <= now_ - timedelta(minutes=PLAN_STALE_MINUTES):
         return {"hours_ahead": hours, "plan_status": "missing" if plan_row is None else "stale", "points": []}
+    if plan_row.get("solver_status") == "FALLBACK":
+        # See dashboard_curves: a FALLBACK plan is a flat pv_forecast_w=0 hold, not a real
+        # forecast — treat it the same as no plan rather than returning fabricated zeros.
+        return {"hours_ahead": hours, "plan_status": "fallback", "points": []}
     battery_conf = await battery_settings(session)
     capacity_wh = float(battery_conf.get("capacity_wh", 10240))
     mqtt_payload = latest_mqtt_status()
