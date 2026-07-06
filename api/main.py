@@ -19,7 +19,6 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Query, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
-import httpx
 import paho.mqtt.client as paho_mqtt
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import text
@@ -181,13 +180,7 @@ STRATEGY_NUMERIC_LIMITS = {
     "ramp_ceiling_w": (1, 5000),
     "ramp_hold_seconds": (0, 3600),
 }
-OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-FORECAST_LATITUDE = float(os.getenv("FORECAST_LATITUDE", "51.9788"))
-FORECAST_LONGITUDE = float(os.getenv("FORECAST_LONGITUDE", "4.3158"))
-SOLAR_PEAK_W = int(os.getenv("SOLAR_PEAK_W", "5000"))
-SOLAR_FORECAST_EFFICIENCY = 0.80
-OPEN_METEO_RETRY_ATTEMPTS = max(1, int(os.getenv("OPEN_METEO_RETRY_ATTEMPTS", "3")))
-OPEN_METEO_RETRY_BASE_DELAY_SECONDS = float(os.getenv("OPEN_METEO_RETRY_BASE_DELAY_SECONDS", "2"))
+PLAN_STALE_MINUTES = 30
 SURPLUS_API_VERSION = "v1"
 
 
@@ -1604,104 +1597,6 @@ def _bucket_expr(column: str, seconds: int) -> str:
     return f"to_timestamp(floor(extract(epoch from {column}) / {seconds}) * {seconds})"
 
 
-def scale_to_system(direct_w_m2: float | None, diffuse_w_m2: float | None) -> int:
-    total = max(0.0, float(direct_w_m2 or 0) + float(diffuse_w_m2 or 0))
-    return round((total / 1000.0) * SOLAR_PEAK_W * SOLAR_FORECAST_EFFICIENCY)
-
-
-def open_meteo_retry_delay_seconds(attempt: int) -> float:
-    return OPEN_METEO_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
-
-
-async def fetch_open_meteo_forecast() -> list[dict[str, Any]]:
-    params = {
-        "latitude": FORECAST_LATITUDE,
-        "longitude": FORECAST_LONGITUDE,
-        "hourly": "direct_radiation,diffuse_radiation,shortwave_radiation",
-        "forecast_days": 2,
-        "timezone": "Europe/Amsterdam",
-    }
-    async with httpx.AsyncClient(timeout=10) as client:
-        for attempt in range(1, OPEN_METEO_RETRY_ATTEMPTS + 1):
-            try:
-                response = await client.get(OPEN_METEO_URL, params=params)
-                response.raise_for_status()
-                data = response.json()
-                break
-            except httpx.RequestError as exc:
-                if attempt == OPEN_METEO_RETRY_ATTEMPTS:
-                    raise
-                delay = open_meteo_retry_delay_seconds(attempt)
-                LOGGER.warning(
-                    "Open-Meteo request failed on attempt %d/%d; retrying in %ss: %s",
-                    attempt,
-                    OPEN_METEO_RETRY_ATTEMPTS,
-                    delay,
-                    exc,
-                )
-                await asyncio.sleep(delay)
-            except httpx.HTTPStatusError:
-                raise
-    hourly = data["hourly"]
-    points = []
-    for forecast_time, direct, diffuse, shortwave in zip(
-        hourly["time"],
-        hourly.get("direct_radiation", []),
-        hourly.get("diffuse_radiation", []),
-        hourly.get("shortwave_radiation", []),
-    ):
-        direct_value = float(direct or 0)
-        diffuse_value = float(diffuse if diffuse is not None else max(0, float(shortwave or 0) - direct_value))
-        points.append({
-            "forecast_time": datetime.fromisoformat(forecast_time).replace(tzinfo=ZoneInfo("Europe/Amsterdam")).astimezone(timezone.utc),
-            "direct_w_m2": direct_value,
-            "diffuse_w_m2": diffuse_value,
-            "estimated_w": scale_to_system(direct_value, diffuse_value),
-        })
-    return points
-
-
-async def persist_solar_forecast(session: AsyncSession, points: list[dict[str, Any]]) -> None:
-    fetched_at = datetime.now(timezone.utc)
-    for point in points:
-        forecast_time = point["forecast_time"]
-        if forecast_time.tzinfo is None:
-            forecast_time = forecast_time.replace(tzinfo=timezone.utc)
-        await session.execute(
-            text("""
-                insert into solar_forecast_points
-                  (timestamp, bucket_start, granularity_seconds, power_w, forecast_ghi, provider,
-                   fetched_at, forecast_time, direct_w_m2, diffuse_w_m2, estimated_w, source)
-                values
-                  (:forecast_time, date_trunc('minute', :forecast_time), 900, :estimated_w, null, 'open-meteo',
-                   :fetched_at, :forecast_time, :direct_w_m2, :diffuse_w_m2, :estimated_w, 'open-meteo')
-                on conflict (forecast_time) do update set
-                  timestamp = excluded.timestamp,
-                  bucket_start = excluded.bucket_start,
-                  granularity_seconds = 900,
-                  power_w = excluded.power_w,
-                  provider = 'open-meteo',
-                  fetched_at = excluded.fetched_at,
-                  direct_w_m2 = excluded.direct_w_m2,
-                  diffuse_w_m2 = excluded.diffuse_w_m2,
-                  estimated_w = excluded.estimated_w,
-                  source = 'open-meteo'
-            """),
-            {"forecast_time": forecast_time, "fetched_at": fetched_at, **point},
-        )
-    await session.commit()
-
-
-async def ensure_recent_solar_forecast(session: AsyncSession) -> None:
-    latest = (await session.execute(text("select max(fetched_at) from solar_forecast_points where source = 'open-meteo'"))).scalar_one_or_none()
-    if latest and latest > datetime.now(timezone.utc) - timedelta(minutes=20):
-        return
-    try:
-        await persist_solar_forecast(session, await fetch_open_meteo_forecast())
-    except Exception:
-        LOGGER.exception("Unable to refresh Open-Meteo solar forecast")
-
-
 def interpolate_points(points: list[dict[str, Any]], step_seconds: int) -> list[dict[str, Any]]:
     if len(points) < 2 or step_seconds >= 900:
         return points
@@ -1718,24 +1613,112 @@ def interpolate_points(points: list[dict[str, Any]], step_seconds: int) -> list[
     return output
 
 
-def extrapolate_battery_curve(start: datetime, end: datetime, step_seconds: int, soc: float, forecast: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    capacity_wh = 10000
-    usable_wh = max(0, min(100, soc)) / 100 * capacity_wh
-    points = []
-    for point in forecast:
-        ts = datetime.fromisoformat(point["timestamp"].replace("Z", "+00:00"))
-        if ts < start or ts > end:
+async def latest_slot_plan(session: AsyncSession) -> dict[str, Any] | None:
+    row = (await session.execute(text("""
+        select generated_at, valid_from, slot_seconds, payload
+        from slot_plans
+        order by generated_at desc
+        limit 1
+    """))).mappings().first()
+    return dict(row) if row else None
+
+
+def _slot_battery_w(prev_soc_pct: float, soc_target_pct: float, capacity_wh: float, slot_seconds: int) -> int:
+    """Net terminal battery power implied by the SoC-target trajectory (dashboard_forecast_v1 spec 3.3).
+
+    Derived from the SoC delta rather than the LP's gross charge_w/discharge_w: round-trip
+    efficiency losses are already priced into the plan, so this is the planned net klemvermogen
+    without further correction. Positive = discharge, negative = charge (GoodWe convention).
+    """
+    if slot_seconds <= 0:
+        return 0
+    delta_fraction = (soc_target_pct - prev_soc_pct) / 100.0
+    slot_hours = slot_seconds / 3600.0
+    return round(-delta_fraction * capacity_wh / slot_hours)
+
+
+def _classify_cloud_cover(cloud_cover_pct: float) -> str:
+    """Mirrors minyad.strategy.v3.pv_uncertainty.classify_cloud_cover (kept duplicated rather
+    than importing the strategy package here, matching this service's existing DB/MQTT-only
+    boundary with strategy internals)."""
+    if cloud_cover_pct < 25.0:
+        return "clear"
+    if cloud_cover_pct < 75.0:
+        return "partly"
+    return "cloudy"
+
+
+def build_plan_curves(
+    payload: dict[str, Any],
+    capacity_wh: float,
+    fallback_soc_pct: float,
+    now_: datetime,
+    window_end: datetime,
+    uncertainty_bands: dict[str, dict[str, float]] | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Derive the four forecast curves + curtailment from one plan payload (spec 3.2/3.3),
+    plus a PV P10-P90 uncertainty band where the slot's cloud-cover class has enough history
+    (spec 4.4) — slots without a usable band are simply omitted, never a fabricated one.
+
+    Slots that have already fully elapsed relative to ``now_`` are dropped, so the forecast
+    curves start at "now" — matching the measured series, which stops at "now" (spec 3.5).
+    """
+    slot_seconds = int(payload["slot_seconds"])
+    prev_soc = float(payload.get("soc_start_pct", fallback_soc_pct))
+    pv: list[dict[str, Any]] = []
+    load: list[dict[str, Any]] = []
+    battery: list[dict[str, Any]] = []
+    grid: list[dict[str, Any]] = []
+    curtailment: list[dict[str, Any]] = []
+    price_source: list[dict[str, Any]] = []
+    pv_p10: list[dict[str, Any]] = []
+    pv_p90: list[dict[str, Any]] = []
+    for slot in payload.get("slots", []):
+        slot_start = datetime.fromisoformat(slot["start"])
+        slot_end = slot_start + timedelta(seconds=slot_seconds)
+        soc_target = float(slot.get("soc_target_pct", prev_soc))
+        battery_w = _slot_battery_w(prev_soc, soc_target, capacity_wh, slot_seconds)
+        prev_soc = soc_target
+        if slot_end <= now_ or slot_start > window_end:
             continue
-        solar_w = int(point["power_w"])
-        if solar_w > 1200 and usable_wh < capacity_wh:
-            power_w = -min(2500, round((solar_w - 1200) * 0.6))
-        elif solar_w < 400 and usable_wh > capacity_wh * 0.15:
-            power_w = min(1200, round(400 - solar_w))
-        else:
-            power_w = 0
-        usable_wh = max(0, min(capacity_wh, usable_wh - (power_w * step_seconds / 3600)))
-        points.append({"timestamp": point["timestamp"], "power_w": power_w})
-    return points
+        ts = slot_start.isoformat()
+        pv_w = round(float(slot.get("pv_forecast_w") or 0))
+        load_w = round(float(slot.get("load_forecast_w") or 0))
+        grid_w = round(load_w - pv_w - battery_w)
+        curtail_w = round(float(slot.get("curtailment_w") or 0))
+        pv.append({"timestamp": ts, "power_w": pv_w})
+        load.append({"timestamp": ts, "power_w": load_w})
+        battery.append({"timestamp": ts, "power_w": battery_w})
+        grid.append({"timestamp": ts, "power_w": grid_w})
+        curtailment.append({"timestamp": ts, "power_w": curtail_w})
+        price_source.append({"timestamp": ts, "source": slot.get("price_source", "fallback")})
+        cloud_cover_pct = slot.get("cloud_cover_pct")
+        if uncertainty_bands and cloud_cover_pct is not None:
+            band = uncertainty_bands.get(_classify_cloud_cover(float(cloud_cover_pct)))
+            if band is not None:
+                pv_p10.append({"timestamp": ts, "power_w": round(pv_w * band["p10_multiplier"])})
+                pv_p90.append({"timestamp": ts, "power_w": round(pv_w * band["p90_multiplier"])})
+    curves = {
+        "forecast": pv,
+        "load_forecast": load,
+        "battery_forecast": battery,
+        "grid_forecast": grid,
+        "curtailment_forecast": curtailment,
+        "pv_p10_forecast": pv_p10,
+        "pv_p90_forecast": pv_p90,
+    }
+    return curves, price_source
+
+
+async def latest_pv_uncertainty_bands(session: AsyncSession) -> dict[str, dict[str, float]]:
+    latest_date = (await session.execute(text("select max(calibration_date) from pv_uncertainty_bands"))).scalar_one_or_none()
+    if latest_date is None:
+        return {}
+    rows = (await session.execute(
+        text("select cloud_class, p10_multiplier, p90_multiplier from pv_uncertainty_bands where calibration_date = :d"),
+        {"d": latest_date},
+    )).all()
+    return {row.cloud_class: {"p10_multiplier": float(row.p10_multiplier), "p90_multiplier": float(row.p90_multiplier)} for row in rows}
 
 
 @app.get("/dashboard/curves")
@@ -1744,7 +1727,6 @@ async def dashboard_curves(
     offset: int | None = Query(default=None, ge=-120, le=0),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    await ensure_recent_solar_forecast(session)
     duration, step_seconds, table_name = WINDOWS[window]
     start, end, now_ = dashboard_window_bounds(window, duration, period_offset=offset)
     if table_name == "power_curve_points":
@@ -1778,18 +1760,39 @@ async def dashboard_curves(
             "net_w": round(float(row["net_w"])) if row["net_w"] is not None else round(float(row["power_w"] or 0)),
         })
 
-    forecast_rows = (await session.execute(text(f"""
-        select forecast_time as ts, estimated_w as power_w
-        from solar_forecast_points
-        where source = 'open-meteo' and forecast_time >= :start and forecast_time <= :end + interval '1 day'
-        order by forecast_time
-    """), {"start": start, "end": end})).mappings().all()
-    forecast = [{"timestamp": r["ts"].replace(tzinfo=timezone.utc).isoformat(), "power_w": round(float(r["power_w"] or 0))} for r in forecast_rows]
-    forecast = interpolate_points(forecast, step_seconds)
-
-    mqtt_payload = latest_mqtt_status()
-    soc = coerce_float_status_value("soc", mqtt_payload.get("soc", 50)) if mqtt_payload.get("soc") not in (None, "") else 50.0
-    battery_forecast = extrapolate_battery_curve(now_, end, step_seconds, soc, forecast)
+    plan_row = await latest_slot_plan(session)
+    plan_status = "missing"
+    plan_generated_at: str | None = None
+    curves: dict[str, list[dict[str, Any]]] = {
+        "forecast": [],
+        "load_forecast": [],
+        "battery_forecast": [],
+        "grid_forecast": [],
+        "curtailment_forecast": [],
+        "pv_p10_forecast": [],
+        "pv_p90_forecast": [],
+    }
+    price_source_points: list[dict[str, Any]] = []
+    if plan_row is not None:
+        generated_at = plan_row["generated_at"]
+        if generated_at.tzinfo is None:
+            generated_at = generated_at.replace(tzinfo=timezone.utc)
+        plan_generated_at = generated_at.isoformat()
+        if generated_at > datetime.now(timezone.utc) - timedelta(minutes=PLAN_STALE_MINUTES):
+            plan_status = "ok"
+            battery_conf = await battery_settings(session)
+            capacity_wh = float(battery_conf.get("capacity_wh", 10240))
+            mqtt_payload = latest_mqtt_status()
+            soc_now = (
+                coerce_float_status_value("soc", mqtt_payload.get("soc", 50))
+                if mqtt_payload.get("soc") not in (None, "")
+                else 50.0
+            )
+            uncertainty_bands = await latest_pv_uncertainty_bands(session)
+            curves, price_source_points = build_plan_curves(plan_row["payload"], capacity_wh, soc_now, now_, end, uncertainty_bands)
+            curves = {key: interpolate_points(points, step_seconds) for key, points in curves.items()}
+        else:
+            plan_status = "stale"
 
     return {
         "window": window,
@@ -1797,10 +1800,38 @@ async def dashboard_curves(
         "granularity_seconds": step_seconds,
         "start": start.isoformat(),
         "end": end.isoformat(),
-        "forecast": forecast,
-        "battery_forecast": battery_forecast,
+        "plan_status": plan_status,
+        "plan_generated_at": plan_generated_at,
+        "forecast": curves["forecast"],
+        "pv_p10_forecast": curves["pv_p10_forecast"],
+        "pv_p90_forecast": curves["pv_p90_forecast"],
+        "load_forecast": curves["load_forecast"],
+        "battery_forecast": curves["battery_forecast"],
+        "grid_forecast": curves["grid_forecast"],
+        "curtailment_forecast": curves["curtailment_forecast"],
+        "price_source": price_source_points,
         "series": series,
     }
+
+
+@app.get("/dashboard/forecast-quality")
+async def dashboard_forecast_quality(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    """Small quality block for the dashboard (spec 5.3): yesterday's MAE/bias per curve/horizon."""
+    latest_date = (await session.execute(text("select max(for_date) from forecast_accuracy_daily"))).scalar_one_or_none()
+    if latest_date is None:
+        return {"for_date": None, "curves": {}}
+    rows = (await session.execute(
+        text("select curve, horizon, mae, bias, sample_count from forecast_accuracy_daily where for_date = :d"),
+        {"d": latest_date},
+    )).mappings().all()
+    curves: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        curves.setdefault(row["curve"], {})[row["horizon"]] = {
+            "mae": round(float(row["mae"]), 1),
+            "bias": round(float(row["bias"]), 1),
+            "sample_count": row["sample_count"],
+        }
+    return {"for_date": latest_date.isoformat(), "curves": curves}
 
 
 @app.get("/api/state")
@@ -1832,26 +1863,24 @@ async def api_surplus(session: AsyncSession = Depends(get_session)) -> dict[str,
 @app.get("/api/forecast")
 async def api_forecast(hours_ahead: int = 12, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     hours = max(1, min(48, hours_ahead))
-    await ensure_recent_solar_forecast(session)
-    start = datetime.now(timezone.utc)
-    end = start + timedelta(hours=hours)
-    rows = (await session.execute(text("""
-        select forecast_time as ts, estimated_w as power_w, direct_w_m2, diffuse_w_m2, fetched_at
-        from solar_forecast_points
-        where source = 'open-meteo' and forecast_time >= :start and forecast_time <= :end
-        order by forecast_time
-    """), {"start": start, "end": end})).mappings().all()
-    points = [
-        {
-            "timestamp": row["ts"].replace(tzinfo=timezone.utc).isoformat(),
-            "power_w": round(float(row["power_w"] or 0)),
-            "direct_w_m2": float(row["direct_w_m2"] or 0),
-            "diffuse_w_m2": float(row["diffuse_w_m2"] or 0),
-            "fetched_at": row["fetched_at"].replace(tzinfo=timezone.utc).isoformat() if row["fetched_at"] else None,
-        }
-        for row in rows
-    ]
-    return {"hours_ahead": hours, "points": interpolate_points(points, 60)}
+    now_ = datetime.now(timezone.utc)
+    end = now_ + timedelta(hours=hours)
+    plan_row = await latest_slot_plan(session)
+    plan_generated_at = plan_row["generated_at"] if plan_row is not None else None
+    if plan_generated_at is not None and plan_generated_at.tzinfo is None:
+        plan_generated_at = plan_generated_at.replace(tzinfo=timezone.utc)
+    if plan_generated_at is None or plan_generated_at <= now_ - timedelta(minutes=PLAN_STALE_MINUTES):
+        return {"hours_ahead": hours, "plan_status": "missing" if plan_row is None else "stale", "points": []}
+    battery_conf = await battery_settings(session)
+    capacity_wh = float(battery_conf.get("capacity_wh", 10240))
+    mqtt_payload = latest_mqtt_status()
+    soc_now = (
+        coerce_float_status_value("soc", mqtt_payload.get("soc", 50))
+        if mqtt_payload.get("soc") not in (None, "")
+        else 50.0
+    )
+    curves, _ = build_plan_curves(plan_row["payload"], capacity_wh, soc_now, now_, end)
+    return {"hours_ahead": hours, "plan_status": "ok", "points": interpolate_points(curves["forecast"], 60)}
 
 
 @app.post("/api/control/battery", dependencies=MUTATION_AUTH)
