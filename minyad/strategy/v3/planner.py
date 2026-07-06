@@ -317,9 +317,17 @@ class RollingPlanner:
         slot_seconds = settings.plan_interval_min * 60
         horizon_start = _slot_floor(now, slot_seconds)
 
-        ghi_points = await self._maybe_await(
-            self._ghi_fetcher(lat=settings.latitude, lon=settings.longitude, past_days=1, forecast_days=2)
-        )
+        try:
+            ghi_points = await self._maybe_await(
+                self._ghi_fetcher(lat=settings.latitude, lon=settings.longitude, past_days=1, forecast_days=2)
+            )
+        except Exception:
+            # A missed GHI fetch used to fail the whole plan build, forcing a flat-zero FALLBACK
+            # plan (which now hides the forecast curves entirely rather than rendering a fake flat
+            # line) — degrade to an all-zero PV forecast instead, matching the cloud-cover/temperature
+            # fetches below, so a transient Open-Meteo outage doesn't blank the dashboard.
+            LOGGER.warning("Unable to fetch GHI forecast; PV forecast will be zero", exc_info=True)
+            ghi_points = []
         try:
             cloud_cover_points = await self._maybe_await(
                 self._cloud_cover_fetcher(lat=settings.latitude, lon=settings.longitude, past_days=1, forecast_days=2)
