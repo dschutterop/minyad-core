@@ -90,3 +90,23 @@ def test_settings_route_renders_language_selector():
     assert "English" in response.text
     assert "Dutch" in response.text
     assert "goodwe_poll_interval_grace_s" in response.text
+
+
+def test_frontend_version_endpoint_is_local_and_uncached():
+    with TestClient(app) as client:
+        response = client.get("/frontend-version")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.json()["version"] == frontend_main.FRONTEND_VERSION
+    assert response.json()["build_id"] == frontend_main.FRONTEND_BUILD_ID
+
+
+def test_frontend_html_polls_for_new_container_version():
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert "fetch('/frontend-version', {cache: 'no-store'})" in response.text
+    assert "window.location.reload()" in response.text

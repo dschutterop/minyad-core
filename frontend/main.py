@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import time
+from hashlib import sha256
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request
@@ -11,6 +14,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 app = FastAPI(title="Minyad Frontend")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://minyad-api:8000")
 MINYAD_API_SECRET = os.getenv("MINYAD_API_SECRET", "")
+FRONTEND_BUILD_ID = os.getenv("MINYAD_FRONTEND_VERSION") or sha256(Path(__file__).read_bytes()).hexdigest()[:16]
+FRONTEND_VERSION = f"{FRONTEND_BUILD_ID}:{int(time.time())}"
 
 MENU = ["Dashboard", "Agent", "Health", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
 
@@ -379,6 +384,33 @@ LANGUAGE_BOOT_SCRIPT = """
 </script>
 """
 
+AUTO_REFRESH_SCRIPT = f"""
+<script>
+(() => {{
+  const currentVersion = {FRONTEND_VERSION!r};
+  let reloading = false;
+  async function checkFrontendVersion() {{
+    if (reloading) return;
+    try {{
+      const res = await fetch('/frontend-version', {{cache: 'no-store'}});
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.version && data.version !== currentVersion) {{
+        reloading = true;
+        window.location.reload();
+      }}
+    }} catch (_) {{}}
+  }}
+  window.addEventListener('focus', checkFrontendVersion);
+  document.addEventListener('visibilitychange', () => {{
+    if (document.visibilityState === 'visible') checkFrontendVersion();
+  }});
+  setInterval(checkFrontendVersion, 15000);
+  setTimeout(checkFrontendVersion, 3000);
+}})();
+</script>
+"""
+
 BRAND_CSS += """
 .mailbox-button{position:relative;border:1px solid var(--p-line);background:#0A1016;color:var(--p-ink);border-radius:9px;padding:9px 12px;cursor:pointer;font:600 16px/1 var(--mono)}
 .mailbox-button .badge{position:absolute;right:-7px;top:-7px;min-width:18px;height:18px;border-radius:999px;background:var(--import-d);color:#fff;border:1px solid rgba(255,255,255,.25);font:700 10px/17px var(--mono);text-align:center;padding:0 4px}
@@ -459,7 +491,7 @@ body.dashboard-page .tile{min-width:0}
 body.dashboard-page .metric-card{min-height:262px;padding:20px;display:grid;grid-template-rows:auto auto minmax(92px,1fr) auto;gap:13px;align-content:stretch}
 body.dashboard-page .tile.produce{border-left:2px solid var(--produce-d);box-shadow:0 0 32px rgba(76,219,131,.08)}
 body.dashboard-page .tile.store{border-left:2px solid var(--store-d);box-shadow:0 0 32px rgba(255,194,71,.08)}
-body.dashboard-page .battery-card{--battery-accent:#888780;border-left:2px solid var(--battery-accent);box-shadow:0 0 0 1px rgba(255,255,255,.02),0 18px 48px rgba(0,0,0,.25),0 0 32px color-mix(in srgb,var(--battery-accent) 8%,transparent);transition:color .4s,background-color .4s,border-color .4s}
+body.dashboard-page .tile.battery-card{--battery-accent:#888780;border-left:2px solid var(--battery-accent);box-shadow:0 0 0 1px rgba(255,255,255,.02),0 18px 48px rgba(0,0,0,.25),0 0 32px color-mix(in srgb,var(--battery-accent) 8%,transparent);transition:color .4s,background-color .4s,border-color .4s}
 body.dashboard-page .battery-card .store-c,body.dashboard-page .battery-card .status-pill{color:var(--battery-accent);transition:color .4s,background-color .4s,border-color .4s}
 body.dashboard-page .battery-card .bar .fill{background:var(--battery-accent);transition:width .24s var(--ease),left .24s var(--ease),right .24s var(--ease),color .4s,background-color .4s,border-color .4s}
 body.dashboard-page .battery-card .status-pill{border-color:var(--battery-accent);background:color-mix(in srgb,var(--battery-accent) 12%,transparent);transition:color .4s,background-color .4s,border-color .4s}
@@ -509,7 +541,7 @@ body.dashboard-page .battery-shell{position:relative;flex:1;min-width:0;border:1
 body.dashboard-page .battery-terminal{width:5px;height:18px;border:1px solid rgba(184,210,228,.24);border-left:0;border-radius:0 4px 4px 0;background:rgba(184,210,228,.14)}
 body.dashboard-page .cells{display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin:0;height:24px}
 body.dashboard-page .cells i{height:100%;border-radius:3px;background:rgba(5,10,15,.9);border:1px solid rgba(184,210,228,.18)}
-body.dashboard-page .cells i.on,body.dashboard-page .battery-pack.low .cells i.on,body.dashboard-page .battery-pack.high .cells i.on{background:rgba(255,255,255,.85);border-color:rgba(255,255,255,.64);box-shadow:0 0 8px rgba(255,255,255,.12)}
+body.dashboard-page .cells i.on,body.dashboard-page .battery-pack.low .cells i.on,body.dashboard-page .battery-pack.high .cells i.on{background:var(--battery-cell-fill,linear-gradient(90deg,#E24B4A 0%,#E24B4A 10%,#EF9F27 10%,#EF9F27 20%,var(--produce-d) 20%,var(--produce-d) 100%));border-color:rgba(255,255,255,.34);box-shadow:0 0 8px rgba(70,198,132,.14)}
 body.dashboard-page .battery-soc-text{min-width:42px;text-align:right;font-family:var(--mono);font-size:17px;font-weight:700;color:var(--p-ink);font-variant-numeric:tabular-nums}
 body.dashboard-page .soc-limit{width:2px;top:2px;bottom:2px;z-index:2;box-shadow:0 0 10px currentColor}
 body.dashboard-page .soc-limit-labels{height:14px;margin-top:0}
@@ -573,7 +605,7 @@ html[data-theme=light] body.dashboard-page .dash-meta{color:rgba(74,98,118,.72)}
 html[data-theme=light] body.dashboard-page .tile,html[data-theme=light] body.dashboard-page .chart-card,html[data-theme=light] body.dashboard-page .flow-node,html[data-theme=light] body.dashboard-page .mailbox-panel{background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(244,248,250,.94));border-color:rgba(74,98,118,.18);box-shadow:0 0 0 1px rgba(255,255,255,.72),0 18px 42px rgba(21,32,42,.10);backdrop-filter:blur(8px)}
 html[data-theme=light] body.dashboard-page .tile.produce{box-shadow:0 0 0 1px rgba(255,255,255,.72),0 18px 42px rgba(21,32,42,.10),0 0 28px rgba(46,156,98,.08)}
 html[data-theme=light] body.dashboard-page .tile.store{box-shadow:0 0 0 1px rgba(255,255,255,.72),0 18px 42px rgba(21,32,42,.10),0 0 28px rgba(216,155,42,.08)}
-html[data-theme=light] body.dashboard-page .battery-card{border-left-color:var(--battery-accent);box-shadow:0 0 0 1px rgba(255,255,255,.72),0 18px 42px rgba(21,32,42,.10),0 0 28px color-mix(in srgb,var(--battery-accent) 8%,transparent)}
+html[data-theme=light] body.dashboard-page .tile.battery-card{border-left-color:var(--battery-accent);box-shadow:0 0 0 1px rgba(255,255,255,.72),0 18px 42px rgba(21,32,42,.10),0 0 28px color-mix(in srgb,var(--battery-accent) 8%,transparent)}
 html[data-theme=light] body.dashboard-page .tile.import{box-shadow:0 0 0 1px rgba(255,255,255,.72),0 18px 42px rgba(21,32,42,.10),0 0 28px rgba(206,73,64,.08)}
 html[data-theme=light] body.dashboard-page .tile-name{color:rgba(74,98,118,.86)}
 html[data-theme=light] body.dashboard-page .metric-subtitle,html[data-theme=light] body.dashboard-page .scale-label,html[data-theme=light] body.dashboard-page .footer-label,html[data-theme=light] body.dashboard-page .kpi-tile span{color:rgba(74,98,118,.76)}
@@ -581,7 +613,7 @@ html[data-theme=light] body.dashboard-page .metric-footer{border-top-color:rgba(
 html[data-theme=light] body.dashboard-page .footer-stat b{color:var(--p-ink)}
 html[data-theme=light] body.dashboard-page .status--standby{color:rgba(74,98,118,.70);background:rgba(74,98,118,.06);border-color:rgba(74,98,118,.24)}
 html[data-theme=light] body.dashboard-page .bar,html[data-theme=light] body.dashboard-page .battery-shell,html[data-theme=light] body.dashboard-page .cells i{background:#EEF3F6;border-color:rgba(74,98,118,.18);box-shadow:inset 0 1px 3px rgba(21,32,42,.08)}
-html[data-theme=light] body.dashboard-page .cells i.on,html[data-theme=light] body.dashboard-page .battery-pack.low .cells i.on,html[data-theme=light] body.dashboard-page .battery-pack.high .cells i.on{background:rgba(255,255,255,.92);border-color:rgba(74,98,118,.22);box-shadow:0 0 10px rgba(74,98,118,.08)}
+html[data-theme=light] body.dashboard-page .cells i.on,html[data-theme=light] body.dashboard-page .battery-pack.low .cells i.on,html[data-theme=light] body.dashboard-page .battery-pack.high .cells i.on{background:var(--battery-cell-fill,linear-gradient(90deg,#E24B4A 0%,#E24B4A 10%,#EF9F27 10%,#EF9F27 20%,var(--produce-d) 20%,var(--produce-d) 100%));border-color:rgba(74,98,118,.22);box-shadow:0 0 10px rgba(74,98,118,.08)}
 html[data-theme=light] body.dashboard-page .battery-terminal{background:#DDE6ED;border-color:rgba(74,98,118,.20)}
 html[data-theme=light] body.dashboard-page .daystrip{background:rgba(255,255,255,.86);border-color:rgba(74,98,118,.16)}
 html[data-theme=light] body.dashboard-page .kpi-tile{border-right-color:rgba(74,98,118,.12)}
@@ -620,6 +652,16 @@ def render_nav(active: str) -> str:
     )
 
 
+def html_response(content: str) -> HTMLResponse:
+    return HTMLResponse(
+        content,
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 def render_page(active: str, body: str) -> str:
     links = render_nav(active)
     return f"""
@@ -633,6 +675,7 @@ def render_page(active: str, body: str) -> str:
         <style>{BRAND_CSS}</style>
         {THEME_BOOT_SCRIPT}
         {LANGUAGE_BOOT_SCRIPT}
+        {AUTO_REFRESH_SCRIPT}
       </head>
       <body>
         <div class="brand-shell">
@@ -662,6 +705,7 @@ def render_dashboard_page() -> str:
         <style>{BRAND_CSS}</style>
         {THEME_BOOT_SCRIPT}
         {LANGUAGE_BOOT_SCRIPT}
+        {AUTO_REFRESH_SCRIPT}
       </head>
       <body class="dashboard-page">
         {energy_dashboard_body()}
@@ -1569,9 +1613,9 @@ def energy_dashboard_body() -> str:
       function renderReadings(){const home=Math.max(0,last.household||last.solar+last.battery-last.grid), gExport=last.grid>=0; $('solar-value').textContent=fmtPower(last.solar); $('m-solar').textContent=fmtPower(last.solar); $('battery-value').textContent=fmtPower(last.battery,true); $('grid-value').textContent=fmtPower(last.grid,true); $('household-value').textContent=fmtPower(home); $('f-solar').textContent=fmtPower(last.solar); $('f-battery').textContent=fmtPower(last.battery,true); $('f-grid').textContent=fmtPower(last.grid,true); $('f-home').textContent=fmtPower(home); $('m-battery').textContent=fmtPower(last.battery,true)+' '+unitLabel(); $('m-grid').textContent=fmtPower(last.grid,true)+' '+unitLabel(); $('f-grid-phrase').className='phrase '+(gExport?'produce-c':'import-c'); const gridLabel=Math.abs(last.grid)<.03?'standing by':gExport?'exporting to grid':'importing from grid'; $('grid-direction-label').textContent=gridLabel; $('household-bar').style.width=Math.min(100,home/solarMax*100)+'%';}
       function setBar(id,v,max,color){const el=$(id); if(!el)return; const pct=Math.min(100,Math.abs(v)/max*50); el.style.backgroundColor=color; if(v<0){el.style.left=(50-pct)+'%';el.style.width=pct+'%'}else{el.style.left='50%';el.style.width=pct+'%'}}
       function truthyFlag(value){return value===true||value===1||['1','true','yes','on','active','fault','error'].includes(String(value||'').toLowerCase());}
-      function deriveBatteryVisualState(battery){const powerW=n(battery.power_w)??Math.round(last.battery*1000), soc=n(battery.soc)??last.soc, minSoc=Math.max(15,n(batteryLimits.min)??15), deadbandPct=n(batteryVisualConfig.trajDeadbandPct)??3, deadbandW=deadbandPct/100*batteryMaxW; const statusText=[battery.mode,battery.mode_label,battery.state,battery.control_state,battery.bridge_status,battery.inverter_status,battery.fault,battery.error,battery.guard_reason,battery.adjustment_reason].filter(v=>v!=null).join(' ').toLowerCase(); const socNearMin=soc!=null&&soc<=minSoc+3; const guardActive=['guard_active','guard_intervention_active','guard_intervention','guard_layer_active','soc_guard_active'].some(key=>truthyFlag(battery[key]))||statusText.includes('guard:'); const inverterFault=['inverter_fault','fault_active','hard_fault'].some(key=>truthyFlag(battery[key]))||/\b(fault|error)\b/.test(statusText); if(socNearMin||guardActive||inverterFault)return {state:'alert',label:'ALERT',color:'#EF9F27'}; if(powerW<-deadbandW)return {state:'charging',label:'CHARGING',color:'#1D9E75'}; if(powerW>deadbandW)return {state:'discharging',label:'DISCHARGING',color:'#378ADD'}; return {state:'idle',label:'IDLE',color:'#888780'};}
+      function deriveBatteryVisualState(battery){const powerW=n(battery.power_w)??Math.round(last.battery*1000), soc=n(battery.soc)??last.soc, minSoc=Math.max(15,n(batteryLimits.min)??15), deadbandPct=n(batteryVisualConfig.trajDeadbandPct)??3, deadbandW=deadbandPct/100*batteryMaxW; const statusText=[battery.mode,battery.mode_label,battery.state,battery.control_state,battery.bridge_status,battery.inverter_status,battery.fault,battery.error,battery.guard_reason,battery.adjustment_reason].filter(v=>v!=null).join(' ').toLowerCase(); const socNearMin=soc!=null&&soc<=minSoc+3; const guardActive=['guard_active','guard_intervention_active','guard_intervention','guard_layer_active','soc_guard_active'].some(key=>truthyFlag(battery[key]))||statusText.includes('guard:'); const inverterFault=['inverter_fault','fault_active','hard_fault'].some(key=>truthyFlag(battery[key]))||/\b(fault|error)\b/.test(statusText); if(socNearMin||guardActive||inverterFault)return {state:'alert',label:'ALERT',color:'#EF9F27'}; if(powerW<-deadbandW)return {state:'charging',label:'CHARGING',color:'var(--produce-d)'}; if(powerW>deadbandW)return {state:'discharging',label:'DISCHARGING',color:'#378ADD'}; return {state:'idle',label:'IDLE',color:'#888780'};}
       function applyBatteryAccent(visual){const card=document.querySelector('.battery-card'); if(card)card.style.setProperty('--battery-accent',visual.color);}
-      function setSoc(soc){const pct=clampPct(n(soc)??0), rounded=Math.round(pct), c=$('soc-cells'), pack=$('battery-pack'), blocks=10; $('soc-text').textContent=rounded+'%'; if(pack){pack.className='battery-pack '+(pct<15?'low':pct>=90?'high':''); pack.setAttribute('aria-valuenow',String(rounded));} c.style.gridTemplateColumns=`repeat(${blocks},1fr)`; c.innerHTML=''; for(let i=0;i<blocks;i++){const cell=document.createElement('i'); if(i<Math.round(pct/100*blocks))cell.className='on'; c.appendChild(cell)} renderSocLimits();}
+      function setSoc(soc){const pct=clampPct(n(soc)??0), rounded=Math.round(pct), c=$('soc-cells'), pack=$('battery-pack'), blocks=10; $('soc-text').textContent=rounded+'%'; if(pack){pack.className='battery-pack '+(pct<15?'low':pct>=90?'high':''); pack.setAttribute('aria-valuenow',String(rounded));} c.style.gridTemplateColumns=`repeat(${blocks},1fr)`; c.innerHTML=''; for(let i=0;i<blocks;i++){const cell=document.createElement('i'); if(i<Math.round(pct/100*blocks)){cell.className='on'; cell.style.backgroundImage='linear-gradient(90deg,#E24B4A 0%,#E24B4A 10%,#EF9F27 10%,#EF9F27 20%,var(--produce-d) 20%,var(--produce-d) 100%)'; cell.style.backgroundSize=`${blocks*100}% 100%`; cell.style.backgroundPosition=`${(i/(blocks-1))*100}% 0`; } c.appendChild(cell)} renderSocLimits();}
       function clampPct(value){return Math.max(0,Math.min(100,value));}
       function renderSocLimits(){const min=batteryLimits.overrideSoc?0:n(batteryLimits.min), max=batteryLimits.overrideSoc?100:n(batteryLimits.max); const limits=[['min',min],['max',max]]; for(const [kind,value] of limits){const line=$(`soc-${kind}-line`), label=$(`soc-${kind}-label`); if(!line||!label)continue; const hasValue=value!=null; line.hidden=!hasValue; label.hidden=!hasValue; if(!hasValue)continue; const pct=clampPct(value); line.style.left=pct+'%'; label.style.left=pct+'%'; label.textContent=`${kind} ${Math.round(value)}%${batteryLimits.overrideSoc?' override':''}`;}}
       async function loadBatteryLimits(){try{const res=await fetch('/api/battery/settings'); if(!res.ok)return; const settings=await res.json(); batteryLimits={...batteryLimits,min:n(settings.soc_floor),max:n(settings.soc_ceiling)}; renderSocLimits();}catch(e){}}
@@ -1848,6 +1892,14 @@ def icon(name: str) -> str:
     return f'<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">{shapes[name]}</svg>'
 
 
+@app.get("/frontend-version")
+async def frontend_version() -> JSONResponse:
+    return JSONResponse(
+        {"version": FRONTEND_VERSION, "build_id": FRONTEND_BUILD_ID},
+        headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"},
+    )
+
+
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 async def api_proxy(path: str, request: Request) -> Response:
     """Forward browser API calls to the API service without hiding failures."""
@@ -1900,40 +1952,40 @@ async def api_proxy(path: str, request: Request) -> Response:
     )
 
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard() -> str:
-    return render_dashboard_page()
+@app.get("/")
+async def dashboard() -> HTMLResponse:
+    return html_response(render_dashboard_page())
 
 
-@app.get("/reporting", response_class=HTMLResponse)
-async def reporting() -> str:
-    return render_page("Reporting", reporting_body())
+@app.get("/reporting")
+async def reporting() -> HTMLResponse:
+    return html_response(render_page("Reporting", reporting_body()))
 
 
-@app.get("/{section}", response_class=HTMLResponse)
-async def section(section: str) -> str:
+@app.get("/{section}")
+async def section(section: str) -> HTMLResponse:
     title = "DSMR" if section.lower() == "dsmr" else section.replace("-", " ").title()
     if title not in MENU:
         title = "Dashboard"
     if title == "Settings":
-        return render_page(title, battery_settings_body())
+        return html_response(render_page(title, battery_settings_body()))
     if title == "Agent":
-        return render_page(title, agent_body())
+        return html_response(render_page(title, agent_body()))
     if title == "Health":
-        return render_page(title, health_body())
+        return html_response(render_page(title, health_body()))
     if title == "Battery":
-        return render_page(title, battery_control_body())
+        return html_response(render_page(title, battery_control_body()))
     if title == "Asset Steering":
-        return render_page(title, asset_steering_body())
+        return html_response(render_page(title, asset_steering_body()))
     if title == "DSMR":
-        return render_page(title, dsmr_body())
+        return html_response(render_page(title, dsmr_body()))
     if title == "History":
-        return render_page(title, history_body())
+        return html_response(render_page(title, history_body()))
     if title == "Trade":
-        return render_page(title, trade_body())
+        return html_response(render_page(title, trade_body()))
     if title == "Solar":
-        return render_page(title, solar_body())
+        return html_response(render_page(title, solar_body()))
     if title == "Reporting":
-        return render_page(title, reporting_body())
+        return html_response(render_page(title, reporting_body()))
     content = f"{title} module scaffold."
-    return render_page(title, f"<div class='card'><h2>{title}</h2><p>{content}</p></div>")
+    return html_response(render_page(title, f"<div class='card'><h2>{title}</h2><p>{content}</p></div>"))
