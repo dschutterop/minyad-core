@@ -1613,13 +1613,14 @@ def interpolate_points(points: list[dict[str, Any]], step_seconds: int) -> list[
     return output
 
 
-async def latest_slot_plan(session: AsyncSession) -> dict[str, Any] | None:
+async def latest_slot_plan(session: AsyncSession, *, include_fallback: bool = True) -> dict[str, Any] | None:
     row = (await session.execute(text("""
         select generated_at, valid_from, slot_seconds, payload, solver_status
         from slot_plans
+        where (:include_fallback or solver_status != 'FALLBACK')
         order by generated_at desc
         limit 1
-    """))).mappings().first()
+    """), {"include_fallback": include_fallback})).mappings().first()
     return dict(row) if row else None
 
 
@@ -1761,6 +1762,9 @@ async def dashboard_curves(
         })
 
     plan_row = await latest_slot_plan(session)
+    latest_plan_status = plan_row.get("solver_status") if plan_row is not None else None
+    if plan_row is not None and latest_plan_status == "FALLBACK":
+        plan_row = await latest_slot_plan(session, include_fallback=False)
     plan_status = "missing"
     plan_generated_at: str | None = None
     curves: dict[str, list[dict[str, Any]]] = {
@@ -1801,6 +1805,8 @@ async def dashboard_curves(
             plan_status = "stale"
         else:
             plan_status = "fallback"
+    elif latest_plan_status == "FALLBACK":
+        plan_status = "fallback"
 
     return {
         "window": window,
@@ -1874,11 +1880,15 @@ async def api_forecast(hours_ahead: int = 12, session: AsyncSession = Depends(ge
     now_ = datetime.now(timezone.utc)
     end = now_ + timedelta(hours=hours)
     plan_row = await latest_slot_plan(session)
+    latest_plan_status = plan_row.get("solver_status") if plan_row is not None else None
+    if plan_row is not None and latest_plan_status == "FALLBACK":
+        plan_row = await latest_slot_plan(session, include_fallback=False)
     plan_generated_at = plan_row["generated_at"] if plan_row is not None else None
     if plan_generated_at is not None and plan_generated_at.tzinfo is None:
         plan_generated_at = plan_generated_at.replace(tzinfo=timezone.utc)
     if plan_generated_at is None or plan_generated_at <= now_ - timedelta(minutes=PLAN_STALE_MINUTES):
-        return {"hours_ahead": hours, "plan_status": "missing" if plan_row is None else "stale", "points": []}
+        status = "fallback" if plan_row is None and latest_plan_status == "FALLBACK" else "missing" if plan_row is None else "stale"
+        return {"hours_ahead": hours, "plan_status": status, "points": []}
     if plan_row.get("solver_status") == "FALLBACK":
         # See dashboard_curves: a FALLBACK plan is a flat pv_forecast_w=0 hold, not a real
         # forecast — treat it the same as no plan rather than returning fabricated zeros.
