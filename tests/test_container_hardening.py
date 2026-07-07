@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -32,3 +33,12 @@ def test_compose_defaults_strategy_v3_primary_on() -> None:
 
     assert "STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-false}" in source
     assert "SHADOW_MODE: ${STRATEGY3_SHADOW_MODE:-false}" in source
+
+
+def test_open_meteo_callers_have_outbound_network_access() -> None:
+    source = (ROOT / "docker-compose.yml").read_text()
+
+    for service in ("minyad-strategy", "minyad-strategy-v3", "minyad-forecast"):
+        match = re.search(rf"^  {service}:\n(?P<body>.*?)(?=^  [\\w-]+:|^networks:)", source, re.M | re.S)
+        assert match is not None, service
+        assert "networks: [minyad-internal, minyad-public]" in match.group("body"), service
