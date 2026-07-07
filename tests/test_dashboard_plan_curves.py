@@ -1,9 +1,11 @@
+import asyncio
 import os
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
 from datetime import datetime, timedelta, timezone
 
+from api import main as api_main
 from api.main import _classify_cloud_cover, build_plan_curves
 
 UTC = timezone.utc
@@ -66,3 +68,46 @@ def test_build_plan_curves_applies_band_multipliers():
     curves, _ = build_plan_curves(payload, 10240.0, 50.0, now_, now_ + timedelta(hours=1), bands)
     assert curves["pv_p10_forecast"] == [{"timestamp": now_.isoformat(), "power_w": 500}]
     assert curves["pv_p90_forecast"] == [{"timestamp": now_.isoformat(), "power_w": 1200}]
+
+
+def test_api_forecast_uses_recent_real_plan_when_latest_plan_is_fallback(monkeypatch):
+    now_ = datetime.now(UTC).replace(microsecond=0)
+    fallback_row = {
+        "generated_at": now_,
+        "valid_from": now_,
+        "slot_seconds": 900,
+        "payload": _payload([_slot(now_ + timedelta(minutes=15), pv_w=0)]),
+        "solver_status": "FALLBACK",
+    }
+    real_row = {
+        "generated_at": now_ - timedelta(minutes=5),
+        "valid_from": now_ - timedelta(minutes=5),
+        "slot_seconds": 900,
+        "payload": _payload(
+            [
+                _slot(now_ + timedelta(minutes=15), pv_w=1200),
+                _slot(now_ + timedelta(minutes=30), pv_w=1800),
+            ]
+        ),
+        "solver_status": "OPTIMAL",
+    }
+
+    async def fake_latest_slot_plan(session, *, include_fallback=True):
+        return fallback_row if include_fallback else real_row
+
+    async def fake_battery_settings(session):
+        return {"capacity_wh": 10240}
+
+    async def fake_uncertainty_bands(session):
+        return {}
+
+    monkeypatch.setattr(api_main, "latest_slot_plan", fake_latest_slot_plan)
+    monkeypatch.setattr(api_main, "battery_settings", fake_battery_settings)
+    monkeypatch.setattr(api_main, "latest_pv_uncertainty_bands", fake_uncertainty_bands)
+    monkeypatch.setattr(api_main, "latest_mqtt_status", lambda: {"soc": 50})
+
+    payload = asyncio.run(api_main.api_forecast(session=object()))
+
+    assert payload["plan_status"] == "ok"
+    assert payload["points"]
+    assert payload["points"][0]["power_w"] == 1200
