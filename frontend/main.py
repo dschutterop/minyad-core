@@ -577,6 +577,9 @@ html[data-theme=light] body.dashboard-page .metric-footer{border-top-color:rgba(
 html[data-theme=light] body.dashboard-page .footer-stat b{color:var(--p-ink)}
 html[data-theme=light] body.dashboard-page .status--standby{color:rgba(74,98,118,.70);background:rgba(74,98,118,.06);border-color:rgba(74,98,118,.24)}
 html[data-theme=light] body.dashboard-page .bar,html[data-theme=light] body.dashboard-page .battery-shell,html[data-theme=light] body.dashboard-page .cells i{background:#EEF3F6;border-color:rgba(74,98,118,.18);box-shadow:inset 0 1px 3px rgba(21,32,42,.08)}
+html[data-theme=light] body.dashboard-page .cells i.on{background:linear-gradient(180deg,#FFD36C,#F0A923);border-color:rgba(216,155,42,.62);box-shadow:0 0 10px rgba(216,155,42,.20)}
+html[data-theme=light] body.dashboard-page .battery-pack.low .cells i.on{background:linear-gradient(180deg,#FF7A72,#D9463F);border-color:rgba(206,73,64,.66);box-shadow:0 0 10px rgba(206,73,64,.20)}
+html[data-theme=light] body.dashboard-page .battery-pack.high .cells i.on{background:linear-gradient(180deg,#DDEB72,#FFC247);border-color:rgba(46,156,98,.42);box-shadow:0 0 10px rgba(216,155,42,.18)}
 html[data-theme=light] body.dashboard-page .battery-terminal{background:#DDE6ED;border-color:rgba(74,98,118,.20)}
 html[data-theme=light] body.dashboard-page .daystrip{background:rgba(255,255,255,.86);border-color:rgba(74,98,118,.16)}
 html[data-theme=light] body.dashboard-page .kpi-tile{border-right-color:rgba(74,98,118,.12)}
