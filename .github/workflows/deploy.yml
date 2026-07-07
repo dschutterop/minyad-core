@@ -157,7 +157,11 @@ jobs:
 
           sudo systemctl daemon-reload
           for unit in ${HOST_SERVICE_UNITS}; do
-            sudo systemctl restart "${unit}"
+            if sudo systemctl list-unit-files "${unit}" --no-legend | grep -q "^${unit}"; then
+              sudo systemctl restart "${unit}"
+            else
+              echo "Skipping missing host service unit: ${unit}"
+            fi
           done
 
           MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
