@@ -120,25 +120,32 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main'
     environment: production
+    permissions:
+      contents: read
+      packages: read
     env:
       HOME: /home/actions-runner
     steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Pull images and restart services
         env:
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
-          DEPLOY_SSH_KEY_PATH: ${{ vars.DEPLOY_SSH_KEY_PATH || '/home/actions-runner/.ssh/minyad_deploy' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MINYAD_IMAGE_TAG: ${{ github.sha }}
         run: |
           test -n "${DEPLOY_PATH}"
-          test -r "${DEPLOY_SSH_KEY_PATH}"
-          mkdir -p "${HOME}/.ssh"
-          ssh-keyscan -H github.com >> "${HOME}/.ssh/known_hosts"
-          export GIT_SSH_COMMAND="ssh -i ${DEPLOY_SSH_KEY_PATH} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
           git config --global --add safe.directory "${DEPLOY_PATH}"
           cd "${DEPLOY_PATH}"
-          git fetch --prune origin
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --prune origin
           git checkout main
-          git pull --ff-only origin main
+          git merge --ff-only origin/main
           MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
           MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
           docker image prune -f
