@@ -24,7 +24,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dryad import DRYAD_CACHE_SECONDS, build_dryad_payload, load_dryad_history, load_dryad_inputs
+try:
+    from api.dryad import DRYAD_CACHE_SECONDS, build_dryad_payload, load_dryad_history, load_dryad_inputs
+except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker image layout
+    from dryad import DRYAD_CACHE_SECONDS, build_dryad_payload, load_dryad_history, load_dryad_inputs
 from shared.db import AsyncSessionLocal, get_session
 from shared.mqtt_client import MinyadMqttClient
 
