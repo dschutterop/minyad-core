@@ -28,6 +28,27 @@ setpoint decision with a factor breakdown and the live/default thresholds read
 from the actual control implementation (`control/main.py`,
 `control/hysteresis.py`, and `minyad/strategy/charge_controller.py`).
 
+## Dryad read-only aggregation API
+
+Dryad can poll the existing Minyad API service without any extra systemd unit:
+
+```bash
+curl http://pknpapp001:8081/api/v1/dryad
+curl "http://pknpapp001:8081/api/v1/dryad/history?days=30"
+```
+
+`GET /api/v1/dryad` returns one JSON object with:
+
+* `ts` - ISO8601 timestamp for the aggregation run.
+* `autarky` - rolling 60 minute self-sufficiency, `1 - P1 import / total consumption`.
+* `trajectory_deviation` - absolute current SoC versus LP planned SoC, normalized by `strategy3.traj_band_pct`.
+* `dispatch_hitrate` - acknowledged versus planned Strategy/Kairos/Vesper dispatches over the last 24 hours; no planned dispatches returns `1.0`.
+* `import_price_penalty` - weighted penalty for import during hours at least `dryad.import_price_penalty_pct` percent above the cheapest coming six-hour price; default threshold is 30 percent.
+* `soc` - current GoodWe/Dyness SoC as a 0.0-1.0 fraction.
+* `sources` - per field source name, data age in seconds, and stale flag. Stale inputs make only the affected field `null`.
+
+`GET /api/v1/dryad/history?days=N` returns up to 400 local-day solar generation sums from the existing Enphase-backed `power_curve_rollups` history.
+
 ## GoodWe bridge API telemetry + Modbus limit actuator mode
 
 `goodwe_bridge.py` uses the GoodWe API as the primary telemetry source. It publishes
