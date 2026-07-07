@@ -153,6 +153,9 @@ STRATEGY_DEFAULTS = {
     "ramp_ceiling_w": "1000",
     "ramp_hold_seconds": "120",
 }
+STRATEGY3_DEFAULTS = {
+    "traj_deadband_pct": "3",
+}
 CLAUDE_AGENT_DEFAULTS = {
     "enabled": "false",
     "token_guard_enabled": "true",
@@ -930,7 +933,10 @@ async def update_claude_agent_settings(
 async def asset_steering_settings(session: AsyncSession) -> dict[str, Any]:
     result = await session.execute(text("select key, value from settings where key like 'strategy.%'"))
     values = {row.key.removeprefix("strategy."): row.value for row in result}
+    result_v3 = await session.execute(text("select key, value from settings where key like 'strategy3.%'"))
+    values_v3 = {row.key.removeprefix("strategy3."): row.value for row in result_v3}
     merged = {**STRATEGY_DEFAULTS, **values}
+    merged_v3 = {**STRATEGY3_DEFAULTS, **values_v3}
     return {
         "ghi_solar_rich_threshold": float(merged["ghi_solar_rich_threshold"]),
         "ghi_solar_poor_threshold": float(merged["ghi_solar_poor_threshold"]),
@@ -939,6 +945,9 @@ async def asset_steering_settings(session: AsyncSession) -> dict[str, Any]:
         "ramp_floor_w": int(float(merged["ramp_floor_w"])),
         "ramp_ceiling_w": int(float(merged["ramp_ceiling_w"])),
         "ramp_hold_seconds": int(float(merged["ramp_hold_seconds"])),
+        "strategy3": {
+            "traj_deadband_pct": float(merged_v3["traj_deadband_pct"]),
+        },
     }
 
 
