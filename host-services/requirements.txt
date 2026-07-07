@@ -1,6 +1,6 @@
 goodwe==0.4.10
 paho-mqtt==2.1.0
-python-dotenv==1.2.2
+python-dotenv==1.2.1
 pymodbus==3.13.1
 requests==2.34.2
 psycopg2-binary==2.9.12
