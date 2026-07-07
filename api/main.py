@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.dryad import DRYAD_CACHE_SECONDS, build_dryad_payload, load_dryad_history, load_dryad_inputs
 from shared.db import AsyncSessionLocal, get_session
 from shared.mqtt_client import MinyadMqttClient
 
@@ -59,6 +60,8 @@ MQTT_EVENTS: deque[dict[str, str]] = deque(maxlen=100)
 LAST_RETAINED_FETCH: dict[str, Any] = {}
 TRADE_PRICE_CACHE_LOCK = Lock()
 TRADE_PRICE_CACHE: dict[str, list[dict[str, Any]]] = {}
+DRYAD_CACHE_LOCK = Lock()
+DRYAD_CACHE: dict[str, Any] = {"computed_at": None, "payload": None}
 _debug_enabled = False
 
 MQTT_STATUS_KEYS = {
@@ -1876,6 +1879,42 @@ async def api_v1_surplus(session: AsyncSession = Depends(get_session)) -> dict[s
     grid = await grid_status(session)
     settings = await battery_settings(session)
     return build_surplus_payload(grid, battery, settings)
+
+
+@app.get("/api/v1/dryad")
+async def api_v1_dryad(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+    now_ = datetime.now(timezone.utc)
+    with DRYAD_CACHE_LOCK:
+        cached_at = DRYAD_CACHE.get("computed_at")
+        cached_payload = DRYAD_CACHE.get("payload")
+        if isinstance(cached_at, datetime) and cached_payload is not None:
+            if (now_ - cached_at).total_seconds() < DRYAD_CACHE_SECONDS:
+                return cached_payload
+
+    inputs = await load_dryad_inputs(session, now_)
+    payload = build_dryad_payload(
+        now=now_,
+        mqtt_status=latest_mqtt_status(),
+        inputs=inputs,
+        prices=latest_trade_prices(),
+    )
+    with DRYAD_CACHE_LOCK:
+        DRYAD_CACHE["computed_at"] = now_
+        DRYAD_CACHE["payload"] = payload
+    return payload
+
+
+@app.get("/api/v1/dryad/history")
+async def api_v1_dryad_history(
+    days: int = Query(default=30, ge=1, le=400),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    timezone_name = os.getenv("MINYAD_TIMEZONE", "Europe/Amsterdam")
+    return {
+        "days": days,
+        "timezone": timezone_name,
+        "series": await load_dryad_history(session, days=days, timezone_name=timezone_name),
+    }
 
 
 @app.get("/api/surplus")
