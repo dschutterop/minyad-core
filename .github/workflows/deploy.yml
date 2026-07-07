@@ -147,7 +147,7 @@ jobs:
 
           # Keep the application checkout current for host-side systemd services.
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git -c http.https://github.com/.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --prune origin
+          git -c "url.https://x-access-token:${GITHUB_TOKEN}@github.com/.insteadOf=https://github.com/" fetch --prune origin
           git checkout main
           git merge --ff-only origin/main
 
