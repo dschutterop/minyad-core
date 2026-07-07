@@ -1,0 +1,52 @@
+services:
+  minyad-migrate:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/migrate:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-ingestion:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/ingestion:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-control:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/control:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-strategy:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/strategy:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-strategy-v3:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/strategy:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-deadman:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/deadman:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-api:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/api:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-frontend:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/frontend:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-mobile-frontend:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/mobile-frontend:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-forecast:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/forecast:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-agent:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/agent:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-trade:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/trade:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
+
+  minyad-reporting:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/reporting:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null
