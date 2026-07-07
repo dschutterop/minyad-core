@@ -35,6 +35,7 @@ Dryad can poll the existing Minyad API service without any extra systemd unit:
 ```bash
 curl http://pknpapp001:8081/api/v1/dryad
 curl "http://pknpapp001:8081/api/v1/dryad/history?days=30"
+MINYAD_API_URL=http://pknpapp001:8081 ./scripts/fetch_dryad.py --history-days 30
 ```
 
 `GET /api/v1/dryad` returns one JSON object with:
