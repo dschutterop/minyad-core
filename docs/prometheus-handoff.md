@@ -1,6 +1,6 @@
 # Prometheus Handoff
 
-This is the monitoring-host runbook for scraping Minyad. The Minyad host exposes metrics on the ports listed in `docs/monitoring.md`; firewall/VPN routing is managed outside this repository.
+This is the monitoring-host runbook for scraping Minyad. The Minyad host exposes metrics on the ports listed in `docs/monitoring.md`, bound to the VPN/internal interface by default.
 
 ## Files To Copy
 
@@ -20,7 +20,7 @@ Example:
 
 ```yaml
 targets:
-  - 10.42.0.17:9102
+  - 192.168.110.2:9102
 ```
 
 Keep the `stack: minyad` label. Alerts rely on it, especially `up{stack="minyad"} == 0`.
@@ -68,14 +68,14 @@ promtool check rules /etc/prometheus/rules/minyad-alerts.yml /etc/prometheus/rul
 Optional quick scrapes:
 
 ```bash
-curl -fsS http://MINYAD_HOST:9102/metrics | grep minyad_ingestion_build_info
-curl -fsS http://MINYAD_HOST:9103/metrics | grep minyad_control_build_info
-curl -fsS http://MINYAD_HOST:9104/metrics | grep minyad_strategy_build_info
-curl -fsS http://MINYAD_HOST:9105/metrics | grep minyad_trade_build_info
-curl -fsS http://MINYAD_HOST:9106/metrics | grep minyad_mqtt_build_info
-curl -fsS http://MINYAD_HOST:9107/metrics | grep minyad_bridge_goodwe_build_info
-curl -fsS http://MINYAD_HOST:9108/metrics | grep minyad_bridge_dsmr_build_info
-curl -fsS http://MINYAD_HOST:9109/metrics | grep minyad_bridge_enphase_build_info
+curl -fsS http://192.168.110.2:9102/metrics | grep minyad_ingestion_build_info
+curl -fsS http://192.168.110.2:9103/metrics | grep minyad_control_build_info
+curl -fsS http://192.168.110.2:9104/metrics | grep minyad_strategy_build_info
+curl -fsS http://192.168.110.2:9105/metrics | grep minyad_trade_build_info
+curl -fsS http://192.168.110.2:9106/metrics | grep minyad_mqtt_build_info
+curl -fsS http://192.168.110.2:9107/metrics | grep minyad_bridge_goodwe_build_info
+curl -fsS http://192.168.110.2:9108/metrics | grep minyad_bridge_dsmr_build_info
+curl -fsS http://192.168.110.2:9109/metrics | grep minyad_bridge_enphase_build_info
 ```
 
 Then reload Prometheus:
