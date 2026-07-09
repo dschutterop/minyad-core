@@ -331,6 +331,7 @@ def make_app_with_soc(soc, controller_state=None, settings=None):
     app = make_available_app()
     app.latest_battery_soc = soc
     app.settings = settings or {}
+    app.effective_soc_ceiling = lambda _now=None: int(app.settings.get("soc_ceiling", control_main.SOC_CEILING_DEFAULT))
     app.controller = FakeHysteresisController(controller_state)
     return app
 
@@ -672,6 +673,7 @@ def test_slow_balance_soc_ceiling_stops_charging(monkeypatch):
     app._has_published_battery_limits = True
     app.latest_grid_power_w = -600
     app.latest_battery_soc = 90
+    app.effective_soc_ceiling = lambda _now=None: control_main.SOC_CEILING_DEFAULT
     force_balance_ready(app)
 
     asyncio.run(app.apply_slow_balance(control_main.ControlState.CHARGING))
