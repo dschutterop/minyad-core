@@ -37,6 +37,19 @@ TOOLS: list[dict[str, Any]] = [
         "input_schema": {"type": "object", "properties": {"hours_ahead": {"type": "integer", "description": "Aantal uur vooruit, max 48"}}, "required": ["hours_ahead"]},
     },
     {
+        "name": "get_operational_logs",
+        "description": "Lees historische Minyad logs voor diagnosevragen: agent decisions, control setpoints, strategy decisions, slot plans, shadow log, telemetry, messages, overrides en settings. Gebruik dit wanneer de operator vraagt waarom iets eerder gebeurde.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "hours_lookback": {"type": "integer", "description": "Aantal uur terug vanaf nu of until_iso. Default 24, max 168."},
+                "limit": {"type": "integer", "description": "Maximaal aantal rijen per logsoort. Default 50, max 100."},
+                "since_iso": {"type": "string", "description": "Optioneel ISO-tijdstip vanaf wanneer logs nodig zijn."},
+                "until_iso": {"type": "string", "description": "Optioneel ISO-tijdstip tot wanneer logs nodig zijn."},
+            },
+        },
+    },
+    {
         "name": "log_decision",
         "description": "ALTIJD als laatste tool call, ongeacht of er gestuurd is. Schrijft het volledige besluit naar agent_decisions.",
         "input_schema": {
@@ -128,6 +141,15 @@ class ToolExecutor:
         if name == "get_extended_forecast":
             hours = max(1, min(48, int(tool_input["hours_ahead"])))
             return self.client.get_forecast(hours)
+        if name == "get_operational_logs":
+            hours = max(1, min(168, int(tool_input.get("hours_lookback") or 24)))
+            limit = max(1, min(100, int(tool_input.get("limit") or 50)))
+            return self.client.get_operational_logs(
+                hours_lookback=hours,
+                limit=limit,
+                since=tool_input.get("since_iso"),
+                until=tool_input.get("until_iso"),
+            )
         if name == "log_decision":
             actual_action = self.last_action or {}
             payload = {

@@ -41,6 +41,20 @@ class MinyadClient:
     def get_forecast(self, hours_ahead: int = 12) -> dict[str, Any]:
         return self._get("/api/forecast", params={"hours_ahead": hours_ahead})
 
+    def get_operational_logs(
+        self,
+        hours_lookback: int = 24,
+        limit: int = 50,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"hours_lookback": hours_lookback, "limit": limit}
+        if since:
+            params["since"] = since
+        if until:
+            params["until"] = until
+        return self._get("/api/agent/logs", params=params)
+
     def set_battery(self, setpoint_w: int, duration_minutes: int = 15) -> dict[str, Any]:
         return self._post(
             "/api/control/battery",

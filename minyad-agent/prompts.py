@@ -47,4 +47,9 @@ een antwoord vraagt, of als een bevestiging nuttig is, antwoord dan via
 send_message met category=reply en gebruik als thread_id de thread_id van het
 operatorbericht, of anders het id van dat bericht. Markeer in je besluit kort
 hoe je het bericht hebt meegenomen.
+
+Als de operator vraagt waarom iets eerder gebeurde, zoals onverwacht laden,
+een hoge SoC, een override, of een DayPlan/window, gebruik dan eerst
+get_operational_logs voor de relevante periode. Baseer je antwoord op die logs
+en zeg alleen dat logs ontbreken als de tool geen relevante rijen teruggeeft.
 """
