@@ -16,6 +16,7 @@ from typing import Any
 
 import paho.mqtt.client as mqtt
 import psycopg2
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, start_http_server
 from dotenv import load_dotenv
 
 from backends import BatteryTelemetry, GoodWeBackend, GoodWeCompositeBackend, InverterBackend, ModbusBackend
@@ -50,6 +51,31 @@ STATUS_OK = "ok"
 STATUS_UNREACHABLE = "unreachable"
 STATUS_ERROR = "error"
 CLIENT_ID = "goodwe-bridge"
+METRICS_PORT = int(os.getenv("METRICS_PORT", "9107"))
+METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
+
+PROMETHEUS_REGISTRY = CollectorRegistry()
+BUILD_INFO = Gauge("minyad_bridge_goodwe_build_info", "Build and version information for the GoodWe bridge.", ["version"], registry=PROMETHEUS_REGISTRY)
+ERRORS_TOTAL = Counter("minyad_bridge_goodwe_errors_total", "Errors observed by the GoodWe bridge.", ["type"], registry=PROMETHEUS_REGISTRY)
+READ_DURATION_SECONDS = Histogram(
+    "minyad_bridge_goodwe_read_duration_seconds",
+    "Duration of GoodWe bridge read_state calls.",
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+    registry=PROMETHEUS_REGISTRY,
+)
+READ_FAILURES_TOTAL = Counter("minyad_bridge_goodwe_read_failures_total", "GoodWe bridge read failures.", registry=PROMETHEUS_REGISTRY)
+LAST_SUCCESS_TIMESTAMP_SECONDS = Gauge(
+    "minyad_bridge_goodwe_last_success_timestamp_seconds",
+    "Unix timestamp of the most recent successful GoodWe bridge read.",
+    registry=PROMETHEUS_REGISTRY,
+)
+
+
+def start_metrics_server() -> None:
+    BUILD_INFO.labels(version=VERSION).set(1)
+    start_http_server(METRICS_PORT, addr=METRICS_ADDR, registry=PROMETHEUS_REGISTRY)
+    logger.info("Prometheus metrics listening on %s:%s", METRICS_ADDR, METRICS_PORT)
 
 
 def _get_env_int(name: str, default: int) -> int:
@@ -398,10 +424,14 @@ class GoodWeBridge:
         try:
             await self.poll_once()
         except (ConnectionError, TimeoutError) as exc:
+            READ_FAILURES_TOTAL.inc()
+            ERRORS_TOTAL.labels(type="read_unavailable").inc()
             self.publish_bridge_alive()
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
             logger.warning("Immediate polling failed: %s", exc, exc_info=True)
         except Exception as exc:
+            READ_FAILURES_TOTAL.inc()
+            ERRORS_TOTAL.labels(type="read_error").inc()
             self.publish_bridge_alive()
             self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
             logger.warning("Immediate polling failed: %s", exc, exc_info=True)
@@ -636,7 +666,8 @@ class GoodWeBridge:
             logger.warning("Unable to write bridge action to setpoint_log: %s", exc)
 
     async def poll_once(self) -> None:
-        state = await self.backend.read_state()
+        with READ_DURATION_SECONDS.time():
+            state = await self.backend.read_state()
         self._last_api_battery_power_w = state.battery_power_w
         self._last_api_grid_power_w = state.grid_power_w
         self._last_api_telemetry_monotonic = monotonic()
@@ -661,8 +692,10 @@ class GoodWeBridge:
         self.publish_bridge_alive()
         self.modbus_reads_total += 1
         self.last_successful_read_timestamp = time()
+        LAST_SUCCESS_TIMESTAMP_SECONDS.set(self.last_successful_read_timestamp)
         if isinstance(state, BatteryTelemetry) and state.modbus_error and state.modbus_error != "disabled":
             self.modbus_errors_total += 1
+            ERRORS_TOTAL.labels(type="modbus_read").inc()
         self.publish_metrics()
         logger.info(
             "Poll read success timestamp=%s soc=%s battery_power_w=%s inverter_grid_power_w=%s",
@@ -709,10 +742,14 @@ class GoodWeBridge:
             try:
                 await self.poll_once()
             except (ConnectionError, TimeoutError) as exc:
+                READ_FAILURES_TOTAL.inc()
+                ERRORS_TOTAL.labels(type="read_unavailable").inc()
                 self.publish_bridge_alive()
                 self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_UNREACHABLE, retain=True)
                 logger.warning("[modbus|api] Polling failed: %s", exc, exc_info=True)
             except Exception as exc:
+                READ_FAILURES_TOTAL.inc()
+                ERRORS_TOTAL.labels(type="read_error").inc()
                 self.publish_bridge_alive()
                 self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
                 logger.warning("[modbus|api] Polling failed: %s", exc, exc_info=True)
@@ -740,6 +777,7 @@ class GoodWeBridge:
 async def main() -> None:
     config = Config.from_env()
     configure_logging(config.log_level)
+    start_metrics_server()
     backend = build_backend(config)
     logger.info("[modbus|api] Using GoodWe protocols: modbus_enabled=%s api_enabled=%s dry_run=%s", config.goodwe_modbus_limits_enabled, config.goodwe_api_enabled, config.dry_run)
     bridge = GoodWeBridge(config, backend)

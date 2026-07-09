@@ -1,5 +1,6 @@
 goodwe==0.4.10
 paho-mqtt==2.1.0
+prometheus-client==0.23.1
 python-dotenv==1.2.2
 pymodbus==3.13.1
 requests==2.34.2

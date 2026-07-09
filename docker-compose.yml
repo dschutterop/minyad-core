@@ -63,6 +63,25 @@ services:
       retries: 10
       start_period: 5s
 
+  minyad-mqtt-observer:
+    build:
+      context: .
+      dockerfile: monitoring/Dockerfile
+    container_name: minyad-mqtt-observer
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MQTT_HOST: minyad-mqtt
+      MQTT_PORT: 1883
+      METRICS_PORT: 9106
+      METRICS_ADDR: 0.0.0.0
+    ports:
+      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9106:9106"
+    depends_on:
+      minyad-mqtt:
+        condition: service_healthy
+    networks: [minyad-internal]
+
   minyad-ingestion:
     build:
       context: .
@@ -73,6 +92,10 @@ services:
     environment:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
+      METRICS_PORT: 9102
+      METRICS_ADDR: 0.0.0.0
+    ports:
+      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9102:9102"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -90,7 +113,11 @@ services:
     environment:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
+      METRICS_PORT: 9103
+      METRICS_ADDR: 0.0.0.0
       STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-false}
+    ports:
+      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9103:9103"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -145,6 +172,10 @@ services:
       STRATEGY_VERSION: v3
       SHADOW_MODE: ${STRATEGY3_SHADOW_MODE:-false}
       MQTT_CLIENT_ID: minyad-strategy-v3
+      METRICS_PORT: 9104
+      METRICS_ADDR: 0.0.0.0
+    ports:
+      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9104:9104"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -195,6 +226,7 @@ services:
       minyad-mqtt:
         condition: service_healthy
     ports:
+      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9101:8000"
       - target: 8000
         published: "8002"
     networks: [minyad-internal, minyad-public]
@@ -292,6 +324,10 @@ services:
     environment:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
+      METRICS_PORT: 9105
+      METRICS_ADDR: 0.0.0.0
+    ports:
+      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9105:9105"
     depends_on:
       minyad-mqtt:
         condition: service_healthy
@@ -315,6 +351,35 @@ services:
       minyad-mqtt:
         condition: service_healthy
     networks: [minyad-internal]
+
+  minyad-node-exporter:
+    image: prom/node-exporter:v1.9.1
+    container_name: minyad-node-exporter
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9110:9100"
+    networks: [minyad-public]
+
+  minyad-cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    container_name: minyad-cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9111:8080"
+    networks: [minyad-public]
 
 networks:
   minyad-internal:

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import paho.mqtt.client as mqtt
+from prometheus_client import CollectorRegistry, Counter, Gauge, start_http_server
 import requests
 import urllib3
 from dotenv import load_dotenv
@@ -31,6 +32,24 @@ MQTT_TOPIC_BRIDGE_STATUS = "minyad/solar/bridge/status"
 MQTT_TOPIC_BRIDGE_LAST_SEEN = "minyad/solar/bridge/last_seen"
 BRIDGE_STATUS_ONLINE = "online"
 BRIDGE_STATUS_ERROR = "error"
+METRICS_PORT = int(os.getenv("METRICS_PORT", "9109"))
+METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
+
+PROMETHEUS_REGISTRY = CollectorRegistry()
+BUILD_INFO = Gauge("minyad_bridge_enphase_build_info", "Build and version information for the Enphase bridge.", ["version"], registry=PROMETHEUS_REGISTRY)
+ERRORS_TOTAL = Counter("minyad_bridge_enphase_errors_total", "Errors observed by the Enphase bridge.", ["type"], registry=PROMETHEUS_REGISTRY)
+LAST_SUCCESS_TIMESTAMP_SECONDS = Gauge(
+    "minyad_bridge_enphase_last_success_timestamp_seconds",
+    "Unix timestamp of the most recent successful Enphase bridge poll.",
+    registry=PROMETHEUS_REGISTRY,
+)
+
+
+def start_metrics_server() -> None:
+    BUILD_INFO.labels(version=VERSION).set(1)
+    start_http_server(METRICS_PORT, addr=METRICS_ADDR, registry=PROMETHEUS_REGISTRY)
+    logger.info("Prometheus metrics listening on %s:%s", METRICS_ADDR, METRICS_PORT)
 
 
 class EnvoyAuthError(RuntimeError):
@@ -234,6 +253,7 @@ class EnphaseBridge:
     def publish(self, topic: str, payload: object, retain: bool = True) -> None:
         result = self.mqtt_client.publish(topic, str(payload), retain=retain)
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            ERRORS_TOTAL.labels(type="mqtt_publish").inc()
             logger.warning("MQTT publish failed for %s with rc=%s", topic, result.rc)
 
     def on_connect(
@@ -285,16 +305,20 @@ class EnphaseBridge:
                     self.publish(MQTT_TOPIC_PRODUCTION_W, production_w)
                     self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, updated_at)
                 self.publish_bridge_alive()
+                LAST_SUCCESS_TIMESTAMP_SECONDS.set(datetime.now(timezone.utc).timestamp())
                 logger.info("Production poll production_w=%s updated_at=%s", production_w, updated_at)
                 backoff = 1
             except EnvoyAuthError as exc:
+                ERRORS_TOTAL.labels(type="auth").inc()
                 await self.handle_auth_error(exc)
             except EnvoyRequestError as exc:
+                ERRORS_TOTAL.labels(type="request").inc()
                 interval = min(backoff, 60)
                 backoff = min(backoff * 2, 60)
                 logger.warning("Production poll failed; retrying in %ss: %s", interval, exc)
                 self.publish_bridge_error()
             except Exception as exc:
+                ERRORS_TOTAL.labels(type="poll").inc()
                 logger.warning("Production poll failed; retrying in %ss: %s", interval, exc, exc_info=True)
                 self.publish_bridge_error()
 
@@ -326,6 +350,7 @@ class EnphaseBridge:
                 self.publish(MQTT_TOPIC_PRODUCTION_W, total_production_w)
                 self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, unix_to_iso(latest_report_at))
                 self.publish_bridge_alive()
+                LAST_SUCCESS_TIMESTAMP_SECONDS.set(datetime.now(timezone.utc).timestamp())
                 logger.info(
                     "Inverter poll inverter_count=%s arrays=%s total_production_w=%s",
                     len(inverters),
@@ -334,13 +359,16 @@ class EnphaseBridge:
                 )
                 backoff = 1
             except EnvoyAuthError as exc:
+                ERRORS_TOTAL.labels(type="auth").inc()
                 await self.handle_auth_error(exc)
             except EnvoyRequestError as exc:
+                ERRORS_TOTAL.labels(type="request").inc()
                 interval = min(backoff, 60)
                 backoff = min(backoff * 2, 60)
                 logger.warning("Inverter poll failed; retrying in %ss: %s", interval, exc)
                 self.publish_bridge_error()
             except Exception as exc:
+                ERRORS_TOTAL.labels(type="poll").inc()
                 logger.warning("Inverter poll failed; retrying in %ss: %s", interval, exc, exc_info=True)
                 self.publish_bridge_error()
 
@@ -365,6 +393,7 @@ class EnphaseBridge:
 async def main() -> None:
     config = Config.from_env()
     configure_logging(config.log_level)
+    start_metrics_server()
     token = read_enphase_token()
     envoy = EnvoyClient(config.envoy_host, token, config.envoy_timeout)
     logger.info(

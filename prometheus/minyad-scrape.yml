@@ -1,0 +1,100 @@
+scrape_configs:
+  - job_name: minyad-api
+    scrape_interval: 15s
+    honor_labels: false
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - minyad-host.example:9101
+        labels:
+          stack: minyad
+
+  - job_name: minyad-ingestion
+    scrape_interval: 15s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - minyad-host.example:9102
+        labels:
+          stack: minyad
+
+  - job_name: minyad-control
+    scrape_interval: 10s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - minyad-host.example:9103
+        labels:
+          stack: minyad
+
+  - job_name: minyad-bridge-goodwe
+    scrape_interval: 10s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - minyad-host.example:9107
+        labels:
+          stack: minyad
+
+  - job_name: minyad-strategy-v3
+    scrape_interval: 15s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - minyad-host.example:9104
+        labels:
+          stack: minyad
+
+  - job_name: minyad-trade
+    scrape_interval: 15s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - minyad-host.example:9105
+        labels:
+          stack: minyad
+
+  - job_name: minyad-bridge-dsmr
+    scrape_interval: 10s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - minyad-host.example:9108
+        labels:
+          stack: minyad
+
+  - job_name: minyad-bridge-enphase
+    scrape_interval: 15s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - minyad-host.example:9109
+        labels:
+          stack: minyad
+
+  - job_name: minyad-mqtt
+    scrape_interval: 15s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - minyad-host.example:9106
+        labels:
+          stack: minyad
+
+  - job_name: minyad-node-exporter
+    scrape_interval: 15s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - minyad-host.example:9110
+        labels:
+          stack: minyad
+
+  - job_name: minyad-cadvisor
+    scrape_interval: 15s
+    honor_labels: false
+    static_configs:
+      - targets:
+          - minyad-host.example:9111
+        labels:
+          stack: minyad
