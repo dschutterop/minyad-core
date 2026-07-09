@@ -76,6 +76,8 @@ Strategy v3 defaults to `strategy3.plan_interval_min = 15`, so the strategy stal
 
 See `prometheus/minyad-scrape.yml`.
 
+For the monitoring-host copy/include steps, see `docs/prometheus-handoff.md`.
+
 ## Alert Rules
 
 See `prometheus/minyad-alerts.yml`.

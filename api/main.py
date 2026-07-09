@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 import paho.mqtt.client as paho_mqtt
-from prometheus_client import Counter, Gauge
+from prometheus_client import CollectorRegistry, Counter, Gauge
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import text
@@ -48,10 +48,21 @@ app.add_middleware(
     allow_headers=["X-API-Key", "Content-Type"],
 )
 VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
-API_BUILD_INFO = Gauge("minyad_api_build_info", "Build and version information for minyad-api.", ["version"])
-API_ERRORS_TOTAL = Counter("minyad_api_errors_total", "Errors observed by minyad-api.", ["type"])
+PROMETHEUS_REGISTRY = CollectorRegistry()
+API_BUILD_INFO = Gauge(
+    "minyad_api_build_info",
+    "Build and version information for minyad-api.",
+    ["version"],
+    registry=PROMETHEUS_REGISTRY,
+)
+API_ERRORS_TOTAL = Counter(
+    "minyad_api_errors_total",
+    "Errors observed by minyad-api.",
+    ["type"],
+    registry=PROMETHEUS_REGISTRY,
+)
 API_BUILD_INFO.labels(version=VERSION).set(1)
-Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+Instrumentator(registry=PROMETHEUS_REGISTRY).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 mqtt = MinyadMqttClient("minyad-api")
 LOGGER = logging.getLogger(__name__)
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
