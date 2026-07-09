@@ -12,6 +12,7 @@ class FakeClient:
         self.battery_calls = []
         self.decisions = []
         self.forecast_hours = []
+        self.log_requests = []
         self.messages = []
 
     def set_battery(self, setpoint_w: int, duration_minutes: int = 15):
@@ -25,6 +26,15 @@ class FakeClient:
     def get_forecast(self, hours):
         self.forecast_hours.append(hours)
         return {"hours_ahead": hours, "points": []}
+
+    def get_operational_logs(self, hours_lookback=24, limit=50, since=None, until=None):
+        self.log_requests.append({
+            "hours_lookback": hours_lookback,
+            "limit": limit,
+            "since": since,
+            "until": until,
+        })
+        return {"logs": {"setpoint_log": []}}
 
     def send_message(self, payload):
         self.messages.append(payload)
@@ -65,6 +75,26 @@ def test_extended_forecast_tool_caps_horizon_to_api_limit() -> None:
 
     assert executor.execute("get_extended_forecast", {"hours_ahead": 72}) == {"hours_ahead": 48, "points": []}
     assert client.forecast_hours == [48]
+
+
+def test_operational_logs_tool_caps_window_and_limit() -> None:
+    client = FakeClient()
+    executor = ToolExecutor(client, {}, {}, dry_run=True, model="test-model")
+
+    result = executor.execute("get_operational_logs", {
+        "hours_lookback": 999,
+        "limit": 999,
+        "since_iso": "2026-07-09T00:00:00+00:00",
+        "until_iso": "2026-07-10T00:00:00+00:00",
+    })
+
+    assert result == {"logs": {"setpoint_log": []}}
+    assert client.log_requests == [{
+        "hours_lookback": 168,
+        "limit": 100,
+        "since": "2026-07-09T00:00:00+00:00",
+        "until": "2026-07-10T00:00:00+00:00",
+    }]
 
 
 def test_send_message_can_reply_to_operator_thread() -> None:

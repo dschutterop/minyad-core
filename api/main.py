@@ -9,7 +9,7 @@ import logging
 import os
 import secrets
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from threading import Event, Lock
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -2037,6 +2037,197 @@ async def list_agent_decisions(
         limit :limit
     """), {"limit": limit})).mappings().all()
     return [serialize_agent_decision(row) for row in rows]
+
+
+def _parse_log_datetime(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _serialize_log_row(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    for key, value in list(data.items()):
+        if isinstance(value, datetime):
+            data[key] = value.replace(tzinfo=timezone.utc).isoformat()
+        elif isinstance(value, date):
+            data[key] = value.isoformat()
+    return data
+
+
+async def _table_exists(session: AsyncSession, table_name: str) -> bool:
+    return bool((await session.execute(text("select to_regclass(:table_name) is not null"), {"table_name": table_name})).scalar_one())
+
+
+async def _table_columns(session: AsyncSession, table_name: str) -> set[str]:
+    rows = (await session.execute(
+        text("""
+            select column_name
+            from information_schema.columns
+            where table_name = :table_name
+        """),
+        {"table_name": table_name},
+    )).scalars().all()
+    return set(rows)
+
+
+async def _fetch_log_rows(session: AsyncSession, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = (await session.execute(text(query), params)).mappings().all()
+    return [_serialize_log_row(row) for row in rows]
+
+
+@app.get("/api/agent/logs", dependencies=[Depends(require_api_key)])
+async def agent_operational_logs(
+    hours_lookback: int = Query(default=24, ge=1, le=168),
+    limit: int = Query(default=50, ge=1, le=100),
+    since: str | None = Query(default=None),
+    until: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    until_dt = _parse_log_datetime(until) or datetime.now(timezone.utc)
+    since_dt = _parse_log_datetime(since) or (until_dt - timedelta(hours=hours_lookback))
+    if since_dt > until_dt:
+        raise HTTPException(status_code=400, detail="since must be before until")
+    params = {"since": since_dt, "until": until_dt, "limit": limit}
+    logs: dict[str, Any] = {}
+    unavailable: list[str] = []
+
+    if await _table_exists(session, "agent_decisions"):
+        logs["agent_decisions"] = await _fetch_log_rows(session, """
+            select id, created_at, action_taken, setpoint_w, reasoning, confidence, input_snapshot, dry_run, model
+            from agent_decisions
+            where created_at >= :since and created_at <= :until
+            order by created_at desc, id desc
+            limit :limit
+        """, params)
+    else:
+        unavailable.append("agent_decisions")
+
+    if await _table_exists(session, "setpoint_log"):
+        columns = await setpoint_log_columns(session)
+        select_list = setpoint_log_select_list(columns)
+        rows = (await session.execute(text(f"""
+            select {select_list}
+            from setpoint_log
+            where timestamp >= :since and timestamp <= :until
+            order by timestamp desc, id desc
+            limit :limit
+        """), params)).mappings().all()
+        logs["setpoint_log"] = [serialize_control_decision(row) for row in rows]
+    else:
+        unavailable.append("setpoint_log")
+
+    if await _table_exists(session, "strategy_decisions"):
+        logs["strategy_decisions"] = await _fetch_log_rows(session, """
+            select id, timestamp, mode, soc_floor, soc_ceiling, forecast_ghi, trigger_reason, applied_at
+            from strategy_decisions
+            where timestamp >= :since and timestamp <= :until
+            order by timestamp desc, id desc
+            limit :limit
+        """, params)
+    else:
+        unavailable.append("strategy_decisions")
+
+    if await _table_exists(session, "day_plans"):
+        logs["day_plans"] = await _fetch_log_rows(session, """
+            select id, plan_date, solar_mode, forecast_ghi_kwh_m2, effective_soc_floor,
+                   effective_soc_ceiling, grid_charge_windows, price_discharge_windows,
+                   planned_soc_at_sunset, valid_until, reason, created_at
+            from day_plans
+            where created_at <= :until and valid_until >= :since
+            order by created_at desc, id desc
+            limit :limit
+        """, params)
+    else:
+        unavailable.append("day_plans")
+
+    if await _table_exists(session, "slot_plans"):
+        columns = await _table_columns(session, "slot_plans")
+        strategy_version_select = "strategy_version" if "strategy_version" in columns else "null as strategy_version"
+        logs["slot_plans"] = await _fetch_log_rows(session, f"""
+            select id, generated_at, valid_from, slot_seconds, solver_status, {strategy_version_select}, payload, created_at
+            from slot_plans
+            where generated_at >= :since and generated_at <= :until
+            order by generated_at desc, id desc
+            limit :limit
+        """, params)
+    else:
+        unavailable.append("slot_plans")
+
+    if await _table_exists(session, "strategy_shadow_log"):
+        logs["strategy_shadow_log"] = await _fetch_log_rows(session, """
+            select id, ts, v2_setpoint_w, v3_setpoint_w, soc, net_grid_w, v3_reason, created_at
+            from strategy_shadow_log
+            where ts >= :since and ts <= :until
+            order by ts desc, id desc
+            limit :limit
+        """, params)
+    else:
+        unavailable.append("strategy_shadow_log")
+
+    if await _table_exists(session, "agent_messages"):
+        columns = await _table_columns(session, "agent_messages")
+        optional_columns = [
+            name for name in ("archived_at", "operator_ack_at", "agent_ack_at")
+            if name in columns
+        ]
+        select_columns = [
+            "id", "created_at", "sender", "category", "subject", "body",
+            "related_decision_id", "read_at", "thread_id", "severity", *optional_columns,
+        ]
+        logs["agent_messages"] = await _fetch_log_rows(session, f"""
+            select {", ".join(select_columns)}
+            from agent_messages
+            where created_at >= :since and created_at <= :until
+            order by created_at desc, id desc
+            limit :limit
+        """, params)
+    else:
+        unavailable.append("agent_messages")
+
+    if await _table_exists(session, "telemetry_log"):
+        logs["telemetry_log"] = await _fetch_log_rows(session, """
+            select id, timestamp, topic, payload
+            from telemetry_log
+            where timestamp >= :since and timestamp <= :until
+            order by timestamp desc, id desc
+            limit :limit
+        """, params)
+    else:
+        unavailable.append("telemetry_log")
+
+    if await _table_exists(session, "battery_override"):
+        logs["battery_override"] = await _fetch_log_rows(session, """
+            select *
+            from battery_override
+            order by id
+            limit :limit
+        """, params)
+    else:
+        unavailable.append("battery_override")
+
+    settings_rows = (await session.execute(text("""
+        select key, value, updated_at
+        from settings
+        where key like 'battery.%' or key like 'strategy.%' or key like 'strategy3.%'
+        order by key
+    """))).mappings().all()
+    logs["settings"] = [_serialize_log_row(row) for row in settings_rows]
+
+    return {
+        "window": {
+            "since": since_dt.isoformat(),
+            "until": until_dt.isoformat(),
+            "hours_lookback": hours_lookback,
+            "limit_per_log": limit,
+        },
+        "logs": logs,
+        "unavailable": unavailable,
+    }
 
 
 def _normalize_battery_override_mode(mode: str | None) -> str:
