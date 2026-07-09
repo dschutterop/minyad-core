@@ -90,6 +90,32 @@ Use your service manager instead if lifecycle reloads are disabled:
 systemctl reload prometheus
 ```
 
+## Troubleshooting Connection Refused
+
+If Prometheus reports `connect: connection refused` for the Docker-published targets
+`192.168.110.2:9101` through `192.168.110.2:9106`, the host is reachable but no
+process is listening on those ports. On the Minyad host, first verify the compose
+services are running and the ports are bound to the VPN/internal address:
+
+```bash
+cd /path/to/minyad
+docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+sudo ss -ltnp | grep -E '192\.168\.110\.2:(9101|9102|9103|9104|9105|9106)\b'
+```
+
+If the ports are missing or bound only to `127.0.0.1`, recreate the compose
+services with the production metrics bind address:
+
+```bash
+MINYAD_METRICS_BIND_IP=192.168.110.2 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
+```
+
+Then retry a direct scrape from the Prometheus host:
+
+```bash
+curl -fsS http://192.168.110.2:9102/metrics | grep minyad_ingestion_build_info
+```
+
 ## First PromQL Checks
 
 Use these in the Prometheus UI after reload:
