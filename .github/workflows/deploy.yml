@@ -142,6 +142,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOST_SERVICE_UNITS: ${{ vars.HOST_SERVICE_UNITS || 'dsmr_bridge.service goodwe_bridge.service enphase_bridge.service enphase_token_refresh.timer' }}
           MINYAD_IMAGE_TAG: ${{ github.sha }}
+          MINYAD_METRICS_BIND_IP: ${{ vars.MINYAD_METRICS_BIND_IP || '192.168.110.2' }}
+          MINYAD_PROMETHEUS_SOURCE: ${{ vars.MINYAD_PROMETHEUS_SOURCE }}
         run: |
           test -n "${DEPLOY_PATH}"
           git config --global --add safe.directory "${DEPLOY_PATH}"
@@ -157,6 +159,9 @@ jobs:
           host-services/venv/bin/python -m pip install --upgrade pip
           host-services/venv/bin/python -m pip install -r host-services/requirements.txt
 
+          sudo env MINYAD_PROMETHEUS_SOURCE="${MINYAD_PROMETHEUS_SOURCE}" scripts/configure_metrics_firewalld.sh
+          sudo env MINYAD_METRICS_BIND_IP="${MINYAD_METRICS_BIND_IP}" scripts/configure_host_metrics_systemd.sh ${HOST_SERVICE_UNITS}
+
           sudo systemctl daemon-reload
           for unit in ${HOST_SERVICE_UNITS}; do
             if sudo systemctl list-unit-files "${unit}" --no-legend | grep -q "^${unit}"; then
@@ -166,6 +171,8 @@ jobs:
             fi
           done
 
-          MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-          MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
+          MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" MINYAD_METRICS_BIND_IP="${MINYAD_METRICS_BIND_IP}" docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+          MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" MINYAD_METRICS_BIND_IP="${MINYAD_METRICS_BIND_IP}" docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
+          sudo ss -ltnp | grep -E ':(9101|9102|9103|9104|9105|9106|9107|9108|9109|9110|9111)\b'
+          sudo firewall-cmd --list-all
           docker image prune -f

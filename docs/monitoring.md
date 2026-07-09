@@ -1,6 +1,6 @@
 # Minyad Monitoring
 
-Prometheus instrumentation is implemented service-by-service. The monitoring host, VPN, HAProxy, and firewall boundary live outside this repository; this repo only defines the service metrics endpoints, Prometheus snippets, and metric contracts.
+Prometheus instrumentation is implemented service-by-service. Production deployment binds Docker-published metrics to the Minyad VPN/internal interface by setting `MINYAD_METRICS_BIND_IP`, and host-service bridge metrics use `METRICS_ADDR`.
 
 ## Port Plan
 
@@ -77,6 +77,16 @@ Strategy v3 defaults to `strategy3.plan_interval_min = 15`, so the strategy stal
 See `prometheus/minyad-scrape.yml`.
 
 For the monitoring-host copy/include steps, see `docs/prometheus-handoff.md`.
+
+## Minyad Host Exposure
+
+Production defaults bind metrics to `192.168.110.2`:
+
+- Docker-published metrics use `MINYAD_METRICS_BIND_IP=192.168.110.2`.
+- Host systemd bridge metrics use `METRICS_ADDR=192.168.110.2`; deployment writes systemd drop-ins with `scripts/configure_host_metrics_systemd.sh` so existing live units receive the value even when unit files were installed earlier.
+- The deploy workflow runs `scripts/configure_metrics_firewalld.sh` to allow `9101-9111/tcp` in firewalld.
+
+Set the GitHub environment variable `MINYAD_PROMETHEUS_SOURCE` to a Prometheus host IP or source CIDR to install a source-limited firewalld rich rule. If it is unset, deployment opens `9101-9111/tcp` in the configured zone, defaulting to `public`.
 
 ## Alert Rules
 
