@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, start_http_server
 from sqlalchemy import text
 
 from shared.db import AsyncSessionLocal
@@ -43,6 +44,37 @@ PV_STALE_SECONDS = 300
 # row, since it's a shared credential rather than a tunable parameter.
 VESPER_API_URL = os.getenv("VESPER_API_URL", "")
 VESPER_API_SECRET = os.getenv("VESPER_API_SECRET", "")
+METRICS_PORT = int(os.getenv("METRICS_PORT", "9104"))
+METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
+
+PROMETHEUS_REGISTRY = CollectorRegistry()
+BUILD_INFO = Gauge("minyad_strategy_build_info", "Build and version information for minyad-strategy-v3.", ["version"], registry=PROMETHEUS_REGISTRY)
+ERRORS_TOTAL = Counter("minyad_strategy_errors_total", "Errors observed by minyad-strategy-v3.", ["type"], registry=PROMETHEUS_REGISTRY)
+SOLVE_DURATION_SECONDS = Histogram(
+    "minyad_strategy_solve_duration_seconds",
+    "Duration of strategy v3 plan recalculations.",
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
+    registry=PROMETHEUS_REGISTRY,
+)
+SOLVE_STATUS_TOTAL = Counter("minyad_strategy_solve_status_total", "Strategy v3 solve outcomes.", ["status"], registry=PROMETHEUS_REGISTRY)
+PLAN_HORIZON_HOURS = Gauge("minyad_strategy_plan_horizon_hours", "Strategy v3 plan horizon in hours.", registry=PROMETHEUS_REGISTRY)
+LAST_PLAN_TIMESTAMP_SECONDS = Gauge(
+    "minyad_strategy_last_plan_timestamp_seconds",
+    "Unix timestamp of the most recent strategy v3 plan.",
+    registry=PROMETHEUS_REGISTRY,
+)
+PLANNED_BATTERY_POWER_WATTS = Gauge(
+    "minyad_strategy_planned_battery_power_watts",
+    "Planned battery power for the next interval; positive means discharge, negative means charge.",
+    registry=PROMETHEUS_REGISTRY,
+)
+
+
+def start_metrics_server() -> None:
+    BUILD_INFO.labels(version=VERSION).set(1)
+    start_http_server(METRICS_PORT, addr=METRICS_ADDR, registry=PROMETHEUS_REGISTRY)
+    LOGGER.info("Prometheus metrics listening on %s:%s", METRICS_ADDR, METRICS_PORT)
 
 
 def _truthy(value: str) -> bool:
@@ -96,6 +128,7 @@ class StrategyService:
 
     async def start(self) -> None:
         self.loop = asyncio.get_running_loop()
+        start_metrics_server()
         await self.settings.load()
         await self.overrides.load()
         await self.planner.load_pv_calibration_factors()
@@ -233,7 +266,14 @@ class StrategyService:
 
     async def recalculate_plan(self) -> None:
         now = datetime.now(AMSTERDAM)
-        plan = await self.planner.recalculate(now, self.state.battery_soc)
+        try:
+            with SOLVE_DURATION_SECONDS.time():
+                plan = await self.planner.recalculate(now, self.state.battery_soc)
+        except Exception:
+            ERRORS_TOTAL.labels(type="plan_recalculate").inc()
+            SOLVE_STATUS_TOTAL.labels(status="error").inc()
+            raise
+        record_plan_metrics(plan)
         self.publish_plan(plan)
         if plan.solver_status != "FALLBACK":
             self.publish_surplus_forecast(plan)
@@ -440,6 +480,27 @@ def _replace(state: ExecutorState, **changes: Any) -> ExecutorState:
 def _parse_dt(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def record_plan_metrics(plan: SlotPlan) -> None:
+    SOLVE_STATUS_TOTAL.labels(status=_prometheus_solve_status(plan.solver_status)).inc()
+    PLAN_HORIZON_HOURS.set(len(plan.slots) * plan.slot_seconds / 3600.0)
+    generated_at = plan.generated_at if plan.generated_at.tzinfo else plan.generated_at.replace(tzinfo=timezone.utc)
+    LAST_PLAN_TIMESTAMP_SECONDS.set(generated_at.timestamp())
+    if plan.slots:
+        first_slot = plan.slots[0]
+        PLANNED_BATTERY_POWER_WATTS.set(float(first_slot.discharge_w - first_slot.charge_w))
+
+
+def _prometheus_solve_status(solver_status: str) -> str:
+    normalized = solver_status.strip().lower()
+    if normalized == "optimal":
+        return "optimal"
+    if "infeasible" in normalized:
+        return "infeasible"
+    if "timeout" in normalized or "time" in normalized:
+        return "timeout"
+    return "error"
 
 
 def _plan_payload(plan: SlotPlan) -> dict[str, Any]:

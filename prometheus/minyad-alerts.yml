@@ -1,0 +1,103 @@
+groups:
+  - name: minyad-general
+    rules:
+      - alert: MinyadTargetDown
+        expr: up{stack="minyad"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          stack: minyad
+        annotations:
+          summary: Minyad Prometheus target is down
+          description: A Minyad scrape target has been down for at least 2 minutes.
+
+  - name: minyad-ingestion
+    rules:
+      - alert: MinyadDsmrIngestionStale
+        expr: time() - minyad_ingestion_last_sample_timestamp_seconds{source="dsmr"} > 300
+        for: 2m
+        labels:
+          severity: critical
+          stack: minyad
+        annotations:
+          summary: Minyad DSMR ingestion is stale
+          description: DSMR ingestion has not processed a sample for more than 5 minutes.
+
+      - alert: MinyadEnphaseBridgeStale
+        expr: time() - minyad_bridge_enphase_last_success_timestamp_seconds > 900
+        labels:
+          severity: warning
+          stack: minyad
+        annotations:
+          summary: Minyad Enphase bridge is stale
+          description: The Enphase bridge has not reported a successful poll for more than 15 minutes.
+
+      - alert: MinyadDsmrBridgeStale
+        expr: time() - minyad_bridge_dsmr_last_success_timestamp_seconds > 300
+        labels:
+          severity: critical
+          stack: minyad
+        annotations:
+          summary: Minyad DSMR bridge is stale
+          description: The DSMR bridge has not reported a successful publish for more than 5 minutes.
+
+  - name: minyad-control
+    rules:
+      - alert: MinyadGoodWeBridgeReadFailures
+        expr: increase(minyad_bridge_goodwe_read_failures_total[15m]) > 10
+        labels:
+          severity: warning
+          stack: minyad
+        annotations:
+          summary: Minyad GoodWe bridge read failures are elevated
+          description: The GoodWe bridge has reported more than 10 read failures in 15 minutes.
+
+      - alert: MinyadBatterySocSanity
+        expr: minyad_control_battery_soc_ratio < 0.05 or minyad_control_battery_soc_ratio > 0.99
+        for: 30m
+        labels:
+          severity: warning
+          stack: minyad
+        annotations:
+          summary: Minyad battery SoC is near an extreme
+          description: Battery SoC has been below 5% or above 99% for 30 minutes.
+
+  - name: minyad-strategy
+    rules:
+      - alert: MinyadStrategyPlanStale
+        expr: time() - minyad_strategy_last_plan_timestamp_seconds > 30 * 60
+        labels:
+          severity: critical
+          stack: minyad
+        annotations:
+          summary: Minyad strategy v3 plan is stale
+          description: Strategy v3 has not produced a plan within twice the configured 15 minute plan interval.
+
+      - alert: MinyadStrategySolveProblems
+        expr: increase(minyad_strategy_solve_status_total{status!="optimal"}[1h]) > 2
+        labels:
+          severity: warning
+          stack: minyad
+        annotations:
+          summary: Minyad strategy v3 has repeated solve problems
+          description: Strategy v3 reported more than two non-optimal solve outcomes in the last hour.
+
+  - name: minyad-trade
+    rules:
+      - alert: MinyadTradeFetchStale
+        expr: time() - minyad_trade_last_fetch_success_timestamp_seconds > 6 * 3600
+        labels:
+          severity: warning
+          stack: minyad
+        annotations:
+          summary: Minyad trade prices have not been refreshed
+          description: minyad-trade has not successfully fetched prices for more than 6 hours.
+
+      - alert: MinyadTradePricesLowHorizon
+        expr: minyad_trade_prices_available_hours < 6
+        labels:
+          severity: critical
+          stack: minyad
+        annotations:
+          summary: Minyad trade price horizon is too short
+          description: Fewer than 6 hours of future prices are available.

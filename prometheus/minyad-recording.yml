@@ -1,0 +1,20 @@
+groups:
+  - name: minyad-recording
+    rules:
+      - record: minyad:ingestion_sample_age_seconds
+        expr: time() - minyad_ingestion_last_sample_timestamp_seconds
+
+      - record: minyad:bridge_goodwe_last_success_age_seconds
+        expr: time() - minyad_bridge_goodwe_last_success_timestamp_seconds
+
+      - record: minyad:bridge_dsmr_last_success_age_seconds
+        expr: time() - minyad_bridge_dsmr_last_success_timestamp_seconds
+
+      - record: minyad:bridge_enphase_last_success_age_seconds
+        expr: time() - minyad_bridge_enphase_last_success_timestamp_seconds
+
+      - record: minyad:strategy_plan_age_seconds
+        expr: time() - minyad_strategy_last_plan_timestamp_seconds
+
+      - record: minyad:trade_fetch_age_seconds
+        expr: time() - minyad_trade_last_fetch_success_timestamp_seconds

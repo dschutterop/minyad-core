@@ -12,6 +12,7 @@ from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from prometheus_client import CollectorRegistry, Counter, Gauge, start_http_server
 from sqlalchemy import text
 
 from hysteresis import HysteresisController, OverrideMode
@@ -43,6 +44,9 @@ MAX_DISCHARGE_POWER_W = int(os.getenv("MAX_DISCHARGE_POWER_W", "6000"))
 CONTROL_REFRESH_INTERVAL_SEC = int(os.getenv("CONTROL_REFRESH_INTERVAL_SEC", "300"))
 ACTIVE_COMMAND_RETRY_INTERVAL_SEC = int(os.getenv("ACTIVE_COMMAND_RETRY_INTERVAL_SEC", "60"))
 STRATEGY_V2_PRIMARY = os.getenv("STRATEGY_V2_PRIMARY", "false").strip().lower() in {"1", "true", "yes", "on"}
+METRICS_PORT = int(os.getenv("METRICS_PORT", "9103"))
+METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
 BATTERY_TOPIC_TYPES = {
     "soc": int,
     "soh": int,
@@ -54,6 +58,24 @@ BATTERY_TOPIC_TYPES = {
     "mode_label": str,
     "charge_i": int,
 }
+
+PROMETHEUS_REGISTRY = CollectorRegistry()
+BUILD_INFO = Gauge("minyad_control_build_info", "Build and version information for minyad-control.", ["version"], registry=PROMETHEUS_REGISTRY)
+ERRORS_TOTAL = Counter("minyad_control_errors_total", "Errors observed by minyad-control.", ["type"], registry=PROMETHEUS_REGISTRY)
+BATTERY_SOC_RATIO = Gauge("minyad_control_battery_soc_ratio", "Battery state of charge as a 0-1 ratio.", registry=PROMETHEUS_REGISTRY)
+BATTERY_POWER_WATTS = Gauge(
+    "minyad_control_battery_power_watts",
+    "Battery power in watts; positive means discharge, negative means charge.",
+    registry=PROMETHEUS_REGISTRY,
+)
+GRID_POWER_WATTS = Gauge("minyad_control_grid_power_watts", "Grid power in watts; positive means import, negative means export.", registry=PROMETHEUS_REGISTRY)
+PV_POWER_WATTS = Gauge("minyad_control_pv_power_watts", "PV production power in watts.", registry=PROMETHEUS_REGISTRY)
+
+
+def start_metrics_server() -> None:
+    BUILD_INFO.labels(version=VERSION).set(1)
+    start_http_server(METRICS_PORT, addr=METRICS_ADDR, registry=PROMETHEUS_REGISTRY)
+    LOGGER.info("Prometheus metrics listening on %s:%s", METRICS_ADDR, METRICS_PORT)
 
 
 async def load_settings() -> dict[str, Any]:
@@ -109,6 +131,7 @@ class ControlApp:
         self.latest_grid_power_w = 0
         self.latest_battery_soc: int | None = None
         self.latest_battery_power_w = 0
+        self.latest_pv_power_w = 0
         self.reported_state_override: str | None = None
         self.bridge_status = "offline"
         self.bridge_last_seen: datetime | None = None
@@ -132,6 +155,7 @@ class ControlApp:
         self.mqtt.subscribe("minyad/grid/net_power_w", self._on_mqtt)
         self.mqtt.subscribe("minyad/battery/+", self._on_mqtt)
         self.mqtt.subscribe("minyad/bridge/+", self._on_mqtt)
+        self.mqtt.subscribe("minyad/solar/production_w", self._on_mqtt)
         self.mqtt.subscribe("minyad/control/override", self._on_mqtt)
         if STRATEGY_V2_PRIMARY:
             self.mqtt.subscribe("minyad/strategy/setpoint_w", self._on_mqtt)
@@ -211,8 +235,14 @@ class ControlApp:
             await self.apply_strategy_v2_setpoint(int(float(decoded)))
             return
         if topic in {"minyad/dsmr/net_power_w", "minyad/grid/net_power_w"}:
-            grid_power_w = int(decoded)
+            try:
+                grid_power_w = int(decoded)
+            except ValueError:
+                ERRORS_TOTAL.labels(type="invalid_grid_power").inc()
+                LOGGER.warning("Ignoring invalid grid power payload topic=%s payload=%r", topic, decoded)
+                return
             self.latest_grid_power_w = grid_power_w
+            GRID_POWER_WATTS.set(grid_power_w)
             if STRATEGY_V2_PRIMARY:
                 LOGGER.debug("Strategy v2 primary enabled; ignoring local FSM grid sample")
                 return
@@ -274,6 +304,9 @@ class ControlApp:
         if topic.startswith("minyad/bridge/"):
             await self.handle_bridge_topic(topic, decoded)
             return
+        if topic == "minyad/solar/production_w":
+            await self.handle_solar_topic(decoded)
+            return
         if topic.startswith("minyad/battery/"):
             await self.handle_battery_topic(topic, decoded)
             if self.refresh_bridge_last_seen_from_battery_telemetry():
@@ -308,10 +341,21 @@ class ControlApp:
             return
         if measurement == "soc":
             self.latest_battery_soc = int(value)
+            BATTERY_SOC_RATIO.set(self.latest_battery_soc / 100.0)
             await self.enforce_soc_guard_now()
         elif measurement == "power_w":
             self.latest_battery_power_w = int(value)
+            BATTERY_POWER_WATTS.set(self.latest_battery_power_w)
         await store_status(**{measurement: value})
+
+    async def handle_solar_topic(self, payload: str) -> None:
+        try:
+            self.latest_pv_power_w = int(float(payload))
+        except ValueError:
+            ERRORS_TOTAL.labels(type="invalid_pv_power").inc()
+            LOGGER.warning("Ignoring invalid PV production payload: %r", payload)
+            return
+        PV_POWER_WATTS.set(self.latest_pv_power_w)
 
     async def handle_bridge_topic(self, topic: str, payload: str) -> None:
         measurement = topic.removeprefix("minyad/bridge/")
@@ -882,6 +926,7 @@ def _normalize_override_mode(mode: str | None) -> str:
 
 
 async def run_control_app() -> None:
+    start_metrics_server()
     app = ControlApp()
     await app.start()
 

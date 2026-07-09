@@ -50,3 +50,7 @@ services:
   minyad-reporting:
     image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/reporting:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
+
+  minyad-mqtt-observer:
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/monitoring:${MINYAD_IMAGE_TAG:-latest}
+    build: !reset null

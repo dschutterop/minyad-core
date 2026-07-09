@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import paho.mqtt.client as mqtt
+from prometheus_client import CollectorRegistry, Counter, Gauge, start_http_server
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,6 +27,24 @@ STATUS_OK = "ok"
 STATUS_STALE = "stale"
 STATUS_DISCONNECTED = "disconnected"
 STATUS_INTERVAL_SECONDS = 30
+METRICS_PORT = int(os.getenv("METRICS_PORT", "9108"))
+METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
+
+PROMETHEUS_REGISTRY = CollectorRegistry()
+BUILD_INFO = Gauge("minyad_bridge_dsmr_build_info", "Build and version information for the DSMR bridge.", ["version"], registry=PROMETHEUS_REGISTRY)
+ERRORS_TOTAL = Counter("minyad_bridge_dsmr_errors_total", "Errors observed by the DSMR bridge.", ["type"], registry=PROMETHEUS_REGISTRY)
+LAST_SUCCESS_TIMESTAMP_SECONDS = Gauge(
+    "minyad_bridge_dsmr_last_success_timestamp_seconds",
+    "Unix timestamp of the most recent successful DSMR bridge publish.",
+    registry=PROMETHEUS_REGISTRY,
+)
+
+
+def start_metrics_server() -> None:
+    BUILD_INFO.labels(version=VERSION).set(1)
+    start_http_server(METRICS_PORT, addr=METRICS_ADDR, registry=PROMETHEUS_REGISTRY)
+    logger.info("Prometheus metrics listening on %s:%s", METRICS_ADDR, METRICS_PORT)
 
 PRIMARY_DELIVERED = "electricity_currently_delivered"
 PRIMARY_RETURNED = "electricity_currently_returned"
@@ -180,6 +199,7 @@ class DsmrBridge:
         topic = self.minyad_topic(field)
         result = self.target_client.publish(topic, str(payload), retain=True)
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            ERRORS_TOTAL.labels(type="mqtt_publish").inc()
             logger.warning("MQTT publish failed for %s with rc=%s", topic, result.rc)
             return
         logger.debug("Published %s=%s", topic, payload)
@@ -265,6 +285,7 @@ class DsmrBridge:
             try:
                 value: float | str = float(payload)
             except ValueError:
+                ERRORS_TOTAL.labels(type="invalid_payload").inc()
                 logger.warning("Ignoring malformed numeric payload on %s: %r", message.topic, payload)
                 return
         else:
@@ -296,11 +317,13 @@ class DsmrBridge:
         delivered_kw = snapshot[PRIMARY_DELIVERED]
         returned_kw = snapshot[PRIMARY_RETURNED]
         if not isinstance(delivered_kw, (float, int)) or not isinstance(returned_kw, (float, int)):
+            ERRORS_TOTAL.labels(type="invalid_primary_values").inc()
             logger.warning("Primary DSMR values have invalid types; skipping net power publish")
             return
 
         net_grid_power_w = round((delivered_kw - returned_kw) * 1000)
         self.publish("net_power_w", net_grid_power_w)
+        LAST_SUCCESS_TIMESTAMP_SECONDS.set(time.time())
 
     def current_status(self) -> str:
         with self.state_lock:
@@ -323,6 +346,7 @@ class DsmrBridge:
             try:
                 self.publish("status", self.current_status())
             except Exception:
+                ERRORS_TOTAL.labels(type="status_publish").inc()
                 logger.warning("Failed to publish DSMR status", exc_info=True)
 
     async def run(self) -> None:
@@ -350,6 +374,7 @@ class DsmrBridge:
 async def main() -> None:
     config = Config.from_env()
     configure_logging(config.log_level)
+    start_metrics_server()
     bridge = DsmrBridge(config)
 
     loop = asyncio.get_running_loop()

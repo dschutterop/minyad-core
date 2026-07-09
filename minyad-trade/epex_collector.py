@@ -20,6 +20,7 @@ try:
     import requests
 except ModuleNotFoundError:  # pragma: no cover - exercised indirectly by import-only tests
     requests = None
+from prometheus_client import CollectorRegistry, Counter, Gauge, start_http_server
 from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
 
@@ -43,6 +44,26 @@ DAY_AHEAD_DEFAULTS = _CONFIG.DAY_AHEAD_DEFAULTS
 ENTSOE = _CONFIG.ENTSOE
 MQTT_TOPICS = _CONFIG.MQTT_TOPICS
 ALLOWED_ENTSOE_HOST = "web-api.tp.entsoe.eu"
+METRICS_PORT = int(os.getenv("METRICS_PORT", "9105"))
+METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
+
+PROMETHEUS_REGISTRY = CollectorRegistry()
+BUILD_INFO = Gauge("minyad_trade_build_info", "Build and version information for minyad-trade.", ["version"], registry=PROMETHEUS_REGISTRY)
+ERRORS_TOTAL = Counter("minyad_trade_errors_total", "Errors observed by minyad-trade.", ["type"], registry=PROMETHEUS_REGISTRY)
+LAST_FETCH_SUCCESS_TIMESTAMP_SECONDS = Gauge(
+    "minyad_trade_last_fetch_success_timestamp_seconds",
+    "Unix timestamp of the most recent successful day-ahead price fetch.",
+    registry=PROMETHEUS_REGISTRY,
+)
+FETCH_FAILURES_TOTAL = Counter("minyad_trade_fetch_failures_total", "Day-ahead price fetch failures.", registry=PROMETHEUS_REGISTRY)
+PRICES_AVAILABLE_HOURS = Gauge("minyad_trade_prices_available_hours", "Hours of future prices available from the last successful fetch.", registry=PROMETHEUS_REGISTRY)
+
+
+def start_metrics_server() -> None:
+    BUILD_INFO.labels(version=VERSION).set(1)
+    start_http_server(METRICS_PORT, addr=METRICS_ADDR, registry=PROMETHEUS_REGISTRY)
+    LOGGER.info("Prometheus metrics listening on %s:%s", METRICS_ADDR, METRICS_PORT)
 
 
 @dataclass(frozen=True)
@@ -182,6 +203,8 @@ def publish_prices(mqtt: MinyadMqttClient, prices: list[dict[str, Any]]) -> None
     for point in prices:
         mqtt.publish(f"{prefix}/{point['hour']}", point["price_eur_kwh"], retain=True)
     mqtt.publish("minyad/market/signals", json.dumps(_price_vector_signal(day, prices), separators=(",", ":")), retain=True)
+    LAST_FETCH_SUCCESS_TIMESTAMP_SECONDS.set(time.time())
+    PRICES_AVAILABLE_HOURS.set(_prices_available_hours(prices, datetime.now(AMSTERDAM_TZ)))
     LOGGER.info("Published %d day-ahead price points for %s", len(prices), day)
 
 
@@ -214,6 +237,21 @@ def _price_vector_signal(day: str, prices: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+def _prices_available_hours(prices: list[dict[str, Any]], now: datetime) -> float:
+    latest_until: datetime | None = None
+    for point in prices:
+        try:
+            starts_at = datetime.fromisoformat(str(point["starts_at"]).replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            continue
+        until = starts_at + timedelta(hours=1)
+        if latest_until is None or until > latest_until:
+            latest_until = until
+    if latest_until is None:
+        return 0.0
+    return max(0.0, (latest_until - now.astimezone(latest_until.tzinfo)).total_seconds() / 3600.0)
+
+
 def collect_once(client: Any, mqtt: MinyadMqttClient, settings: DayAheadSettings, target_day: datetime) -> None:
     prices = fetch_day_ahead(client, settings, target_day)
     publish_prices(mqtt, prices)
@@ -225,6 +263,8 @@ def collect_with_retries(client: Any, mqtt: MinyadMqttClient, settings: DayAhead
             collect_once(client, mqtt, settings, target_day)
             return True
         except Exception as exc:  # ENTSO-E uses several exception types for unavailable data.
+            FETCH_FAILURES_TOTAL.inc()
+            ERRORS_TOTAL.labels(type="fetch").inc()
             if attempt >= settings.retry_attempts:
                 LOGGER.exception("Day-ahead price collection failed after %d attempts: %r", attempt, exc)
                 return False
@@ -246,6 +286,8 @@ def collect_startup_prices(client: Any, mqtt: MinyadMqttClient, settings: DayAhe
         collect_once(client, mqtt, settings, target)
         return
     except Exception as exc:  # ENTSO-E uses several exception types for unavailable data.
+        FETCH_FAILURES_TOTAL.inc()
+        ERRORS_TOTAL.labels(type="fetch").inc()
         LOGGER.warning(
             "Startup day-ahead prices for %s are unavailable; immediately fetching current-day prices so the dashboard is populated: %r",
             target.date(),
@@ -261,6 +303,8 @@ def collect_startup_prices(client: Any, mqtt: MinyadMqttClient, settings: DayAhe
             target.date(),
         )
     except Exception as exc:  # ENTSO-E uses several exception types for unavailable data.
+        FETCH_FAILURES_TOTAL.inc()
+        ERRORS_TOTAL.labels(type="fetch").inc()
         LOGGER.warning(
             "Current-day prices for %s are unavailable during startup; retrying target day %s with configured retry policy: %r",
             current_day.date(),
@@ -276,6 +320,7 @@ def _target_day(now: datetime) -> datetime:
 
 def main() -> None:
     configure_container_logging(format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
+    start_metrics_server()
     api_key = os.getenv("ENTSOE_API_KEY")
     if not api_key:
         LOGGER.critical("ENTSOE_API_KEY is required; minyad-trade cannot fetch ENTSO-E prices without it")
