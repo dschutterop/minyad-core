@@ -86,6 +86,7 @@ TRADE_PRICE_CACHE: dict[str, list[dict[str, Any]]] = {}
 DRYAD_CACHE_LOCK = Lock()
 DRYAD_CACHE: dict[str, Any] = {"computed_at": None, "payload": None}
 _debug_enabled = False
+_debug_refresh_task: asyncio.Task[None] | None = None
 
 MQTT_STATUS_KEYS = {
     "minyad/battery/soc": "soc",
@@ -807,6 +808,7 @@ async def publish_battery_mqtt_settings(settings: dict[str, Any] | None = None) 
 
 @app.on_event("startup")
 async def startup() -> None:
+    global _debug_refresh_task
     async with AsyncSessionLocal() as session:
         result = await session.execute(text("select value from settings where key = 'system.debug_logging'"))
         val = result.scalar_one_or_none() or "false"
@@ -821,7 +823,7 @@ async def startup() -> None:
     mqtt.subscribe("minyad/trade/prices/da/+/full", handle_trade_price_mqtt)
     await publish_battery_mqtt_settings()
     await publish_trade_mqtt_settings()
-    asyncio.create_task(_refresh_debug_setting())
+    _debug_refresh_task = asyncio.create_task(_refresh_debug_setting())
 
 
 @app.get("/health")
