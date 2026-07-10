@@ -77,9 +77,6 @@ def require_api_key(key: str | None = Security(API_KEY_HEADER)) -> None:
 
 
 MUTATION_AUTH = [Depends(require_api_key)]
-HTTP_400_RESPONSE = {400: {"description": "Bad request"}}
-HTTP_404_RESPONSE = {404: {"description": "Not found"}}
-HTTP_422_RESPONSE = {422: {"description": "Unprocessable entity"}}
 UTC_OFFSET_SUFFIX = "+00:00"
 DEBUG_LOGGING_SETTING_QUERY = "select value from settings where key = 'system.debug_logging'"
 SETTING_UPSERT_QUERY = """
@@ -1013,7 +1010,7 @@ async def get_asset_steering_settings(session: SessionDep) -> dict[str, Any]:
     return await asset_steering_settings(session)
 
 
-@app.put("/asset-steering/settings", dependencies=MUTATION_AUTH, responses=HTTP_422_RESPONSE)
+@app.put("/asset-steering/settings", dependencies=MUTATION_AUTH, responses={422: {"description": "Unprocessable entity"}})
 async def update_asset_steering_settings(
     update: AssetSteeringSettingsUpdate,
     session: SessionDep,
@@ -1173,7 +1170,7 @@ async def get_trade_settings(session: SessionDep) -> dict[str, Any]:
     return await trade_settings(session)
 
 
-@app.put("/trade/settings", dependencies=MUTATION_AUTH, responses=HTTP_422_RESPONSE)
+@app.put("/trade/settings", dependencies=MUTATION_AUTH, responses={422: {"description": "Unprocessable entity"}})
 async def update_trade_settings(update: TradeSettingsUpdate, session: SessionDep) -> dict[str, Any]:
     data = update.model_dump(exclude_unset=True)
     for key, value in data.items():
@@ -2138,7 +2135,7 @@ async def _collect_log(
         unavailable.append(table)
 
 
-@app.get("/api/agent/logs", dependencies=[Depends(require_api_key)], responses=HTTP_400_RESPONSE)
+@app.get("/api/agent/logs", dependencies=[Depends(require_api_key)], responses={400: {"description": "Bad request"}})
 async def agent_operational_logs(
     session: SessionDep,
     hours_lookback: Annotated[int, Query(ge=1, le=168)] = 24,
@@ -2362,7 +2359,7 @@ async def agent_messages_unread_count(
     return {"unread_count": int(count)}
 
 
-@app.get("/api/messages/{message_id}", responses=HTTP_404_RESPONSE)
+@app.get("/api/messages/{message_id}", responses={404: {"description": "Not found"}})
 async def get_agent_message(message_id: int, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("""
         select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity, archived_at, operator_ack_at, agent_ack_at
@@ -2392,7 +2389,7 @@ async def create_agent_message(request: AgentMessageCreate, session: SessionDep)
     return {"status": "ok", "id": row["id"], "created_at": row["created_at"].replace(tzinfo=timezone.utc).isoformat()}
 
 
-@app.patch("/api/messages/{message_id}/read", dependencies=MUTATION_AUTH, responses=HTTP_404_RESPONSE)
+@app.patch("/api/messages/{message_id}/read", dependencies=MUTATION_AUTH, responses={404: {"description": "Not found"}})
 async def mark_agent_message_read(message_id: int, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("""
         update agent_messages
@@ -2407,7 +2404,7 @@ async def mark_agent_message_read(message_id: int, session: SessionDep) -> dict[
     return {"status": "ok", "id": row["id"], "read_at": row["read_at"].replace(tzinfo=timezone.utc).isoformat()}
 
 
-@app.patch("/api/messages/{message_id}/archive", dependencies=MUTATION_AUTH, responses=HTTP_404_RESPONSE)
+@app.patch("/api/messages/{message_id}/archive", dependencies=MUTATION_AUTH, responses={404: {"description": "Not found"}})
 async def archive_agent_message(message_id: int, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("""
         update agent_messages
@@ -2421,7 +2418,7 @@ async def archive_agent_message(message_id: int, session: SessionDep) -> dict[st
     return {"status": "ok", "id": row["id"], "archived_at": row["archived_at"].replace(tzinfo=timezone.utc).isoformat()}
 
 
-@app.patch("/api/messages/{message_id}/ack", dependencies=MUTATION_AUTH, responses=HTTP_404_RESPONSE)
+@app.patch("/api/messages/{message_id}/ack", dependencies=MUTATION_AUTH, responses={404: {"description": "Not found"}})
 async def acknowledge_agent_message(message_id: int, session: SessionDep, actor: Literal["operator", "agent"] = "operator") -> dict[str, Any]:
     column = "operator_ack_at" if actor == "operator" else "agent_ack_at"
     row = (await session.execute(text(f"""
@@ -2436,7 +2433,7 @@ async def acknowledge_agent_message(message_id: int, session: SessionDep, actor:
     return {"status": "ok", **serialize_agent_message(row)}
 
 
-@app.delete("/api/messages/{message_id}", dependencies=MUTATION_AUTH, responses=HTTP_404_RESPONSE)
+@app.delete("/api/messages/{message_id}", dependencies=MUTATION_AUTH, responses={404: {"description": "Not found"}})
 async def delete_agent_message(message_id: int, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("delete from agent_messages where id = :id returning id"), {"id": message_id})).mappings().first()
     if row is None:
@@ -2445,7 +2442,7 @@ async def delete_agent_message(message_id: int, session: SessionDep) -> dict[str
     return {"status": "ok", "id": row["id"]}
 
 
-@app.post("/battery/override", dependencies=MUTATION_AUTH, responses=HTTP_422_RESPONSE)
+@app.post("/battery/override", dependencies=MUTATION_AUTH, responses={422: {"description": "Unprocessable entity"}})
 async def set_battery_override(request: BatteryOverrideRequest, session: SessionDep) -> dict[str, Any]:
     mode = _normalize_battery_override_mode(request.mode)
     settings = await battery_settings(session)
@@ -2509,8 +2506,8 @@ async def get_battery_settings(session: SessionDep) -> dict[str, Any]:
     return await battery_settings(session)
 
 
-@app.put("/api/battery/settings", dependencies=MUTATION_AUTH, responses=HTTP_422_RESPONSE)
-@app.put("/battery/settings", dependencies=MUTATION_AUTH, responses=HTTP_422_RESPONSE)
+@app.put("/api/battery/settings", dependencies=MUTATION_AUTH, responses={422: {"description": "Unprocessable entity"}})
+@app.put("/battery/settings", dependencies=MUTATION_AUTH, responses={422: {"description": "Unprocessable entity"}})
 async def update_battery_settings(update: BatterySettingsUpdate, session: SessionDep) -> dict[str, Any]:
     data = update.model_dump(exclude_unset=True)
     current = await battery_settings(session)
