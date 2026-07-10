@@ -99,7 +99,7 @@ def test_dashboard_window_bounds_day_offset():
 
 def test_dashboard_window_bounds_naive_now_is_treated_as_utc():
     naive = datetime(2026, 6, 15, 12, 0)
-    start, end, _ = api_main.dashboard_window_bounds("day", timedelta(days=1), now=naive)
+    start, _end, _until = api_main.dashboard_window_bounds("day", timedelta(days=1), now=naive)
     assert start.tzinfo is not None
 
 
