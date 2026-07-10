@@ -100,6 +100,7 @@ services:
       - -ec
       - |
         test -n "$$MQTT_USER" && test -n "$$MQTT_PASS"
+        rm -f /tmp/minyad-mosquitto.passwd
         mosquitto_passwd -c -b /tmp/minyad-mosquitto.passwd "$$MQTT_USER" "$$MQTT_PASS"
         chown mosquitto:mosquitto /tmp/minyad-mosquitto.passwd
         chmod 600 /tmp/minyad-mosquitto.passwd
