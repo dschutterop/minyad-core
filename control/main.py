@@ -305,7 +305,7 @@ class ControlApp:
             await self.handle_bridge_topic(topic, decoded)
             return
         if topic == "minyad/solar/production_w":
-            await self.handle_solar_topic(decoded)
+            self.handle_solar_topic(decoded)
             return
         if topic.startswith("minyad/battery/"):
             await self.handle_battery_topic(topic, decoded)
@@ -348,7 +348,7 @@ class ControlApp:
             BATTERY_POWER_WATTS.set(self.latest_battery_power_w)
         await store_status(**{measurement: value})
 
-    async def handle_solar_topic(self, payload: str) -> None:
+    def handle_solar_topic(self, payload: str) -> None:
         try:
             self.latest_pv_power_w = int(float(payload))
         except ValueError:
@@ -814,6 +814,7 @@ class ControlApp:
         await self.stop_charging()
 
     async def stop_charging(self) -> None:
+        await asyncio.sleep(0)
         self.setpoint_w = 0
         self.mqtt.publish_measurement("control", "command", "stop")
         if self.bridge_is_available:

@@ -274,5 +274,3 @@ async def load_baseline_consumption_profile(
         )
 
     return HouseholdLoadProfile(weekday=weekday_profile, weekend=weekend_profile, temp_betas=temp_betas, tz=tz)
-
-    return build_profile_from_rows(rows, tz=tz, fallback_w=fallback_w)
