@@ -149,7 +149,13 @@ class ToolExecutor:
         result = {"requested_setpoint_w": requested, "setpoint_w": clipped, "duration_minutes": duration, "dry_run": self.dry_run, "warnings": warnings}
         if not self.dry_run:
             result["api_result"] = self.client.set_battery(clipped, duration)
-        self.last_action = {"action_taken": "charge" if clipped > 0 else "discharge" if clipped < 0 else "hold", "setpoint_w": clipped, "reasoning": tool_input["reasoning"]}
+        if clipped > 0:
+            action_taken = "charge"
+        elif clipped < 0:
+            action_taken = "discharge"
+        else:
+            action_taken = "hold"
+        self.last_action = {"action_taken": action_taken, "setpoint_w": clipped, "reasoning": tool_input["reasoning"]}
         return result
 
     def _hold_position(self, tool_input: dict[str, Any]) -> dict[str, Any]:

@@ -51,7 +51,11 @@ class OverrideManager:
             self.current = Override(row.mode, row.watts, row.expires_at, bool(row.override_soc_limits))
 
     async def apply_payload(self, payload: str | bytes | dict[str, Any]) -> Override:
-        data = json.loads(payload.decode() if isinstance(payload, bytes) else payload) if not isinstance(payload, dict) else payload
+        if isinstance(payload, dict):
+            data = payload
+        else:
+            raw_payload = payload.decode() if isinstance(payload, bytes) else payload
+            data = json.loads(raw_payload)
         mode = _normalize_mode(data.get("mode", "none"))
         duration = data.get("duration_seconds")
         expires_at = _parse_dt(data.get("expires_at")) if data.get("expires_at") else None

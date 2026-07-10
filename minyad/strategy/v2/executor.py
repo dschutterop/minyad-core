@@ -69,7 +69,12 @@ class StrategyExecutor:
 
     def _balance_candidate(self, state: ExecutorState, current: int, in_price_discharge: bool) -> tuple[int, str]:
         error_w = state.net_grid_w - self.settings.int("strategy.grid_target_w")
-        direction = 1 if error_w > 0 else -1 if error_w < 0 else 0
+        if error_w > 0:
+            direction = 1
+        elif error_w < 0:
+            direction = -1
+        else:
+            direction = 0
         if abs(error_w) < self.settings.ramp_floor_w:
             return current, f"within deadband ({error_w}W)"
         if not self._ramp_hold_satisfied(direction):
