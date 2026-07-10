@@ -666,7 +666,12 @@ def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None
         component_status("Agent messages", "ok", "Agent mailbox API endpoint is registered", endpoint="/api/messages"),
     ]
     components = [api_status, db_status, mqtt_status, battery, grid, solar, *endpoint_items]
-    overall = "error" if any(item["status"] == "error" for item in components) else "warning" if any(item["status"] == "warning" for item in components) else "ok"
+    if any(item["status"] == "error" for item in components):
+        overall = "error"
+    elif any(item["status"] == "warning" for item in components):
+        overall = "warning"
+    else:
+        overall = "ok"
     return {
         "status": overall,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -969,7 +974,10 @@ async def update_claude_agent_settings(
 ) -> dict[str, Any]:
     data = update.model_dump(exclude_unset=True)
     for key, value in data.items():
-        stored = "true" if isinstance(value, bool) and value else "false" if isinstance(value, bool) else str(value)
+        if isinstance(value, bool):
+            stored = "true" if value else "false"
+        else:
+            stored = str(value)
         await session.execute(
             text(SETTING_UPSERT_QUERY),
             {"key": f"claude_agent.{key}", "value": stored},

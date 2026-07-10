@@ -610,9 +610,22 @@ class GoodWeBridge:
         self._log_control_decision(self.target_charge_limit_w, self.target_discharge_limit_w, modbus_write_result=f"skipped_{reason.replace(' ', '_')}", api_command="skipped", api_command_success=None)
 
     def _log_control_decision(self, charge: int, discharge: int, *, modbus_write_result: str, api_command: str, api_command_success: bool | None) -> None:
-        desired_state = "CHARGING" if charge > 0 and discharge <= 0 else "DISCHARGING" if discharge > 0 and charge <= 0 else self.control_state
-        target_power_w = charge if desired_state == "CHARGING" else discharge if desired_state == "DISCHARGING" else 0
-        signed_setpoint_w = charge if desired_state == "CHARGING" else -discharge if desired_state == "DISCHARGING" else 0
+        if charge > 0 and discharge <= 0:
+            desired_state = "CHARGING"
+        elif discharge > 0 and charge <= 0:
+            desired_state = "DISCHARGING"
+        else:
+            desired_state = self.control_state
+
+        if desired_state == "CHARGING":
+            target_power_w = charge
+            signed_setpoint_w = charge
+        elif desired_state == "DISCHARGING":
+            target_power_w = discharge
+            signed_setpoint_w = -discharge
+        else:
+            target_power_w = 0
+            signed_setpoint_w = 0
         reason = f"bridge actuator consequence; api_command={api_command} api_success={api_command_success} modbus_result={modbus_write_result}"
         logger.info(
             "[control] decision p1_grid_power_w=%s desired_state=%s target_power_w=%s api_command=%s api_command_success=%s modbus_charge_limit_w=%s modbus_discharge_limit_w=%s modbus_write_result=%s api_battery_power_w=%s api_grid_power_w=%s battery_soc=%s bridge_max_charge_a=%s bridge_max_allowed_charge_a=%s dry_run=%s note=modbus_limits_are_not_force_setpoints",
