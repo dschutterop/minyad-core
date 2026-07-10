@@ -1,6 +1,10 @@
-from datetime import datetime
+import asyncio
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
+from minyad.strategy.v3 import forecast_client
 from minyad.strategy.v3.forecast_client import calibrate_pv_factors, fallback_sunset, interpolate_ghi
 
 TZ = ZoneInfo("Europe/Amsterdam")
@@ -83,8 +87,99 @@ def test_calibrate_pv_factors_empty_samples_keeps_previous():
 
 
 def test_fallback_sunset_is_21_local():
-    from datetime import date
-
     sunset = fallback_sunset(date(2026, 7, 3))
     assert sunset.hour == 21
     assert sunset.tzinfo is not None
+
+
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+        self.raised = False
+
+    def raise_for_status(self):
+        self.raised = True
+
+    def json(self):
+        return self.payload
+
+
+class FakeAsyncClient:
+    calls = []
+    payload = {}
+
+    def __init__(self, *, timeout):
+        self.timeout = timeout
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url, *, params):
+        FakeAsyncClient.calls.append({"url": url, "params": params, "timeout": self.timeout})
+        return FakeResponse(FakeAsyncClient.payload)
+
+
+def test_fetch_ghi_hourly_parses_naive_times_and_none_values(monkeypatch):
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.payload = {
+        "hourly": {
+            "time": ["2026-07-03T10:00", "2026-07-03T11:00"],
+            "shortwave_radiation": [123.4, None],
+        }
+    }
+    monkeypatch.setattr(forecast_client.httpx, "AsyncClient", FakeAsyncClient)
+
+    points = asyncio.run(forecast_client.fetch_ghi_hourly(lat=1.2, lon=3.4, past_days=5, forecast_days=6))
+
+    assert points == [
+        (datetime(2026, 7, 3, 10, 0, tzinfo=TZ), 123.4),
+        (datetime(2026, 7, 3, 11, 0, tzinfo=TZ), 0.0),
+    ]
+    assert FakeAsyncClient.calls[0]["params"]["hourly"] == "shortwave_radiation"
+    assert FakeAsyncClient.calls[0]["params"]["latitude"] == 1.2
+    assert FakeAsyncClient.calls[0]["params"]["forecast_days"] == 6
+
+
+def test_fetch_temperature_hourly_uses_temperature_series(monkeypatch):
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.payload = {"hourly": {"time": ["2026-07-03T10:00+02:00"], "temperature_2m": [18.5]}}
+    monkeypatch.setattr(forecast_client.httpx, "AsyncClient", FakeAsyncClient)
+
+    points = asyncio.run(forecast_client.fetch_temperature_hourly())
+
+    assert points == [(datetime(2026, 7, 3, 10, 0, tzinfo=TZ), 18.5)]
+    assert FakeAsyncClient.calls[0]["params"]["hourly"] == "temperature_2m"
+
+
+def test_fetch_cloud_cover_hourly_uses_cloud_series(monkeypatch):
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.payload = {"hourly": {"time": ["2026-07-03T10:00"], "cloud_cover": [72]}}
+    monkeypatch.setattr(forecast_client.httpx, "AsyncClient", FakeAsyncClient)
+
+    points = asyncio.run(forecast_client.fetch_cloud_cover_hourly())
+
+    assert points == [(datetime(2026, 7, 3, 10, 0, tzinfo=TZ), 72.0)]
+    assert FakeAsyncClient.calls[0]["params"]["hourly"] == "cloud_cover"
+
+
+def test_fetch_sunset_parses_value_and_request_dates(monkeypatch):
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.payload = {"daily": {"sunset": ["2026-07-03T21:58"]}}
+    monkeypatch.setattr(forecast_client.httpx, "AsyncClient", FakeAsyncClient)
+
+    sunset = asyncio.run(forecast_client.fetch_sunset(date(2026, 7, 3), lat=1.2, lon=3.4))
+
+    assert sunset == datetime(2026, 7, 3, 21, 58, tzinfo=TZ)
+    assert FakeAsyncClient.calls[0]["params"]["daily"] == "sunset"
+    assert FakeAsyncClient.calls[0]["params"]["start_date"] == "2026-07-03"
+
+
+def test_fetch_sunset_raises_when_response_has_no_values(monkeypatch):
+    FakeAsyncClient.payload = {"daily": {"sunset": []}}
+    monkeypatch.setattr(forecast_client.httpx, "AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(RuntimeError, match="no sunset"):
+        asyncio.run(forecast_client.fetch_sunset(date(2026, 7, 3)))
