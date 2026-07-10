@@ -172,6 +172,82 @@ def select_model(
     return config.HAIKU_MODEL  # routine, balanced state → Haiku is sufficient
 
 
+def _log_skipped_cycle(client: MinyadClient, claude_settings: dict[str, Any], skip_reason: str, reasoning: str) -> None:
+    client.log_decision({
+        "action_taken": "hold",
+        "setpoint_w": None,
+        "reasoning": reasoning,
+        "confidence": "low",
+        "input_snapshot": {"claude_agent": claude_settings, "skip_reason": skip_reason},
+        "dry_run": config.DRY_RUN,
+        "model": config.MODEL,
+    })
+
+
+def _gather_cycle_inputs(client: MinyadClient) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]] | None:
+    claude_settings = client.get_claude_agent_settings()
+    skip_reason = claude_skip_reason(claude_settings, config.MAX_TOKENS)
+    if skip_reason is not None:
+        LOGGER.info("skipping Claude agent cycle reason=%s settings=%s", skip_reason, {k: v for k, v in claude_settings.items() if "key" not in k.lower()})
+        _log_skipped_cycle(client, claude_settings, skip_reason, f"Claude call skipped: {skip_reason}")
+        return None
+    if not config.ANTHROPIC_API_KEY:
+        LOGGER.warning("skipping Claude agent cycle because ANTHROPIC_API_KEY is not configured")
+        _log_skipped_cycle(client, claude_settings, "missing_api_key", "Claude call skipped: missing Anthropic API key")
+        return None
+    state = client.get_state()
+    battery_settings = client.get_battery_settings()
+    state.setdefault("settings", {})["battery"] = battery_settings
+    forecast = client.get_forecast(hours_ahead=12)
+    operator_messages = client.get_unread_operator_messages()
+    return state, forecast, operator_messages
+
+
+def _dispatch_tool_calls(response: Any, executor: ToolExecutor) -> tuple[list[dict[str, Any]], bool]:
+    tool_results: list[dict[str, Any]] = []
+    saw_log = False
+    for block in getattr(response, "content", []):
+        if getattr(block, "type", None) != "tool_use":
+            continue
+        result = executor.execute(block.name, dict(block.input))
+        LOGGER.info("tool %s result=%s", block.name, result)
+        saw_log = saw_log or block.name == "log_decision"
+        tool_results.append({
+            "type": "tool_result",
+            "tool_use_id": block.id,
+            "content": json.dumps(result, ensure_ascii=False, default=str),
+        })
+    return tool_results, saw_log
+
+
+def _run_tool_loop(anthropic: Anthropic, model: str, messages: list[dict[str, Any]], executor: ToolExecutor) -> tuple[bool, dict[str, Any]]:
+    saw_log = False
+    cumulative_usage: dict[str, Any] = {}
+    for _round in range(MAX_TOOL_ROUNDS):
+        response = anthropic.messages.create(
+            model=model,
+            max_tokens=config.MAX_TOKENS,
+            system=[{
+                "type": "text",
+                "text": SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral", "ttl": SYSTEM_PROMPT_CACHE_TTL},
+            }],
+            tools=TOOLS,
+            messages=messages,
+        )
+        usage = log_api_usage(response)
+        accumulate_usage(cumulative_usage, usage)
+        tool_results, round_saw_log = _dispatch_tool_calls(response, executor)
+        saw_log = saw_log or round_saw_log
+        if not tool_results:
+            break
+        messages.append({"role": "assistant", "content": serialize_content_blocks(list(response.content))})
+        messages.append({"role": "user", "content": tool_results})
+        if saw_log:
+            break
+    return saw_log, cumulative_usage
+
+
 def run_cycle() -> None:
     client = MinyadClient(
         config.MINYAD_API_URL,
@@ -180,40 +256,13 @@ def run_cycle() -> None:
         backoff_seconds=config.MINYAD_API_RETRY_BACKOFF_SECONDS,
     )
     try:
-        claude_settings = client.get_claude_agent_settings()
-        skip_reason = claude_skip_reason(claude_settings, config.MAX_TOKENS)
-        if skip_reason is not None:
-            LOGGER.info("skipping Claude agent cycle reason=%s settings=%s", skip_reason, {k: v for k, v in claude_settings.items() if "key" not in k.lower()})
-            client.log_decision({
-                "action_taken": "hold",
-                "setpoint_w": None,
-                "reasoning": f"Claude call skipped: {skip_reason}",
-                "confidence": "low",
-                "input_snapshot": {"claude_agent": claude_settings, "skip_reason": skip_reason},
-                "dry_run": config.DRY_RUN,
-                "model": config.MODEL,
-            })
-            return
-        if not config.ANTHROPIC_API_KEY:
-            LOGGER.warning("skipping Claude agent cycle because ANTHROPIC_API_KEY is not configured")
-            client.log_decision({
-                "action_taken": "hold",
-                "setpoint_w": None,
-                "reasoning": "Claude call skipped: missing Anthropic API key",
-                "confidence": "low",
-                "input_snapshot": {"claude_agent": claude_settings, "skip_reason": "missing_api_key"},
-                "dry_run": config.DRY_RUN,
-                "model": config.MODEL,
-            })
-            return
-        state = client.get_state()
-        battery_settings = client.get_battery_settings()
-        state.setdefault("settings", {})["battery"] = battery_settings
-        forecast = client.get_forecast(hours_ahead=12)
-        operator_messages = client.get_unread_operator_messages()
+        cycle_inputs = _gather_cycle_inputs(client)
     except (httpx.RequestError, httpx.HTTPStatusError) as exc:
         LOGGER.warning("skipping agent cycle because Minyad API is unavailable: %s", exc)
         return
+    if cycle_inputs is None:
+        return
+    state, forecast, operator_messages = cycle_inputs
 
     # --- Rule-based pre-filter: skip LLM for fully deterministic states ---
     rule_action = rule_based_decision(state, forecast, operator_messages)
@@ -244,41 +293,7 @@ def run_cycle() -> None:
         ),
     }]
     executor = ToolExecutor(client, state, forecast, config.DRY_RUN, model, operator_messages)
-    saw_log = False
-    cumulative_usage: dict[str, Any] = {}
-
-    for _round in range(MAX_TOOL_ROUNDS):
-        response = anthropic.messages.create(
-            model=model,
-            max_tokens=config.MAX_TOKENS,
-            system=[{
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral", "ttl": SYSTEM_PROMPT_CACHE_TTL},
-            }],
-            tools=TOOLS,
-            messages=messages,
-        )
-        usage = log_api_usage(response)
-        accumulate_usage(cumulative_usage, usage)
-        tool_results: list[dict[str, Any]] = []
-        for block in getattr(response, "content", []):
-            if getattr(block, "type", None) != "tool_use":
-                continue
-            result = executor.execute(block.name, dict(block.input))
-            LOGGER.info("tool %s result=%s", block.name, result)
-            saw_log = saw_log or block.name == "log_decision"
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": json.dumps(result, ensure_ascii=False, default=str),
-            })
-        if not tool_results:
-            break
-        messages.append({"role": "assistant", "content": serialize_content_blocks(list(response.content))})
-        messages.append({"role": "user", "content": tool_results})
-        if saw_log:
-            break
+    saw_log, cumulative_usage = _run_tool_loop(anthropic, model, messages, executor)
 
     LOGGER.info("agent_cycle_token_totals %s", json.dumps(cumulative_usage, sort_keys=True))
 

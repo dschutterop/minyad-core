@@ -327,36 +327,37 @@ class EnphaseBridge:
             except asyncio.TimeoutError:
                 pass
 
+    async def _poll_inverters_once(self) -> None:
+        inverters = await self.envoy.read_inverters()
+        array_totals, total_production_w, latest_report_at = summarize_inverter_production(inverters)
+        for inverter in inverters:
+            serial = str(inverter.get("serialNumber", "")).strip()
+            if not serial:
+                continue
+            watts = int(inverter.get("lastReportWatts", 0) or 0)
+            last_report_at = unix_to_iso(inverter.get("lastReportDate"))
+            self.publish(f"minyad/solar/inverter/{serial}/power_w", watts)
+            self.publish(f"minyad/solar/inverter/{serial}/last_report_at", last_report_at)
+        for array_name, watts in array_totals.items():
+            self.publish(f"minyad/solar/array/{array_name}/power_w", watts)
+        self.last_production_w = total_production_w
+        self.publish(MQTT_TOPIC_PRODUCTION_W, total_production_w)
+        self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, unix_to_iso(latest_report_at))
+        self.publish_bridge_alive()
+        LAST_SUCCESS_TIMESTAMP_SECONDS.set(datetime.now(timezone.utc).timestamp())
+        logger.info(
+            "Inverter poll inverter_count=%s arrays=%s total_production_w=%s",
+            len(inverters),
+            sorted(array_totals),
+            total_production_w,
+        )
+
     async def inverter_loop(self) -> None:
         backoff = 1
         while not self.shutdown_event.is_set():
             interval = self.config.inverter_poll_interval
             try:
-                inverters = await self.envoy.read_inverters()
-                array_totals, total_production_w, latest_report_at = summarize_inverter_production(
-                    inverters
-                )
-                for inverter in inverters:
-                    serial = str(inverter.get("serialNumber", "")).strip()
-                    if not serial:
-                        continue
-                    watts = int(inverter.get("lastReportWatts", 0) or 0)
-                    last_report_at = unix_to_iso(inverter.get("lastReportDate"))
-                    self.publish(f"minyad/solar/inverter/{serial}/power_w", watts)
-                    self.publish(f"minyad/solar/inverter/{serial}/last_report_at", last_report_at)
-                for array_name, watts in array_totals.items():
-                    self.publish(f"minyad/solar/array/{array_name}/power_w", watts)
-                self.last_production_w = total_production_w
-                self.publish(MQTT_TOPIC_PRODUCTION_W, total_production_w)
-                self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, unix_to_iso(latest_report_at))
-                self.publish_bridge_alive()
-                LAST_SUCCESS_TIMESTAMP_SECONDS.set(datetime.now(timezone.utc).timestamp())
-                logger.info(
-                    "Inverter poll inverter_count=%s arrays=%s total_production_w=%s",
-                    len(inverters),
-                    sorted(array_totals),
-                    total_production_w,
-                )
+                await self._poll_inverters_once()
                 backoff = 1
             except EnvoyAuthError as exc:
                 ERRORS_TOTAL.labels(type="auth").inc()

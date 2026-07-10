@@ -164,6 +164,31 @@ def price_points_by_hour(prices: list[dict[str, Any]]) -> dict[datetime, float]:
     return by_hour
 
 
+def _row_import_kwh(row: dict[str, Any]) -> tuple[datetime, float] | None:
+    hour = parse_dt(row.get("ts"))
+    if hour is None:
+        return None
+    hour = hour.replace(minute=0, second=0, microsecond=0)
+    import_w = max(0.0, numeric(row.get("delivered_w")) or numeric(row.get("power_w")) or 0.0)
+    import_kwh = import_w / 1000.0
+    if import_kwh <= 0:
+        return None
+    return hour, import_kwh
+
+
+def _hour_penalty_severity(hour: datetime, price_by_hour: dict[datetime, float], threshold_factor: float) -> float | None:
+    current_price = price_by_hour.get(hour)
+    future_prices = [price for starts_at, price in price_by_hour.items() if hour <= starts_at < hour + timedelta(hours=6)]
+    if current_price is None or not future_prices:
+        return None
+    cheapest_future = min(future_prices)
+    if current_price < cheapest_future * threshold_factor:
+        return 0.0
+    if current_price <= 0:
+        return 1.0
+    return clamp01((current_price - (cheapest_future * threshold_factor)) / current_price)
+
+
 def compute_import_price_penalty(import_rows: list[dict[str, Any]], prices: list[dict[str, Any]], *, threshold_pct: float = DEFAULT_IMPORT_PRICE_PENALTY_PCT) -> float | None:
     price_by_hour = price_points_by_hour(prices)
     if not price_by_hour:
@@ -172,27 +197,15 @@ def compute_import_price_penalty(import_rows: list[dict[str, Any]], prices: list
     penalty_import_kwh = 0.0
     threshold_factor = 1.0 + (threshold_pct / 100.0)
     for row in import_rows:
-        hour = parse_dt(row.get("ts"))
-        if hour is None:
+        parsed = _row_import_kwh(row)
+        if parsed is None:
             continue
-        hour = hour.replace(minute=0, second=0, microsecond=0)
-        import_w = max(0.0, numeric(row.get("delivered_w")) or numeric(row.get("power_w")) or 0.0)
-        import_kwh = import_w / 1000.0
-        if import_kwh <= 0:
-            continue
-        current_price = price_by_hour.get(hour)
-        future_prices = [
-            price
-            for starts_at, price in price_by_hour.items()
-            if hour <= starts_at < hour + timedelta(hours=6)
-        ]
-        if current_price is None or not future_prices:
+        hour, import_kwh = parsed
+        severity = _hour_penalty_severity(hour, price_by_hour, threshold_factor)
+        if severity is None:
             continue
         total_import_kwh += import_kwh
-        cheapest_future = min(future_prices)
-        if current_price >= cheapest_future * threshold_factor:
-            severity = 1.0 if current_price <= 0 else clamp01((current_price - (cheapest_future * threshold_factor)) / current_price)
-            penalty_import_kwh += import_kwh * severity
+        penalty_import_kwh += import_kwh * severity
     if total_import_kwh <= 0:
         return 0.0
     return clamp01(penalty_import_kwh / total_import_kwh)

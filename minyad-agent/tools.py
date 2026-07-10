@@ -127,40 +127,52 @@ class ToolExecutor:
 
     def execute(self, name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
         if name == "set_battery_setpoint":
-            requested = int(tool_input["setpoint_w"])
-            clipped, warnings = clip_setpoint(requested, self.state)
-            duration = int(tool_input.get("duration_minutes") or 15)
-            result = {"requested_setpoint_w": requested, "setpoint_w": clipped, "duration_minutes": duration, "dry_run": self.dry_run, "warnings": warnings}
-            if not self.dry_run:
-                result["api_result"] = self.client.set_battery(clipped, duration)
-            self.last_action = {"action_taken": "charge" if clipped > 0 else "discharge" if clipped < 0 else "hold", "setpoint_w": clipped, "reasoning": tool_input["reasoning"]}
-            return result
+            return self._set_battery_setpoint(tool_input)
         if name == "hold_position":
-            self.last_action = {"action_taken": "hold", "setpoint_w": None, "reasoning": tool_input["reasoning"]}
-            return {"status": "held", "dry_run": self.dry_run}
+            return self._hold_position(tool_input)
         if name == "get_extended_forecast":
             hours = max(1, min(48, int(tool_input["hours_ahead"])))
             return self.client.get_forecast(hours)
         if name == "get_operational_logs":
-            hours = max(1, min(168, int(tool_input.get("hours_lookback") or 24)))
-            limit = max(1, min(100, int(tool_input.get("limit") or 50)))
-            return self.client.get_operational_logs(
-                hours_lookback=hours,
-                limit=limit,
-                since=tool_input.get("since_iso"),
-                until=tool_input.get("until_iso"),
-            )
+            return self._get_operational_logs(tool_input)
         if name == "log_decision":
-            actual_action = self.last_action or {}
-            payload = {
-                **tool_input,
-                **{key: value for key, value in actual_action.items() if key in {"action_taken", "setpoint_w"}},
-                "input_snapshot": {"state": self.state, "forecast": self.forecast, "operator_messages": self.operator_messages},
-                "dry_run": self.dry_run,
-                "model": self.model,
-            }
-            return self.client.log_decision(payload)
+            return self._log_decision(tool_input)
         if name == "send_message":
             payload = {**tool_input, "sender": "agent"}
             return self.client.send_message(payload)
         raise ValueError(f"Unknown tool: {name}")
+
+    def _set_battery_setpoint(self, tool_input: dict[str, Any]) -> dict[str, Any]:
+        requested = int(tool_input["setpoint_w"])
+        clipped, warnings = clip_setpoint(requested, self.state)
+        duration = int(tool_input.get("duration_minutes") or 15)
+        result = {"requested_setpoint_w": requested, "setpoint_w": clipped, "duration_minutes": duration, "dry_run": self.dry_run, "warnings": warnings}
+        if not self.dry_run:
+            result["api_result"] = self.client.set_battery(clipped, duration)
+        self.last_action = {"action_taken": "charge" if clipped > 0 else "discharge" if clipped < 0 else "hold", "setpoint_w": clipped, "reasoning": tool_input["reasoning"]}
+        return result
+
+    def _hold_position(self, tool_input: dict[str, Any]) -> dict[str, Any]:
+        self.last_action = {"action_taken": "hold", "setpoint_w": None, "reasoning": tool_input["reasoning"]}
+        return {"status": "held", "dry_run": self.dry_run}
+
+    def _get_operational_logs(self, tool_input: dict[str, Any]) -> dict[str, Any]:
+        hours = max(1, min(168, int(tool_input.get("hours_lookback") or 24)))
+        limit = max(1, min(100, int(tool_input.get("limit") or 50)))
+        return self.client.get_operational_logs(
+            hours_lookback=hours,
+            limit=limit,
+            since=tool_input.get("since_iso"),
+            until=tool_input.get("until_iso"),
+        )
+
+    def _log_decision(self, tool_input: dict[str, Any]) -> dict[str, Any]:
+        actual_action = self.last_action or {}
+        payload = {
+            **tool_input,
+            **{key: value for key, value in actual_action.items() if key in {"action_taken", "setpoint_w"}},
+            "input_snapshot": {"state": self.state, "forecast": self.forecast, "operator_messages": self.operator_messages},
+            "dry_run": self.dry_run,
+            "model": self.model,
+        }
+        return self.client.log_decision(payload)

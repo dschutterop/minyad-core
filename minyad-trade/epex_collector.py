@@ -139,6 +139,30 @@ def _format_entsoe_period(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y%m%d%H00")
 
 
+def _points_for_period(period: ET.Element, ns: dict[str, str]) -> list[dict[str, Any]]:
+    start_element = period.find("./ns:timeInterval/ns:start", ns)
+    if start_element is None or not start_element.text:
+        return []
+    interval_start = datetime.fromisoformat(start_element.text.replace("Z", "+00:00"))
+
+    points: list[dict[str, Any]] = []
+    for point in period.findall("./ns:Point", ns):
+        position_element = point.find("ns:position", ns)
+        price_element = point.find("ns:price.amount", ns)
+        if position_element is None or price_element is None:
+            continue
+        timestamp = interval_start + timedelta(hours=int(position_element.text or "0") - 1)
+        local_ts = timestamp.astimezone(AMSTERDAM_TZ)
+        eur_mwh = float(price_element.text or "0")
+        points.append({
+            "date": local_ts.strftime("%Y-%m-%d"),
+            "hour": local_ts.strftime("%H"),
+            "starts_at": local_ts.isoformat(),
+            "price_eur_kwh": eur_mwh / ENTSOE.price_unit_divisor,
+        })
+    return points
+
+
 def parse_entsoe_publication_document(xml_text: str) -> list[dict[str, Any]]:
     root = ET.fromstring(xml_text)
     ns = {"ns": root.tag.removesuffix("Publication_MarketDocument").rstrip("}").lstrip("{")}
@@ -146,25 +170,7 @@ def parse_entsoe_publication_document(xml_text: str) -> list[dict[str, Any]]:
 
     for series in root.findall(".//ns:TimeSeries", ns):
         for period in series.findall(".//ns:Period", ns):
-            start_element = period.find("./ns:timeInterval/ns:start", ns)
-            if start_element is None or not start_element.text:
-                continue
-            interval_start = datetime.fromisoformat(start_element.text.replace("Z", "+00:00"))
-
-            for point in period.findall("./ns:Point", ns):
-                position_element = point.find("ns:position", ns)
-                price_element = point.find("ns:price.amount", ns)
-                if position_element is None or price_element is None:
-                    continue
-                timestamp = interval_start + timedelta(hours=int(position_element.text or "0") - 1)
-                local_ts = timestamp.astimezone(AMSTERDAM_TZ)
-                eur_mwh = float(price_element.text or "0")
-                prices.append({
-                    "date": local_ts.strftime("%Y-%m-%d"),
-                    "hour": local_ts.strftime("%H"),
-                    "starts_at": local_ts.isoformat(),
-                    "price_eur_kwh": eur_mwh / ENTSOE.price_unit_divisor,
-                })
+            prices.extend(_points_for_period(period, ns))
 
     return prices
 
