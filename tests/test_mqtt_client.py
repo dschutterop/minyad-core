@@ -88,3 +88,66 @@ def test_client_configures_mqtt_credentials():
 
     assert client.client._username == b"minyad"
     assert client.client._password == b"secret"
+
+
+def test_connection_callbacks_update_state_and_resubscribe():
+    client = MinyadMqttClient("minyad-control", MqttConfig(host="broker", port=1883, keepalive=30))
+    subscribed = []
+    client.subscribe("minyad/battery/+", lambda topic, payload: None)
+    client.client.subscribe = lambda topic: subscribed.append(topic)
+
+    client._on_connect(client.client, None, None, "Success", None)
+
+    assert client.is_connected
+    assert client.connection_info()["connect_count"] == 1
+    assert client.connection_info()["last_connect_at"] is not None
+    assert subscribed == ["minyad/battery/+"]
+
+    client._on_disconnect(client.client, None, None, "Normal", None)
+
+    assert not client.is_connected
+    assert client.connection_info()["disconnect_count"] == 1
+    assert client.connection_info()["last_disconnect_at"] is not None
+
+
+def test_on_message_routes_matching_subscriptions_only():
+    client = MinyadMqttClient("minyad-control", MqttConfig(host="broker", port=1883, keepalive=30))
+    seen = []
+    client.subscribe("minyad/battery/+", lambda topic, payload: seen.append(("battery", topic, payload)))
+    client.subscribe("minyad/grid/net_power_w", lambda topic, payload: seen.append(("grid", topic, payload)))
+
+    message = type("Message", (), {"topic": "minyad/battery/soc", "payload": b"61", "qos": 0, "retain": False})()
+    client._on_message(client.client, None, message)
+
+    assert seen == [("battery", "minyad/battery/soc", b"61")]
+
+
+def test_subscribe_registers_handler_and_forwards_to_client():
+    client = MinyadMqttClient("minyad-control", MqttConfig(host="broker", port=1883, keepalive=30))
+    calls = []
+    client.client.subscribe = lambda topic: calls.append(topic) or (0, 99)
+
+    def handler(topic, payload):
+        return None
+
+    client.subscribe("minyad/grid/net_power_w", handler)
+
+    assert client._subscriptions["minyad/grid/net_power_w"] is handler
+    assert calls == ["minyad/grid/net_power_w"]
+
+
+def test_publish_measurement_builds_minyad_topic():
+    client = MinyadMqttClient("minyad-control", MqttConfig(host="broker", port=1883, keepalive=30))
+    calls = []
+
+    class Result:
+        mid = 8
+        rc = 0
+
+    client.client.publish = lambda topic, *, payload, qos, retain: calls.append(
+        {"topic": topic, "payload": payload, "qos": qos, "retain": retain}
+    ) or Result()
+
+    client.publish_measurement("battery", "soc", 61.5)
+
+    assert calls == [{"topic": "minyad/battery/soc", "payload": "61.5", "qos": 0, "retain": False}]
