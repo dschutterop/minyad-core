@@ -191,6 +191,7 @@ def test_handle_message_updates_state_for_supported_topics():
     calls = []
 
     async def tick():
+        await asyncio.sleep(0)
         calls.append("tick")
 
     svc.tick = tick
@@ -215,15 +216,18 @@ def test_handle_message_dispatches_reload_override_prices_and_ignores_bad_json()
     seen = []
 
     async def reload_settings():
+        await asyncio.sleep(0)
         seen.append(("reload", None))
 
     async def apply_payload(payload):
+        await asyncio.sleep(0)
         seen.append(("override", payload))
 
     def on_prices(day, points):
         seen.append(("prices", day, points))
 
     async def recalculate_plan():
+        await asyncio.sleep(0)
         seen.append(("recalculate", None))
 
     svc.settings.reload = reload_settings
@@ -316,6 +320,7 @@ def test_recalculate_plan_publishes_surplus_unless_fallback():
     plans = [make_plan(status="Optimal"), make_plan(status="FALLBACK")]
 
     async def recalculate(now, soc):
+        await asyncio.sleep(0)
         published.append(("recalculate", soc))
         return plans.pop(0)
 
@@ -349,6 +354,7 @@ def test_tick_applies_override_guard_logs_shadow_and_updates_state():
     svc.executor.tick = lambda state, plan_arg, tracker: decision
 
     async def apply_with_reason(setpoint, state, floor, ceiling):
+        await asyncio.sleep(0)
         return setpoint + 50, "override: raise"
 
     svc.overrides.apply_with_reason = apply_with_reason
@@ -359,6 +365,7 @@ def test_tick_applies_override_guard_logs_shadow_and_updates_state():
     svc.publish_floor_telemetry = lambda tracker: events.append(("floor", tracker.floor_dyn_pct))
 
     async def log_shadow(decision_arg):
+        await asyncio.sleep(0)
         events.append(("shadow", decision_arg.setpoint_w))
 
     svc.log_shadow = log_shadow

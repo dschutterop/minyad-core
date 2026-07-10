@@ -223,15 +223,18 @@ def test_handle_message_updates_state_and_dispatches_callbacks():
     seen = []
 
     async def reload():
+        await asyncio.sleep(0)
         seen.append(("reload", None))
 
     async def apply_payload(payload):
+        await asyncio.sleep(0)
         seen.append(("override", payload))
 
     def set_prices(payload):
         seen.append(("prices", payload))
 
     async def tick():
+        await asyncio.sleep(0)
         seen.append(("tick", None))
 
     svc.reload = reload
@@ -292,6 +295,7 @@ def test_tick_applies_adjustments_logs_and_updates_state():
     svc.update_floor_schedule = lambda now: events.append(("floor_update", now))
 
     async def apply_with_reason(setpoint, state, plan_arg):
+        await asyncio.sleep(0)
         return setpoint + 50, "override: raise"
 
     svc.overrides.apply_with_reason = apply_with_reason
@@ -302,6 +306,7 @@ def test_tick_applies_adjustments_logs_and_updates_state():
     svc.publish_decision = lambda decision_arg: events.append(("decision", decision_arg.reason, decision_arg.setpoint_w))
 
     async def log_setpoint(decision_arg):
+        await asyncio.sleep(0)
         events.append(("log", decision_arg.setpoint_w))
 
     svc.log_setpoint = log_setpoint
@@ -321,6 +326,7 @@ def test_recalculate_refreshes_profile_resets_floor_and_publishes(monkeypatch):
     svc.floor_schedule = object()
 
     async def recalculate():
+        await asyncio.sleep(0)
         return plan
 
     svc.planner.recalculate = recalculate
@@ -332,6 +338,7 @@ def test_recalculate_refreshes_profile_resets_floor_and_publishes(monkeypatch):
     svc.executor = Executor()
 
     async def refresh():
+        await asyncio.sleep(0)
         events.append(("refresh", None))
 
     svc.refresh_consumption_profile = refresh
