@@ -62,10 +62,7 @@ def build_accuracy_pairs(
     for slot_start_iso, measured in measured_by_slot.items():
         slot_start = datetime.fromisoformat(slot_start_iso)
         for horizon_key, offset in horizons.items():
-            vintage = latest_vintage_at_or_before(vintages, slot_start - offset)
-            if vintage is None:
-                continue
-            slot_forecast = vintage["slots_by_start"].get(slot_start_iso)
+            slot_forecast = _forecast_for_slot(vintages, slot_start_iso, slot_start - offset)
             if slot_forecast is None:
                 continue
             for curve, forecast_key in curves.items():
@@ -73,6 +70,14 @@ def build_accuracy_pairs(
                     continue
                 pairs[(curve, horizon_key)].append((float(slot_forecast[forecast_key]), float(measured[curve])))
     return pairs
+
+
+def _forecast_for_slot(vintages: list[dict[str, Any]], slot_start_iso: str, cutoff: datetime) -> dict[str, Any] | None:
+    """Return the forecast a vintage made for ``slot_start_iso``, given the vintage cutoff, or None."""
+    vintage = latest_vintage_at_or_before(vintages, cutoff)
+    if vintage is None:
+        return None
+    return vintage["slots_by_start"].get(slot_start_iso)
 
 
 async def run_daily_accuracy_job(db_session_factory: Any, for_date: date, *, tz: ZoneInfo = AMSTERDAM) -> None:

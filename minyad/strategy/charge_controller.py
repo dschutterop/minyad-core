@@ -390,22 +390,36 @@ class ChargeController:
             return default
 
     def _load_active_mode_sync(self) -> ModeConfig | None:
-        if not isinstance(self.db_session_factory, dict):
-            if self.db_session_factory is None:
-                return None
-            try:
-                import asyncio
-                async def read_active() -> ModeConfig | None:
-                    async with self.db_session_factory() as session:
-                        result = await session.execute(text("select key, value from settings where key like 'strategy.active.%'"))
-                        values = {row.key.removeprefix("strategy.active."): row.value for row in result}
-                    if not values:
-                        return None
-                    valid_until = datetime.fromisoformat(values["valid_until"])
-                    return ModeConfig(values["mode"], int(values["soc_floor"]), int(values["soc_ceiling"]), int(values["charge_rate_w"]) if values.get("charge_rate_w") else None, values.get("reason", "configured active mode"), valid_until, float(values["forecast_ghi"]) if values.get("forecast_ghi") else None)
-                return asyncio.run(read_active())
-            except RuntimeError:
-                return None
+        if isinstance(self.db_session_factory, dict):
+            return self._load_active_mode_from_dict()
+        if self.db_session_factory is None:
+            return None
+        try:
+            import asyncio
+            async def read_active() -> ModeConfig | None:
+                async with self.db_session_factory() as session:
+                    result = await session.execute(text("select key, value from settings where key like 'strategy.active.%'"))
+                    values = {row.key.removeprefix("strategy.active."): row.value for row in result}
+                if not values:
+                    return None
+                return self._mode_config_from_values(values)
+            return asyncio.run(read_active())
+        except RuntimeError:
+            return None
+
+    @staticmethod
+    def _mode_config_from_values(values: dict[str, Any]) -> ModeConfig:
+        return ModeConfig(
+            values["mode"],
+            int(values["soc_floor"]),
+            int(values["soc_ceiling"]),
+            int(values["charge_rate_w"]) if values.get("charge_rate_w") else None,
+            values.get("reason", "configured active mode"),
+            datetime.fromisoformat(values["valid_until"]),
+            float(values["forecast_ghi"]) if values.get("forecast_ghi") else None,
+        )
+
+    def _load_active_mode_from_dict(self) -> ModeConfig | None:
         row = self.db_session_factory.get("strategy.active")
         if not row:
             return None

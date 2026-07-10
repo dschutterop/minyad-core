@@ -107,18 +107,24 @@ class OverrideManager:
         if mode in {"force_idle", "pause"}:
             return 0, f"override: {mode}"
         if mode in {"force_charge", "grid_charge_now"}:
-            if not self.current.override_soc_limits and state.battery_soc is not None and state.battery_soc >= plan.effective_soc_ceiling:
-                return 0, f"override: {mode} blocked at SoC ceiling ({state.battery_soc}% >= {plan.effective_soc_ceiling}%)"
-            adjusted = min(abs(self.current.watts or self.settings.effective_max_charge_w), self.settings.effective_max_charge_w)
-            suffix = " (SoC limit override active)" if self.current.override_soc_limits else ""
-            return adjusted, f"override: {mode}{suffix}"
+            return self._force_charge(mode, state, plan.effective_soc_ceiling)
         if mode == "force_discharge":
-            if not self.current.override_soc_limits and state.battery_soc is not None and state.battery_soc <= plan.effective_soc_floor:
-                return 0, f"override: force_discharge blocked at SoC floor ({state.battery_soc}% <= {plan.effective_soc_floor}%)"
-            adjusted = -min(abs(self.current.watts or self.settings.max_discharge_w), self.settings.max_discharge_w)
-            suffix = " (SoC limit override active)" if self.current.override_soc_limits else ""
-            return adjusted, f"override: force_discharge{suffix}"
+            return self._force_discharge(state, plan.effective_soc_floor)
         return candidate_w, f"override: unknown mode {mode}"
+
+    def _force_charge(self, mode: str, state: ExecutorState, soc_ceiling: float) -> tuple[int, str]:
+        if not self.current.override_soc_limits and state.battery_soc is not None and state.battery_soc >= soc_ceiling:
+            return 0, f"override: {mode} blocked at SoC ceiling ({state.battery_soc}% >= {soc_ceiling}%)"
+        adjusted = min(abs(self.current.watts or self.settings.effective_max_charge_w), self.settings.effective_max_charge_w)
+        suffix = " (SoC limit override active)" if self.current.override_soc_limits else ""
+        return adjusted, f"override: {mode}{suffix}"
+
+    def _force_discharge(self, state: ExecutorState, soc_floor: float) -> tuple[int, str]:
+        if not self.current.override_soc_limits and state.battery_soc is not None and state.battery_soc <= soc_floor:
+            return 0, f"override: force_discharge blocked at SoC floor ({state.battery_soc}% <= {soc_floor}%)"
+        adjusted = -min(abs(self.current.watts or self.settings.max_discharge_w), self.settings.max_discharge_w)
+        suffix = " (SoC limit override active)" if self.current.override_soc_limits else ""
+        return adjusted, f"override: force_discharge{suffix}"
 
     def _cycle_complete(self, mode: str, state: ExecutorState) -> bool:
         commanded_direction = _mode_direction(mode)

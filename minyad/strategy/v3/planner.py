@@ -317,26 +317,20 @@ class RollingPlanner:
         slot_seconds = settings.plan_interval_min * 60
         horizon_start = _slot_floor(now, slot_seconds)
 
-        try:
-            ghi_points = await self._maybe_await(
-                self._ghi_fetcher(lat=settings.latitude, lon=settings.longitude, past_days=1, forecast_days=2)
-            )
-        except Exception:
-            # A missed GHI fetch used to fail the whole plan build, forcing a flat-zero FALLBACK
-            # plan (which now hides the forecast curves entirely rather than rendering a fake flat
-            # line) — degrade to an all-zero PV forecast instead, matching the cloud-cover/temperature
-            # fetches below, so a transient Open-Meteo outage doesn't blank the dashboard.
-            LOGGER.warning("Unable to fetch GHI forecast; PV forecast will be zero", exc_info=True)
-            ghi_points = []
-        try:
-            cloud_cover_points = await self._maybe_await(
-                self._cloud_cover_fetcher(lat=settings.latitude, lon=settings.longitude, past_days=1, forecast_days=2)
-            )
-        except Exception:
-            # The P10-P90 band (spec 4.4) is purely informational for the dashboard — a missed
-            # cloud-cover fetch should leave cloud_cover_pct unset per slot, not fail the plan.
-            LOGGER.warning("Unable to fetch cloud cover forecast; PV uncertainty band will be unavailable", exc_info=True)
-            cloud_cover_points = []
+        # A missed GHI fetch used to fail the whole plan build, forcing a flat-zero FALLBACK
+        # plan (which now hides the forecast curves entirely rather than rendering a fake flat
+        # line) — degrade to an all-zero PV forecast instead, matching the cloud-cover/temperature
+        # fetches below, so a transient Open-Meteo outage doesn't blank the dashboard.
+        ghi_points = await self._safe_fetch(
+            self._ghi_fetcher(lat=settings.latitude, lon=settings.longitude, past_days=1, forecast_days=2),
+            "Unable to fetch GHI forecast; PV forecast will be zero",
+        )
+        # The P10-P90 band (spec 4.4) is purely informational for the dashboard — a missed
+        # cloud-cover fetch should leave cloud_cover_pct unset per slot, not fail the plan.
+        cloud_cover_points = await self._safe_fetch(
+            self._cloud_cover_fetcher(lat=settings.latitude, lon=settings.longitude, past_days=1, forecast_days=2),
+            "Unable to fetch cloud cover forecast; PV uncertainty band will be unavailable",
+        )
         pv_forecast = []
         cloud_cover_pct: list[float | None] = []
         for t in range(horizon_slots):
@@ -350,14 +344,13 @@ class RollingPlanner:
             cloud_cover_pct.append(forecast_client.interpolate_ghi(cloud_cover_points, slot_start) if cloud_cover_points else None)
 
         if self.consumption_profile is not None:
-            try:
-                temp_points = await self._maybe_await(self._temperature_fetcher(past_days=1, forecast_days=2))
-            except Exception:
-                # Temperature correction (spec 4.2.2) is an enhancement, not a dependency —
-                # fall back to the profile's plain per-slot expectation rather than failing the
-                # whole plan build over a missed forecast fetch.
-                LOGGER.warning("Unable to fetch temperature forecast; skipping temperature correction", exc_info=True)
-                temp_points = []
+            # Temperature correction (spec 4.2.2) is an enhancement, not a dependency —
+            # fall back to the profile's plain per-slot expectation rather than failing the
+            # whole plan build over a missed forecast fetch.
+            temp_points = await self._safe_fetch(
+                self._temperature_fetcher(past_days=1, forecast_days=2),
+                "Unable to fetch temperature forecast; skipping temperature correction",
+            )
             load_forecast = []
             for t in range(horizon_slots):
                 slot_start = horizon_start + timedelta(seconds=slot_seconds * t)
@@ -592,6 +585,14 @@ class RollingPlanner:
         if hasattr(value, "__await__"):
             return await value
         return value
+
+    async def _safe_fetch(self, fetch: Any, warning: str) -> list:
+        """Await a forecast fetch, degrading to an empty list (with a warning) on any error."""
+        try:
+            return await self._maybe_await(fetch)
+        except Exception:
+            LOGGER.warning(warning, exc_info=True)
+            return []
 
 
 def _plan_to_json(plan: SlotPlan) -> dict[str, Any]:
