@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -168,6 +169,7 @@ class StrategyPlanner:
         )
 
     async def _load_prices_from_db(self) -> list[dict[str, Any]]:
+        await asyncio.sleep(0)
         return []
 
     def _price_windows(self, prices: list[dict[str, Any]], plan_date: date, *, below: float | None = None, above: float | None = None) -> list[Window]:

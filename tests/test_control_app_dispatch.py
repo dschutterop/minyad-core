@@ -51,14 +51,14 @@ def _stub_store_status(monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_handle_solar_topic_updates_pv_power():
     app = make_available_app()
-    run(app.handle_solar_topic("1234.0"))
+    app.handle_solar_topic("1234.0")
     assert app.latest_pv_power_w == 1234
 
 
 def test_handle_solar_topic_ignores_invalid_payload():
     app = make_available_app()
     app.latest_pv_power_w = 42
-    run(app.handle_solar_topic("not-a-number"))
+    app.handle_solar_topic("not-a-number")
     assert app.latest_pv_power_w == 42
 
 

@@ -288,7 +288,7 @@ class EnphaseBridge:
         self.publish(MQTT_TOPIC_BRIDGE_STATUS, BRIDGE_STATUS_ERROR)
         self.publish(MQTT_TOPIC_BRIDGE_LAST_SEEN, utc_now_iso())
 
-    async def handle_auth_error(self, exc: EnvoyAuthError) -> None:
+    def handle_auth_error(self, exc: EnvoyAuthError) -> None:
         logger.critical("%s; refresh the host-services .token file and restart", exc)
         self.publish_bridge_error()
 
@@ -310,7 +310,7 @@ class EnphaseBridge:
                 backoff = 1
             except EnvoyAuthError as exc:
                 ERRORS_TOTAL.labels(type="auth").inc()
-                await self.handle_auth_error(exc)
+                self.handle_auth_error(exc)
             except EnvoyRequestError as exc:
                 ERRORS_TOTAL.labels(type="request").inc()
                 interval = min(backoff, 60)
@@ -360,7 +360,7 @@ class EnphaseBridge:
                 backoff = 1
             except EnvoyAuthError as exc:
                 ERRORS_TOTAL.labels(type="auth").inc()
-                await self.handle_auth_error(exc)
+                self.handle_auth_error(exc)
             except EnvoyRequestError as exc:
                 ERRORS_TOTAL.labels(type="request").inc()
                 interval = min(backoff, 60)
