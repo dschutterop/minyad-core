@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 import paho.mqtt.client as paho_mqtt
 from prometheus_client import CollectorRegistry, Counter, Gauge
@@ -2018,8 +2019,8 @@ def _forecast_stale_status(plan_row: dict[str, Any] | None, latest_plan_status: 
     return None
 
 
-@app.post("/api/control/battery", dependencies=MUTATION_AUTH)
-async def api_control_battery(request: AgentBatteryControlRequest, session: SessionDep) -> dict[str, Any]:
+@app.post("/api/control/battery", dependencies=MUTATION_AUTH, responses={422: {"description": "Unprocessable entity"}})
+async def api_control_battery(request: AgentBatteryControlRequest, session: SessionDep) -> Any:
     if request.setpoint_w > 0:
         override = BatteryOverrideRequest(mode="force_charge", watts=request.setpoint_w, duration_seconds=request.duration_minutes * 60)
         action = "charge"
@@ -2033,6 +2034,8 @@ async def api_control_battery(request: AgentBatteryControlRequest, session: Sess
         override = BatteryOverrideRequest(mode="none", watts=None, duration_seconds=None)
         action = "hold"
     result = await set_battery_override(override, session)
+    if isinstance(result, JSONResponse):
+        return result
     return {"status": "ok", "action": action, "setpoint_w": request.setpoint_w, "duration_minutes": request.duration_minutes, "override": result}
 
 
@@ -2445,8 +2448,26 @@ async def delete_agent_message(message_id: int, session: SessionDep) -> dict[str
     return {"status": "ok", "id": row["id"]}
 
 
+def _validate_battery_override_limits(
+    request: BatteryOverrideRequest,
+    mode: str,
+    soc_value: float | None,
+    soc_floor: int,
+    soc_ceiling: int,
+    max_allowed_w: int,
+) -> str | None:
+    if not request.override_soc_limits and mode == "force_discharge" and soc_value is not None and soc_value <= soc_floor:
+        return f"discharge blocked because SoC {soc_value:g}% is at or below configured floor {soc_floor}%"
+    if not request.override_soc_limits and mode == "force_charge" and soc_value is not None and soc_value >= soc_ceiling:
+        return f"charge blocked because SoC {soc_value:g}% is at or above configured ceiling {soc_ceiling}%"
+    if request.watts is not None and request.watts > max_allowed_w:
+        limit_name = "MAX_DISCHARGE_W" if mode == "force_discharge" else "MAX_CHARGE_W"
+        return f"watts must not exceed {limit_name} ({max_allowed_w})"
+    return None
+
+
 @app.post("/battery/override", dependencies=MUTATION_AUTH, responses={422: {"description": "Unprocessable entity"}})
-async def set_battery_override(request: BatteryOverrideRequest, session: SessionDep) -> dict[str, Any]:
+async def set_battery_override(request: BatteryOverrideRequest, session: SessionDep) -> Any:
     mode = _normalize_battery_override_mode(request.mode)
     settings = await battery_settings(session)
     soc_floor = int(settings.get("soc_floor", 20))
@@ -2460,18 +2481,14 @@ async def set_battery_override(request: BatteryOverrideRequest, session: Session
         soc_value = float(soc) if soc not in (None, "") else None
     except (TypeError, ValueError):
         soc_value = None
-    if not request.override_soc_limits and mode == "force_discharge" and soc_value is not None and soc_value <= soc_floor:
-        raise HTTPException(status_code=422, detail=f"discharge blocked because SoC {soc_value:g}% is at or below configured floor {soc_floor}%")
-    if not request.override_soc_limits and mode == "force_charge" and soc_value is not None and soc_value >= soc_ceiling:
-        raise HTTPException(status_code=422, detail=f"charge blocked because SoC {soc_value:g}% is at or above configured ceiling {soc_ceiling}%")
     configured_max_w = int(settings.get("max_charge_w", 0))
     hardware_max_w = int(settings.get("max_charge_a", 30)) * int(settings.get("nominal_v", 48))
     max_charge_w = min(configured_max_w, hardware_max_w)
     max_discharge_w = int(settings.get("max_discharge_w", 5000))
     max_allowed_w = max_discharge_w if mode == "force_discharge" else max_charge_w
-    if request.watts is not None and request.watts > max_allowed_w:
-        limit_name = "MAX_DISCHARGE_W" if mode == "force_discharge" else "MAX_CHARGE_W"
-        raise HTTPException(status_code=422, detail=f"watts must not exceed {limit_name} ({max_allowed_w})")
+    validation_error = _validate_battery_override_limits(request, mode, soc_value, soc_floor, soc_ceiling, max_allowed_w)
+    if validation_error is not None:
+        return JSONResponse(status_code=422, content={"detail": validation_error})
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=request.duration_seconds) if request.duration_seconds else None
     await session.execute(
         text("""
