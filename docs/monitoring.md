@@ -6,10 +6,10 @@ Prometheus instrumentation is implemented service-by-service. Production deploym
 
 | Port | Service | Status | Notes |
 |---:|---|---|---|
-| 9101 | minyad-api | implemented | FastAPI `/metrics`; host port maps to the API container port. |
+| 9101 | minyad-api | implemented | HTTPS FastAPI `/metrics`; host port maps to the API container port. |
 | 9102 | minyad-ingestion | implemented | `prometheus_client.start_http_server`; published with `MINYAD_METRICS_BIND_IP`. |
 | 9103 | minyad-control | implemented | Plain Python metrics endpoint; published with `MINYAD_METRICS_BIND_IP`. |
-| 9104 | minyad-strategy-v3 | implemented | Strategy v3 metrics endpoint; published with `MINYAD_METRICS_BIND_IP`. |
+| 9104 | minyad-strategy-v3 | implemented | HTTPS strategy v3 metrics endpoint; published with `MINYAD_METRICS_BIND_IP`. |
 | 9105 | minyad-trade | implemented | Plain Python metrics endpoint; published with `MINYAD_METRICS_BIND_IP`. |
 | 9106 | minyad-mqtt-observer | implemented | Sidecar observer for the Mosquitto container; published with `MINYAD_METRICS_BIND_IP`. |
 | 9107 | goodwe_bridge | implemented | Host systemd service metrics endpoint; bind with `METRICS_ADDR`. |
@@ -75,6 +75,10 @@ Strategy v3 defaults to `strategy3.plan_interval_min = 15`, so the strategy stal
 ## Scrape Config
 
 See `prometheus/minyad-scrape.yml`.
+
+The API and strategy v3 targets share the internal self-signed certificate from the
+`minyad-internal-tls` Compose volume. Copy `internal.crt` to the Prometheus host as
+`/etc/prometheus/certs/minyad-internal.crt` before enabling those HTTPS scrape jobs.
 
 For the monitoring-host copy/include steps, see `docs/prometheus-handoff.md`.
 

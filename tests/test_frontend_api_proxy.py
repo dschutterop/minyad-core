@@ -1,6 +1,6 @@
 import os
 
-os.environ.setdefault("API_BASE_URL", "http://minyad-api:8000")
+os.environ.setdefault("API_BASE_URL", "https://minyad-api:8000")
 
 import httpx
 from fastapi.testclient import TestClient

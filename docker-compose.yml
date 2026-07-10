@@ -34,6 +34,55 @@ services:
     restart: "no"
     networks: [minyad-internal]
 
+  minyad-tls-init:
+    image: python:3.12-slim
+    container_name: minyad-tls-init
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        mkdir -p /run/minyad/tls
+        if [ ! -s /run/minyad/tls/internal.crt ] || [ ! -s /run/minyad/tls/internal.key ]; then
+          cat > /tmp/minyad-internal-openssl.cnf <<'EOF'
+        [req]
+        distinguished_name = req_distinguished_name
+        x509_extensions = v3_req
+        prompt = no
+
+        [req_distinguished_name]
+        CN = minyad-internal
+
+        [v3_req]
+        keyUsage = critical, digitalSignature, keyEncipherment
+        extendedKeyUsage = serverAuth
+        subjectAltName = @alt_names
+
+        [alt_names]
+        DNS.1 = minyad-api
+        DNS.2 = minyad-strategy
+        DNS.3 = minyad-strategy-v3
+        DNS.4 = minyad
+        DNS.5 = dryad
+        DNS.6 = vesper
+        DNS.7 = localhost
+        DNS.8 = pknpapp001
+        DNS.9 = minyad-host.example
+        IP.1 = 127.0.0.1
+        IP.2 = 192.168.110.2
+        EOF
+          openssl req -x509 -newkey rsa:4096 -sha256 -days 36500 -nodes \
+            -keyout /run/minyad/tls/internal.key \
+            -out /run/minyad/tls/internal.crt \
+            -config /tmp/minyad-internal-openssl.cnf
+        fi
+        chown 1000:1000 /run/minyad/tls/internal.crt /run/minyad/tls/internal.key
+        chmod 0644 /run/minyad/tls/internal.crt
+        chmod 0640 /run/minyad/tls/internal.key
+    volumes:
+      - minyad-internal-tls:/run/minyad/tls
+    networks: [minyad-internal]
+
   minyad-mqtt:
     image: eclipse-mosquitto:2
     container_name: minyad-mqtt
@@ -139,18 +188,25 @@ services:
       TZ: Europe/Amsterdam
       STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-false}
       STRATEGY_VERSION: v2
+      MINYAD_TLS_CERT_FILE: /run/minyad/tls/internal.crt
+      MINYAD_TLS_KEY_FILE: /run/minyad/tls/internal.key
     depends_on:
       minyad-migrate:
+        condition: service_completed_successfully
+      minyad-tls-init:
         condition: service_completed_successfully
       minyad-mqtt:
         condition: service_healthy
     networks: [minyad-internal, minyad-public]
+    volumes:
+      - minyad-internal-tls:/run/minyad/tls:ro
     healthcheck:
       test:
         - CMD-SHELL
         - >-
-          python -c "import urllib.request;
-          urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"
+          python -c "import ssl, urllib.request;
+          ctx = ssl.create_default_context(cafile='/run/minyad/tls/internal.crt');
+          urllib.request.urlopen('https://127.0.0.1:8080/health', timeout=2, context=ctx).read()"
       interval: 5s
       timeout: 5s
       retries: 12
@@ -174,20 +230,27 @@ services:
       MQTT_CLIENT_ID: minyad-strategy-v3
       METRICS_PORT: 9104
       METRICS_ADDR: 0.0.0.0
+      MINYAD_TLS_CERT_FILE: /run/minyad/tls/internal.crt
+      MINYAD_TLS_KEY_FILE: /run/minyad/tls/internal.key
     ports:
       - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9104:9104"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
+      minyad-tls-init:
+        condition: service_completed_successfully
       minyad-mqtt:
         condition: service_healthy
     networks: [minyad-internal, minyad-public]
+    volumes:
+      - minyad-internal-tls:/run/minyad/tls:ro
     healthcheck:
       test:
         - CMD-SHELL
         - >-
-          python -c "import urllib.request;
-          urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"
+          python -c "import ssl, urllib.request;
+          ctx = ssl.create_default_context(cafile='/run/minyad/tls/internal.crt');
+          urllib.request.urlopen('https://127.0.0.1:8080/health', timeout=2, context=ctx).read()"
       interval: 5s
       timeout: 5s
       retries: 12
@@ -220,8 +283,23 @@ services:
     environment:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
+      MINYAD_TLS_CERT_FILE: /run/minyad/tls/internal.crt
+      MINYAD_TLS_KEY_FILE: /run/minyad/tls/internal.key
+    command:
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --ssl-certfile
+      - /run/minyad/tls/internal.crt
+      - --ssl-keyfile
+      - /run/minyad/tls/internal.key
     depends_on:
       minyad-migrate:
+        condition: service_completed_successfully
+      minyad-tls-init:
         condition: service_completed_successfully
       minyad-mqtt:
         condition: service_healthy
@@ -230,12 +308,15 @@ services:
       - target: 8000
         published: "8002"
     networks: [minyad-internal, minyad-public]
+    volumes:
+      - minyad-internal-tls:/run/minyad/tls:ro
     healthcheck:
       test:
         - CMD-SHELL
         - >-
-          python -c "import urllib.request;
-          urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"
+          python -c "import ssl, urllib.request;
+          ctx = ssl.create_default_context(cafile='/run/minyad/tls/internal.crt');
+          urllib.request.urlopen('https://127.0.0.1:8000/health', timeout=2, context=ctx).read()"
       interval: 5s
       timeout: 5s
       retries: 12
@@ -249,7 +330,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      API_BASE_URL: http://minyad-api:8000
+      API_BASE_URL: https://minyad-api:8000
+      MINYAD_INTERNAL_CA_FILE: /run/minyad/tls/internal.crt
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
     depends_on:
@@ -263,6 +345,8 @@ services:
       - target: 8080
         published: "8084"
     networks: [minyad-internal, minyad-public]
+    volumes:
+      - minyad-internal-tls:/run/minyad/tls:ro
 
   minyad-mobile-frontend:
     build:
@@ -272,7 +356,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      API_BASE_URL: http://minyad-api:8000
+      API_BASE_URL: https://minyad-api:8000
+      MINYAD_INTERNAL_CA_FILE: /run/minyad/tls/internal.crt
     depends_on:
       minyad-api:
         condition: service_healthy
@@ -280,6 +365,8 @@ services:
       - target: 8080
         published: "8085"
     networks: [minyad-internal, minyad-public]
+    volumes:
+      - minyad-internal-tls:/run/minyad/tls:ro
 
   minyad-forecast:
     build:
@@ -306,13 +393,16 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      MINYAD_API_URL: http://minyad-api:8000
+      MINYAD_API_URL: https://minyad-api:8000
+      MINYAD_INTERNAL_CA_FILE: /run/minyad/tls/internal.crt
       DRY_RUN: "true"
       CYCLE_MINUTES: 15
     depends_on:
       minyad-api:
         condition: service_healthy
     networks: [minyad-internal, minyad-public]
+    volumes:
+      - minyad-internal-tls:/run/minyad/tls:ro
 
   minyad-trade:
     build:
@@ -388,3 +478,4 @@ networks:
 
 volumes:
   minyad-db-data:
+  minyad-internal-tls:

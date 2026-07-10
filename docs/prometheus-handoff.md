@@ -68,9 +68,10 @@ promtool check rules /etc/prometheus/rules/minyad-alerts.yml /etc/prometheus/rul
 Optional quick scrapes:
 
 ```bash
+curl -fsS --cacert /etc/prometheus/certs/minyad-internal.crt https://192.168.110.2:9101/metrics | grep minyad_api_build_info
 curl -fsS http://192.168.110.2:9102/metrics | grep minyad_ingestion_build_info
 curl -fsS http://192.168.110.2:9103/metrics | grep minyad_control_build_info
-curl -fsS http://192.168.110.2:9104/metrics | grep minyad_strategy_build_info
+curl -fsS --cacert /etc/prometheus/certs/minyad-internal.crt https://192.168.110.2:9104/metrics | grep minyad_strategy_build_info
 curl -fsS http://192.168.110.2:9105/metrics | grep minyad_trade_build_info
 curl -fsS http://192.168.110.2:9106/metrics | grep minyad_mqtt_build_info
 curl -fsS http://192.168.110.2:9107/metrics | grep minyad_bridge_goodwe_build_info
@@ -114,6 +115,7 @@ Then retry a direct scrape from the Prometheus host:
 
 ```bash
 curl -fsS http://192.168.110.2:9102/metrics | grep minyad_ingestion_build_info
+curl -fsS --cacert /etc/prometheus/certs/minyad-internal.crt https://192.168.110.2:9104/metrics | grep minyad_strategy_build_info
 ```
 
 ## First PromQL Checks

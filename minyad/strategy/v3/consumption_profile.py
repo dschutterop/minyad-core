@@ -11,9 +11,11 @@ control. Kairos-planned loads are out of scope here (spec 4.1.2) — v1 only net
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
@@ -46,8 +48,10 @@ async def fetch_flex_load_wh(
     """
     headers = {"X-API-Key": api_key} if api_key else {}
     params = {"start": start.isoformat(), "end": end.isoformat(), "slot_seconds": SLOT_SECONDS}
+    ca_file = os.getenv("VESPER_CA_FILE") or os.getenv("MINYAD_INTERNAL_CA_FILE", "/run/minyad/tls/internal.crt")
+    verify: str | bool = ca_file if Path(ca_file).is_file() else True
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, verify=verify) as client:
             response = await client.get(f"{vesper_api_url}/api/minyad/dispatch-ledger", params=params, headers=headers)
             response.raise_for_status()
             data = response.json()

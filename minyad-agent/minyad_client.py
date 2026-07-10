@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -21,6 +23,7 @@ class MinyadClient:
         retries: int = 3,
         backoff_seconds: float = 2.0,
         sleep: Callable[[float], None] = time.sleep,
+        ca_file: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_secret = api_secret
@@ -28,6 +31,7 @@ class MinyadClient:
         self.retries = retries
         self.backoff_seconds = backoff_seconds
         self.sleep = sleep
+        self.ca_file = ca_file or os.getenv("MINYAD_INTERNAL_CA_FILE", "/run/minyad/tls/internal.crt")
 
     def get_state(self) -> dict[str, Any]:
         return self._get("/api/state")
@@ -78,7 +82,8 @@ class MinyadClient:
         last_error: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
-                with httpx.Client(base_url=self.base_url, timeout=self.timeout) as client:
+                verify: str | bool = self.ca_file if Path(self.ca_file).is_file() else True
+                with httpx.Client(base_url=self.base_url, timeout=self.timeout, verify=verify) as client:
                     headers = dict(kwargs.pop("headers", {}))
                     if self.api_secret:
                         headers["X-API-Key"] = self.api_secret

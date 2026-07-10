@@ -33,9 +33,9 @@ from the actual control implementation (`control/main.py`,
 Dryad can poll the existing Minyad API service without any extra systemd unit:
 
 ```bash
-curl http://pknpapp001:8081/api/v1/dryad
-curl "http://pknpapp001:8081/api/v1/dryad/history?days=30"
-MINYAD_API_URL=http://pknpapp001:8081 ./scripts/fetch_dryad.py --history-days 30
+curl --cacert /run/minyad/tls/internal.crt https://pknpapp001:8081/api/v1/dryad
+curl --cacert /run/minyad/tls/internal.crt "https://pknpapp001:8081/api/v1/dryad/history?days=30"
+MINYAD_API_URL=https://pknpapp001:8081 MINYAD_INTERNAL_CA_FILE=/run/minyad/tls/internal.crt ./scripts/fetch_dryad.py --history-days 30
 ```
 
 `GET /api/v1/dryad` returns one JSON object with:

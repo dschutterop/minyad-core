@@ -12,12 +12,18 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 app = FastAPI(title="Minyad Frontend")
-API_BASE_URL = os.getenv("API_BASE_URL", "http://minyad-api:8000")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://minyad-api:8000")
+MINYAD_INTERNAL_CA_FILE = os.getenv("MINYAD_INTERNAL_CA_FILE", "/run/minyad/tls/internal.crt")
 MINYAD_API_SECRET = os.getenv("MINYAD_API_SECRET", "")
 FRONTEND_BUILD_ID = os.getenv("MINYAD_FRONTEND_VERSION") or sha256(Path(__file__).read_bytes()).hexdigest()[:16]
 FRONTEND_VERSION = f"{FRONTEND_BUILD_ID}:{int(time.time())}"
 
 MENU = ["Dashboard", "Agent", "Health", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
+
+
+def _api_verify() -> str | bool:
+    ca_file = Path(MINYAD_INTERNAL_CA_FILE)
+    return str(ca_file) if ca_file.is_file() else True
 
 BRAND_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
@@ -1911,7 +1917,7 @@ async def api_proxy(path: str, request: Request) -> Response:
     if MINYAD_API_SECRET:
         headers["X-API-Key"] = MINYAD_API_SECRET
     try:
-        async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=10.0) as client:
+        async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=10.0, verify=_api_verify()) as client:
             body = await request.body()
             response = await client.request(
                 request.method,

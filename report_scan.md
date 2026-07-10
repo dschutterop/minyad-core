@@ -112,7 +112,7 @@ if parsed.scheme not in {"http", "https"} or not parsed.netloc:
     raise ValueError("entsoe_api_url must be an absolute HTTP(S) URL")
 ```
 
-An attacker can redirect this to an internal address (`http://169.254.169.254/`, `http://minyad-db:5432/`) and cause the trade container to probe internal services.
+An attacker can redirect this to an internal address (`http://169.254.169.254/`, `https://minyad-db:5432/`) and cause the trade container to probe internal services.
 
 **Recommended fix:** Lock the allowed domain in the validator:
 ```python

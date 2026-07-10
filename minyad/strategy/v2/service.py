@@ -323,7 +323,16 @@ class StrategyService:
                 "last_decision": _decision_payload(self.last_decision) if self.last_decision else None,
             }
 
-        server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=8080, log_level="info"))
+        server = uvicorn.Server(
+            uvicorn.Config(
+                app,
+                host="0.0.0.0",
+                port=8080,
+                log_level="info",
+                ssl_certfile=os.getenv("MINYAD_TLS_CERT_FILE") or None,
+                ssl_keyfile=os.getenv("MINYAD_TLS_KEY_FILE") or None,
+            )
+        )
         await server.serve()
 
 
