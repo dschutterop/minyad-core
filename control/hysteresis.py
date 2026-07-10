@@ -113,61 +113,70 @@ class HysteresisController:
                 return None
 
             if self._state is ControlState.COOLDOWN:
-                if self._cooldown_until is not None and now >= self._cooldown_until:
-                    LOGGER.info(
-                        "%s Cooldown expired, performing immediate control evaluation current_fsm_state=%s grid_power=%sW calculated_surplus=%sW current_charge_current_target=%s",
-                        self._timestamp(),
-                        self._state.value,
-                        grid_power_w,
-                        surplus_w,
-                        charge_current_target,
-                    )
-                    self._transition(ControlState.IDLE, "cooldown elapsed")
-                    return self._evaluate_idle_sample(surplus_w, now, immediate=True) or ControlState.IDLE
-                # Allow the opposite direction to bypass remaining cooldown if its
-                # trigger has been sustained for start_duration — this prevents a
-                # 10-minute blind spot when e.g. solar appears right after discharge.
-                if self._cooldown_direction is ControlState.DISCHARGING and surplus_w >= self.start_w:
-                    if self._charge_since is None:
-                        self._charge_since = now
-                    if now - self._charge_since >= self.start_duration:
-                        return self._transition(ControlState.CHARGING, f"charge trigger sustained during discharge cooldown; bypassing cooldown")
-                elif self._cooldown_direction is ControlState.CHARGING and surplus_w <= self.discharge_start_w:
-                    if self._discharge_since is None:
-                        self._discharge_since = now
-                    if now - self._discharge_since >= self.start_duration:
-                        return self._transition(ControlState.DISCHARGING, f"discharge trigger sustained during charge cooldown; bypassing cooldown")
-                else:
-                    self._charge_since = None
-                    self._discharge_since = None
-                return None
-
+                return self._tick_cooldown(surplus_w, now, grid_power_w, charge_current_target)
             if self._state is ControlState.IDLE:
                 return self._evaluate_idle_sample(surplus_w, now, immediate=False)
-
             if self._state is ControlState.CHARGING:
-                if surplus_w < self.stop_w:
-                    if self._stop_since is None:
-                        self._stop_since = now
-                    if now - self._stop_since >= self.stop_duration:
-                        self._cooldown_until = now + self.cooldown
-                        self._cooldown_direction = ControlState.CHARGING
-                        return self._transition(ControlState.COOLDOWN, f"surplus {surplus_w}W sustained below {self.stop_w}W")
-                else:
-                    self._stop_since = None
-                return None
-
+                return self._tick_charging(surplus_w, now)
             if self._state is ControlState.DISCHARGING:
-                if surplus_w > self.discharge_stop_w:
-                    if self._stop_since is None:
-                        self._stop_since = now
-                    if now - self._stop_since >= self.stop_duration:
-                        self._cooldown_until = now + self.cooldown
-                        self._cooldown_direction = ControlState.DISCHARGING
-                        return self._transition(ControlState.COOLDOWN, f"import {surplus_w}W sustained above {self.discharge_stop_w}W")
-                else:
-                    self._stop_since = None
+                return self._tick_discharging(surplus_w, now)
             return None
+
+    def _tick_cooldown(
+        self, surplus_w: int, now: float, grid_power_w: int | None, charge_current_target: int | None
+    ) -> ControlState | None:
+        if self._cooldown_until is not None and now >= self._cooldown_until:
+            LOGGER.info(
+                "%s Cooldown expired, performing immediate control evaluation current_fsm_state=%s grid_power=%sW calculated_surplus=%sW current_charge_current_target=%s",
+                self._timestamp(),
+                self._state.value,
+                grid_power_w,
+                surplus_w,
+                charge_current_target,
+            )
+            self._transition(ControlState.IDLE, "cooldown elapsed")
+            return self._evaluate_idle_sample(surplus_w, now, immediate=True) or ControlState.IDLE
+        # Allow the opposite direction to bypass remaining cooldown if its
+        # trigger has been sustained for start_duration — this prevents a
+        # 10-minute blind spot when e.g. solar appears right after discharge.
+        if self._cooldown_direction is ControlState.DISCHARGING and surplus_w >= self.start_w:
+            if self._charge_since is None:
+                self._charge_since = now
+            if now - self._charge_since >= self.start_duration:
+                return self._transition(ControlState.CHARGING, "charge trigger sustained during discharge cooldown; bypassing cooldown")
+        elif self._cooldown_direction is ControlState.CHARGING and surplus_w <= self.discharge_start_w:
+            if self._discharge_since is None:
+                self._discharge_since = now
+            if now - self._discharge_since >= self.start_duration:
+                return self._transition(ControlState.DISCHARGING, "discharge trigger sustained during charge cooldown; bypassing cooldown")
+        else:
+            self._charge_since = None
+            self._discharge_since = None
+        return None
+
+    def _tick_charging(self, surplus_w: int, now: float) -> ControlState | None:
+        if surplus_w < self.stop_w:
+            if self._stop_since is None:
+                self._stop_since = now
+            if now - self._stop_since >= self.stop_duration:
+                self._cooldown_until = now + self.cooldown
+                self._cooldown_direction = ControlState.CHARGING
+                return self._transition(ControlState.COOLDOWN, f"surplus {surplus_w}W sustained below {self.stop_w}W")
+        else:
+            self._stop_since = None
+        return None
+
+    def _tick_discharging(self, surplus_w: int, now: float) -> ControlState | None:
+        if surplus_w > self.discharge_stop_w:
+            if self._stop_since is None:
+                self._stop_since = now
+            if now - self._stop_since >= self.stop_duration:
+                self._cooldown_until = now + self.cooldown
+                self._cooldown_direction = ControlState.DISCHARGING
+                return self._transition(ControlState.COOLDOWN, f"import {surplus_w}W sustained above {self.discharge_stop_w}W")
+        else:
+            self._stop_since = None
+        return None
 
     def _evaluate_idle_sample(self, surplus_w: int, now: float, *, immediate: bool) -> ControlState | None:
         if surplus_w >= self.start_w:

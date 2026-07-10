@@ -235,63 +235,7 @@ class ControlApp:
             await self.apply_strategy_v2_setpoint(int(float(decoded)))
             return
         if topic in {"minyad/dsmr/net_power_w", "minyad/grid/net_power_w"}:
-            try:
-                grid_power_w = int(decoded)
-            except ValueError:
-                ERRORS_TOTAL.labels(type="invalid_grid_power").inc()
-                LOGGER.warning("Ignoring invalid grid power payload topic=%s payload=%r", topic, decoded)
-                return
-            self.latest_grid_power_w = grid_power_w
-            GRID_POWER_WATTS.set(grid_power_w)
-            if STRATEGY_V2_PRIMARY:
-                LOGGER.debug("Strategy v2 primary enabled; ignoring local FSM grid sample")
-                return
-            # DSMR/grid net power is positive for grid import and negative for export.
-            # HysteresisController expects surplus-style samples: positive export/available
-            # power starts charging, while negative import starts discharging.
-            surplus_w = -grid_power_w
-            if not self.controller:
-                LOGGER.info("Skipping grid control sample topic=%s grid_power=%sW: controller not ready", topic, grid_power_w)
-                return
-            if not self.bridge_is_available:
-                LOGGER.info(
-                    "Skipping grid control sample topic=%s grid_power=%sW surplus=%sW: GoodWe bridge unavailable status=%s last_seen=%s error=%s",
-                    topic,
-                    grid_power_w,
-                    surplus_w,
-                    self.bridge_status,
-                    self.bridge_last_seen_raw,
-                    self.bridge_last_seen_error,
-                )
-                return
-            previous_state = self.controller.state
-            surplus_w = self._apply_soc_guard(surplus_w)
-            # _apply_soc_guard may force the controller idle; publish the stop now,
-            # but keep evaluating this sample.  A below-floor battery must still be
-            # able to start charging immediately when there is solar surplus.
-            if previous_state is not ControlState.IDLE and self.controller.state is ControlState.IDLE:
-                await self.stop_charging()
-                await self.publish_state(ControlState.IDLE)
-            rebalanced_idle_discharge = await self._rebalance_untracked_idle_discharge(grid_power_w)
-            state = self._tick_controller(surplus_w, grid_power_w)
-            LOGGER.info(
-                "Grid control sample topic=%s grid_power=%sW surplus=%sW state=%s%s",
-                topic,
-                grid_power_w,
-                surplus_w,
-                self.controller.state.value,
-                " transitioned_from=" + previous_state.value if state else "",
-            )
-            if state is ControlState.CHARGING:
-                await self.publish_setpoint(self.charge_target_w(), state_changed=True)
-            elif self.controller.state is ControlState.CHARGING:
-                await self.apply_slow_balance(ControlState.CHARGING)
-            if state is ControlState.DISCHARGING and not rebalanced_idle_discharge:
-                await self.publish_discharge_setpoint(self.discharge_target_w(), state_changed=True)
-            elif self.controller.state is ControlState.DISCHARGING and not rebalanced_idle_discharge:
-                await self.apply_slow_balance(ControlState.DISCHARGING)
-            if state:
-                await self.publish_state(state)
+            await self.handle_grid_power_topic(topic, decoded)
             return
         if topic == "minyad/control/override":
             command = json.loads(decoded)
@@ -317,6 +261,68 @@ class ControlApp:
                     available=True,
                 )
             return
+
+    async def handle_grid_power_topic(self, topic: str, decoded: str) -> None:
+        try:
+            grid_power_w = int(decoded)
+        except ValueError:
+            ERRORS_TOTAL.labels(type="invalid_grid_power").inc()
+            LOGGER.warning("Ignoring invalid grid power payload topic=%s payload=%r", topic, decoded)
+            return
+        self.latest_grid_power_w = grid_power_w
+        GRID_POWER_WATTS.set(grid_power_w)
+        if STRATEGY_V2_PRIMARY:
+            LOGGER.debug("Strategy v2 primary enabled; ignoring local FSM grid sample")
+            return
+        # DSMR/grid net power is positive for grid import and negative for export.
+        # HysteresisController expects surplus-style samples: positive export/available
+        # power starts charging, while negative import starts discharging.
+        surplus_w = -grid_power_w
+        if not self.controller:
+            LOGGER.info("Skipping grid control sample topic=%s grid_power=%sW: controller not ready", topic, grid_power_w)
+            return
+        if not self.bridge_is_available:
+            LOGGER.info(
+                "Skipping grid control sample topic=%s grid_power=%sW surplus=%sW: GoodWe bridge unavailable status=%s last_seen=%s error=%s",
+                topic,
+                grid_power_w,
+                surplus_w,
+                self.bridge_status,
+                self.bridge_last_seen_raw,
+                self.bridge_last_seen_error,
+            )
+            return
+        previous_state = self.controller.state
+        surplus_w = self._apply_soc_guard(surplus_w)
+        # _apply_soc_guard may force the controller idle; publish the stop now,
+        # but keep evaluating this sample.  A below-floor battery must still be
+        # able to start charging immediately when there is solar surplus.
+        if previous_state is not ControlState.IDLE and self.controller.state is ControlState.IDLE:
+            await self.stop_charging()
+            await self.publish_state(ControlState.IDLE)
+        rebalanced_idle_discharge = await self._rebalance_untracked_idle_discharge(grid_power_w)
+        state = self._tick_controller(surplus_w, grid_power_w)
+        LOGGER.info(
+            "Grid control sample topic=%s grid_power=%sW surplus=%sW state=%s%s",
+            topic,
+            grid_power_w,
+            surplus_w,
+            self.controller.state.value,
+            " transitioned_from=" + previous_state.value if state else "",
+        )
+        await self._publish_grid_control_result(state, rebalanced_idle_discharge)
+
+    async def _publish_grid_control_result(self, state: ControlState | None, rebalanced_idle_discharge: bool) -> None:
+        if state is ControlState.CHARGING:
+            await self.publish_setpoint(self.charge_target_w(), state_changed=True)
+        elif self.controller.state is ControlState.CHARGING:
+            await self.apply_slow_balance(ControlState.CHARGING)
+        if state is ControlState.DISCHARGING and not rebalanced_idle_discharge:
+            await self.publish_discharge_setpoint(self.discharge_target_w(), state_changed=True)
+        elif self.controller.state is ControlState.DISCHARGING and not rebalanced_idle_discharge:
+            await self.apply_slow_balance(ControlState.DISCHARGING)
+        if state:
+            await self.publish_state(state)
 
     async def apply_strategy_v2_setpoint(self, signed_setpoint_w: int) -> None:
         if not STRATEGY_V2_PRIMARY:

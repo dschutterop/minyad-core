@@ -32,69 +32,17 @@ class StrategyExecutor:
         current = state.current_setpoint_w if state.current_setpoint_w is not None else self.current_setpoint_w
         in_grid_charge = self.plan.in_grid_charge_window(now)
         in_price_discharge = self.plan.in_price_discharge_window(now)
-        band = self.settings.soc_hysteresis_pct
 
-        # Track whether we've hit the ceiling inside a grid charge window so we
-        # don't oscillate at the boundary when SoC dips a fraction below it.
-        if in_grid_charge and state.battery_soc is not None:
-            if state.battery_soc >= self.plan.effective_soc_ceiling:
-                self._grid_charge_ceiling_reached = True
-            elif state.battery_soc <= self.plan.effective_soc_ceiling - band:
-                self._grid_charge_ceiling_reached = False
-        elif not in_grid_charge:
-            self._grid_charge_ceiling_reached = False
-
+        self._update_grid_charge_ceiling(in_grid_charge, state)
         force_grid_charge = in_grid_charge and (state.battery_soc is None or not self._grid_charge_ceiling_reached)
 
         if force_grid_charge:
             candidate = self.settings.effective_max_charge_w
             reason = "grid charge window active; forcing max charge"
         else:
-            error_w = state.net_grid_w - self.settings.int("strategy.grid_target_w")
-            direction = 1 if error_w > 0 else -1 if error_w < 0 else 0
-            if abs(error_w) < self.settings.ramp_floor_w:
-                candidate = current
-                reason = f"within deadband ({error_w}W)"
-            elif not self._ramp_hold_satisfied(direction):
-                candidate = current
-                reason = f"ramp hold active for {'import' if direction > 0 else 'export'}"
-            else:
-                delta = _clamp(int(error_w * self.settings.balance_gain), -self.settings.ramp_ceiling_w, self.settings.ramp_ceiling_w)
-                bias = -self.settings.price_discharge_bias_w if in_price_discharge else 0
-                candidate = current - delta + bias
-                reason = f"balancing grid to target; grid offset {error_w}W"
-                if in_price_discharge:
-                    reason += "; price discharge bias applied"
-                candidate = _clamp(candidate, -self.settings.max_discharge_w, self.settings.effective_max_charge_w)
+            candidate, reason = self._balance_candidate(state, current, in_price_discharge)
 
-        # Export block with hysteresis: once export exceeds threshold, block
-        # discharge until export falls back by at least hysteresis_w.
-        threshold = self.settings.export_block_threshold_w
-        hysteresis = self.settings.export_block_hysteresis_w
-        if state.net_grid_w < -threshold:
-            self._export_blocked = True
-        elif state.net_grid_w >= -(threshold - hysteresis):
-            self._export_blocked = False
-        if self._export_blocked:
-            active_discharge = current < -self.settings.jitter_w or state.battery_power_w > self.settings.jitter_w
-            if active_discharge and current < 0:
-                trim_sample = (state.net_grid_w, state.battery_power_w)
-                if trim_sample == self._last_export_trim_sample:
-                    candidate = current
-                    reason = f"waiting for fresh export telemetry before next discharge trim; grid offset {state.net_grid_w}W"
-                else:
-                    export_trim = _clamp(int(abs(state.net_grid_w) * self.settings.balance_gain), 0, self.settings.ramp_ceiling_w)
-                    candidate = min(0, max(candidate, current + export_trim))
-                    reason = f"trimming discharge during export; grid offset {state.net_grid_w}W"
-                    self._last_export_trim_sample = trim_sample
-            elif candidate < 0:
-                candidate = 0
-                reason = "discharge blocked during export"
-                self._last_export_trim_sample = None
-            else:
-                self._last_export_trim_sample = None
-        else:
-            self._last_export_trim_sample = None
+        candidate, reason = self._apply_export_block(state, current, candidate, reason)
 
         candidate, limit_reason = self._apply_soc_limits(candidate, state)
         if limit_reason:
@@ -104,6 +52,67 @@ class StrategyExecutor:
             reason += f"; jitter suppressed (<{self.settings.jitter_w}W)"
         self.current_setpoint_w = int(candidate)
         return StrategyDecision(now, int(candidate), state.battery_soc, state.net_grid_w, state.solar_forecast_w, self.plan.solar_mode, reason, self.plan.date, in_grid_charge, in_price_discharge)
+
+    def _update_grid_charge_ceiling(self, in_grid_charge: bool, state: ExecutorState) -> None:
+        # Track whether we've hit the ceiling inside a grid charge window so we
+        # don't oscillate at the boundary when SoC dips a fraction below it.
+        if not in_grid_charge:
+            self._grid_charge_ceiling_reached = False
+            return
+        if state.battery_soc is None:
+            return
+        band = self.settings.soc_hysteresis_pct
+        if state.battery_soc >= self.plan.effective_soc_ceiling:
+            self._grid_charge_ceiling_reached = True
+        elif state.battery_soc <= self.plan.effective_soc_ceiling - band:
+            self._grid_charge_ceiling_reached = False
+
+    def _balance_candidate(self, state: ExecutorState, current: int, in_price_discharge: bool) -> tuple[int, str]:
+        error_w = state.net_grid_w - self.settings.int("strategy.grid_target_w")
+        direction = 1 if error_w > 0 else -1 if error_w < 0 else 0
+        if abs(error_w) < self.settings.ramp_floor_w:
+            return current, f"within deadband ({error_w}W)"
+        if not self._ramp_hold_satisfied(direction):
+            return current, f"ramp hold active for {'import' if direction > 0 else 'export'}"
+        delta = _clamp(int(error_w * self.settings.balance_gain), -self.settings.ramp_ceiling_w, self.settings.ramp_ceiling_w)
+        bias = -self.settings.price_discharge_bias_w if in_price_discharge else 0
+        candidate = current - delta + bias
+        reason = f"balancing grid to target; grid offset {error_w}W"
+        if in_price_discharge:
+            reason += "; price discharge bias applied"
+        candidate = _clamp(candidate, -self.settings.max_discharge_w, self.settings.effective_max_charge_w)
+        return candidate, reason
+
+    def _apply_export_block(self, state: ExecutorState, current: int, candidate: int, reason: str) -> tuple[int, str]:
+        # Export block with hysteresis: once export exceeds threshold, block
+        # discharge until export falls back by at least hysteresis_w.
+        threshold = self.settings.export_block_threshold_w
+        hysteresis = self.settings.export_block_hysteresis_w
+        if state.net_grid_w < -threshold:
+            self._export_blocked = True
+        elif state.net_grid_w >= -(threshold - hysteresis):
+            self._export_blocked = False
+        if not self._export_blocked:
+            self._last_export_trim_sample = None
+            return candidate, reason
+
+        active_discharge = current < -self.settings.jitter_w or state.battery_power_w > self.settings.jitter_w
+        if active_discharge and current < 0:
+            return self._trim_discharge_during_export(state, current, candidate)
+        if candidate < 0:
+            self._last_export_trim_sample = None
+            return 0, "discharge blocked during export"
+        self._last_export_trim_sample = None
+        return candidate, reason
+
+    def _trim_discharge_during_export(self, state: ExecutorState, current: int, candidate: int) -> tuple[int, str]:
+        trim_sample = (state.net_grid_w, state.battery_power_w)
+        if trim_sample == self._last_export_trim_sample:
+            return current, f"waiting for fresh export telemetry before next discharge trim; grid offset {state.net_grid_w}W"
+        export_trim = _clamp(int(abs(state.net_grid_w) * self.settings.balance_gain), 0, self.settings.ramp_ceiling_w)
+        candidate = min(0, max(candidate, current + export_trim))
+        self._last_export_trim_sample = trim_sample
+        return candidate, f"trimming discharge during export; grid offset {state.net_grid_w}W"
 
     def _ramp_hold_satisfied(self, direction: int) -> bool:
         if direction == 0:
