@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import ssl
 import sys
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -24,10 +26,11 @@ EXPECTED_FIELDS = {
 }
 
 
-def fetch_json(url: str, timeout: float) -> dict[str, Any]:
+def fetch_json(url: str, timeout: float, ca_file: str | None = None) -> dict[str, Any]:
     request = Request(url, headers={"Accept": "application/json"})
+    context = ssl.create_default_context(cafile=ca_file) if ca_file and Path(ca_file).is_file() else None
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with urlopen(request, timeout=timeout, context=context) as response:
             body = response.read().decode("utf-8")
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -69,8 +72,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base-url",
-        default=os.getenv("MINYAD_API_URL", "http://localhost:8002"),
-        help="Minyad API base URL, default: MINYAD_API_URL or http://localhost:8002",
+        default=os.getenv("MINYAD_API_URL", "https://localhost:8002"),
+        help="Minyad API base URL, default: MINYAD_API_URL or https://localhost:8002",
+    )
+    parser.add_argument(
+        "--ca-file",
+        default=os.getenv("MINYAD_INTERNAL_CA_FILE", "/run/minyad/tls/internal.crt"),
+        help="CA certificate for the self-signed internal API certificate",
     )
     parser.add_argument("--timeout", type=float, default=5.0, help="HTTP timeout in seconds")
     parser.add_argument("--history-days", type=int, default=0, help="Also fetch /api/v1/dryad/history?days=N")
@@ -79,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
 
     base_url = args.base_url.rstrip("/")
     try:
-        snapshot = fetch_json(f"{base_url}/api/v1/dryad", args.timeout)
+        snapshot = fetch_json(f"{base_url}/api/v1/dryad", args.timeout, args.ca_file)
         validate_snapshot(snapshot)
         if args.raw:
             print(json.dumps(snapshot, indent=2, sort_keys=True))
@@ -88,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.history_days:
             query = urlencode({"days": max(1, min(400, args.history_days))})
-            history = fetch_json(f"{base_url}/api/v1/dryad/history?{query}", args.timeout)
+            history = fetch_json(f"{base_url}/api/v1/dryad/history?{query}", args.timeout, args.ca_file)
             print()
             if args.raw:
                 print(json.dumps({"history": history}, indent=2, sort_keys=True))

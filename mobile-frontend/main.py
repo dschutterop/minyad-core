@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 app = FastAPI(title="Minyad Mobile Frontend")
-API_BASE_URL = os.getenv("API_BASE_URL", "http://minyad-api:8000")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://minyad-api:8000")
+MINYAD_INTERNAL_CA_FILE = os.getenv("MINYAD_INTERNAL_CA_FILE", "/run/minyad/tls/internal.crt")
 MINYAD_API_SECRET = os.getenv("MINYAD_API_SECRET", "")
+
+
+def _api_verify() -> str | bool:
+    ca_file = Path(MINYAD_INTERNAL_CA_FILE)
+    return str(ca_file) if ca_file.is_file() else True
 
 CSS = """
 :root{color-scheme:dark;--bg:#071017;--panel:#101b24;--panel2:#162631;--line:rgba(184,210,228,.14);--text:#ecf4f8;--muted:#8ea4b4;--solar:#4bd37f;--battery:#ffc34d;--grid:#ff756c;--blue:#7db7ff;--home:#dbe7ef;--warn:#ffc34d;--bad:#ff756c;--shadow:0 18px 40px rgba(0,0,0,.28);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -85,7 +92,7 @@ async def api_proxy(path: str, request: Request) -> Response:
     if MINYAD_API_SECRET:
         headers["X-API-Key"] = MINYAD_API_SECRET
     try:
-        async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=10.0) as client:
+        async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=10.0, verify=_api_verify()) as client:
             response = await client.request(request.method, f"/{path}", params=request.query_params, content=await request.body(), headers=headers)
     except httpx.RequestError as exc:
         return JSONResponse(status_code=502, content={"detail": "Unable to reach Minyad API service", "api_base_url": API_BASE_URL, "error": str(exc)})

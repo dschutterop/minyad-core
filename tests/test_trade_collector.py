@@ -138,7 +138,7 @@ def test_trade_settings_reject_invalid_entsoe_api_url_from_mqtt():
     "value",
     [
         b"http://169.254.169.254/latest/meta-data",
-        b"http://minyad-db:5432/",
+        b"https://minyad-db:5432/",
         b"https://web-api.tp.entsoe.eu@127.0.0.1/api",
     ],
 )
