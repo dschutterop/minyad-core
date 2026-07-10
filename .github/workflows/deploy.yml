@@ -75,6 +75,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install lint dependencies
+        run: python -m pip install --upgrade pip ruff
+
       - name: Download coverage report
         uses: actions/download-artifact@v4
         with:
@@ -90,6 +99,9 @@ jobs:
 
       - name: Convert Trivy reports for SonarQube
         run: python3 scripts/trivy_to_sonar.py --ignore-unfixed --output sonar-trivy-issues.json "trivy-reports/*.json"
+
+      - name: Run linters
+        run: ruff check --select FAST002,RUF029,F841,SIM102 --fix --unsafe-fixes .
 
       - name: Load SonarQube environment
         env:
