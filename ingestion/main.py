@@ -75,6 +75,7 @@ async def main() -> None:
     mqtt.start()
     broker = await _setting("dsmr.mqtt.broker", DEFAULT_DSMR_BROKER)
     port = int(await _setting("dsmr.mqtt.port", str(DEFAULT_DSMR_PORT)))
+    pending_grid_write_tasks: set[asyncio.Task[None]] = set()
 
     async def store_grid_point(net_power_w: int, per_phase_w: dict, timestamp, delivered_w: int, returned_w: int) -> None:
         with WRITE_DURATION_SECONDS.time():
@@ -135,7 +136,9 @@ async def main() -> None:
         mqtt.publish_measurement("dsmr", "phase_w_l2", per_phase_w["L2"])
         mqtt.publish_measurement("dsmr", "phase_w_l3", per_phase_w["L3"])
         mqtt.publish_measurement("dsmr", "timestamp", timestamp.isoformat())
-        asyncio.create_task(store_grid_point(net_power_w, per_phase_w, timestamp, delivered_w, returned_w))
+        task = asyncio.create_task(store_grid_point(net_power_w, per_phase_w, timestamp, delivered_w, returned_w))
+        pending_grid_write_tasks.add(task)
+        task.add_done_callback(pending_grid_write_tasks.discard)
 
     reader = P1Reader(broker, port, publish_update)
     reader.start()
