@@ -40,6 +40,154 @@ def _slot_floor(moment: datetime, slot_seconds: int) -> datetime:
     return datetime.fromtimestamp(floored_epoch, tz=timezone.utc).astimezone(moment.tzinfo)
 
 
+class _LpVars:
+    """The LP decision variables shared across constraint-builder and extraction helpers."""
+
+    def __init__(self, n: int, max_charge_w: float, max_discharge_w: float, export_cap_w: float, capacity: float) -> None:
+        self.ch = [pulp.LpVariable(f"ch_{t}", lowBound=0, upBound=max_charge_w) for t in range(n)]
+        self.dis = [pulp.LpVariable(f"dis_{t}", lowBound=0, upBound=max_discharge_w) for t in range(n)]
+        self.gimp = [pulp.LpVariable(f"gimp_{t}", lowBound=0) for t in range(n)]
+        self.gexp = [pulp.LpVariable(f"gexp_{t}", lowBound=0, upBound=max(0.0, export_cap_w)) for t in range(n)]
+        # Free curtailment term: pv_forecast_w is a forecast ceiling, not a commitment. Without this,
+        # constraint 1 is infeasible any time forecast PV exceeds load + max_charge_w + export_cap_w
+        # (common on a sunny day with a hardware-limited charger and export disabled) — real inverters
+        # clip excess PV the same way. Curtailing costs nothing in the objective.
+        self.curtail = [pulp.LpVariable(f"curtail_{t}", lowBound=0) for t in range(n)]
+        self.soc = [pulp.LpVariable(f"soc_{t}", lowBound=0, upBound=capacity) for t in range(n + 1)]
+        self.slack_lo = [pulp.LpVariable(f"slack_lo_{t}", lowBound=0) for t in range(n + 1)]
+        self.slack_hi = [pulp.LpVariable(f"slack_hi_{t}", lowBound=0) for t in range(n + 1)]
+
+
+def _friday_slots_and_sunset(
+    horizon_start: datetime, slot_seconds: int, n: int, tz: ZoneInfo, friday_sunset_at: datetime | None
+) -> tuple[list[datetime], set[int], int | None]:
+    slot_starts = [horizon_start + timedelta(seconds=slot_seconds * t) for t in range(n)]
+    friday_slots = {t for t, start in enumerate(slot_starts) if is_lifepo4_full_cycle_day(start.astimezone(tz).date())}
+
+    sunset_index: int | None = None
+    if friday_sunset_at is not None:
+        for t in range(n + 1):
+            boundary = horizon_start + timedelta(seconds=slot_seconds * t)
+            if boundary <= friday_sunset_at:
+                sunset_index = t
+            else:
+                break
+    return slot_starts, friday_slots, sunset_index
+
+
+def _add_balance_and_dynamics_constraints(
+    prob: pulp.LpProblem,
+    lp: _LpVars,
+    n: int,
+    pv_forecast_w: list[float],
+    load_forecast_w: list[float],
+    dt_h: float,
+    one_way_efficiency: float,
+    grid_charge_enabled: bool,
+    friday_slots: set[int],
+    grid_charge_relax_w: float,
+) -> None:
+    for t in range(n):
+        # 1. power balance (with free curtailment of unusable forecast PV, see _LpVars.curtail)
+        prob += lp.curtail[t] <= pv_forecast_w[t], f"curtail_cap_{t}"
+        prob += (pv_forecast_w[t] - lp.curtail[t]) + lp.dis[t] + lp.gimp[t] == load_forecast_w[t] + lp.ch[t] + lp.gexp[t], f"balance_{t}"
+        # 2. SoC dynamics
+        prob += lp.soc[t + 1] == lp.soc[t] + (lp.ch[t] * one_way_efficiency - lp.dis[t] * (1.0 / one_way_efficiency)) * dt_h, f"dynamics_{t}"
+        # 4. grid-charge gating (forced solar-only on Friday slots regardless of the setting)
+        if not grid_charge_enabled or t in friday_slots:
+            surplus_cap = max(0.0, pv_forecast_w[t] - load_forecast_w[t]) + grid_charge_relax_w
+            prob += lp.ch[t] <= surplus_cap, f"solar_only_{t}"
+
+
+def _add_soc_band_constraints(
+    prob: pulp.LpProblem,
+    lp: _LpVars,
+    n: int,
+    horizon_start: datetime,
+    slot_seconds: int,
+    tz: ZoneInfo,
+    floor_wh: float,
+    ceil_wh: float,
+    hard_floor_wh: float,
+    capacity: float,
+) -> None:
+    for t in range(n + 1):
+        # 3. soft SoC band + hard bounds (hard bound skipped at t=0: soc[0] is pinned to the live reading,
+        # which may transiently sit below the hard floor; the LP must stay feasible regardless).
+        # The ceiling is Friday-aware (spec 4.2's soc_ceiling_effective): without this, constraint 3
+        # would fight the Friday-sunset target the entire day, since exceeding the ordinary ceiling
+        # anywhere en route to 99% is soft-penalized — the LP would rather fake-satisfy constraint 5
+        # with a single large slack than actually charge using free solar.
+        boundary = horizon_start + timedelta(seconds=slot_seconds * t)
+        ceil_wh_t = capacity if is_lifepo4_full_cycle_day(boundary.astimezone(tz).date()) else ceil_wh
+        prob += lp.soc[t] >= floor_wh - lp.slack_lo[t], f"soft_floor_{t}"
+        prob += lp.soc[t] <= ceil_wh_t + lp.slack_hi[t], f"soft_ceiling_{t}"
+        if t > 0:
+            prob += lp.soc[t] >= hard_floor_wh, f"hard_floor_{t}"
+
+
+def _add_target_constraints(
+    prob: pulp.LpProblem, lp: _LpVars, n: int, sunset_index: int | None, capacity: float, terminal_soc_pct: float
+) -> None:
+    # 5. Friday full-cycle target at sunset
+    if sunset_index is not None:
+        target_wh = FRIDAY_SUNSET_HARD_TARGET_PCT / 100.0 * capacity
+        prob += lp.soc[sunset_index] >= target_wh - lp.slack_hi[sunset_index], "friday_sunset_target"
+
+    # 6. terminal condition
+    terminal_wh = terminal_soc_pct / 100.0 * capacity
+    prob += lp.soc[n] >= terminal_wh - lp.slack_lo[n], "terminal_soc"
+
+
+def _build_objective(
+    lp: _LpVars, n: int, price_import: list[float], price_export: list[float], cycle_cost_eur_kwh: float, dt_h: float
+) -> pulp.LpAffineExpression:
+    return pulp.lpSum(
+        price_import[t] * lp.gimp[t] * dt_h / 1000.0
+        - price_export[t] * lp.gexp[t] * dt_h / 1000.0
+        + cycle_cost_eur_kwh * (lp.ch[t] + lp.dis[t]) * dt_h / 1000.0
+        for t in range(n)
+    ) + pulp.lpSum(10.0 * (lp.slack_lo[t] + lp.slack_hi[t]) / 1000.0 for t in range(n + 1))
+
+
+def _extract_slots(
+    lp: _LpVars,
+    n: int,
+    slot_starts: list[datetime],
+    pv_forecast_w: list[float],
+    load_forecast_w: list[float],
+    capacity: float,
+    price_source_vec: list[str],
+    cloud_cover_vec: list[float | None],
+    price_import: list[float],
+    price_export: list[float],
+) -> list[Slot]:
+    slots: list[Slot] = []
+    for t in range(n):
+        ch_val = lp.ch[t].value() or 0.0
+        dis_val = lp.dis[t].value() or 0.0
+        pv_minus_load_surplus = max(0.0, pv_forecast_w[t] - load_forecast_w[t])
+        planned_grid_charge_w = max(0.0, ch_val - pv_minus_load_surplus)
+        slots.append(
+            Slot(
+                start=slot_starts[t],
+                soc_target_pct=(lp.soc[t + 1].value() or 0.0) / capacity * 100.0,
+                planned_grid_charge_w=int(round(planned_grid_charge_w)),
+                planned_export_w=int(round(lp.gexp[t].value() or 0.0)),
+                pv_forecast_w=int(round(pv_forecast_w[t])),
+                load_forecast_w=int(round(load_forecast_w[t])),
+                charge_w=int(round(ch_val)),
+                discharge_w=int(round(dis_val)),
+                curtailment_w=int(round(lp.curtail[t].value() or 0.0)),
+                price_source=price_source_vec[t],
+                cloud_cover_pct=cloud_cover_vec[t],
+                price_import=price_import[t],
+                price_export=price_export[t],
+            )
+        )
+    return slots
+
+
 def solve_slot_plan(
     *,
     horizon_start: datetime,
@@ -77,82 +225,24 @@ def solve_slot_plan(
     dt_h = slot_seconds / 3600.0
     capacity = capacity_wh
 
-    slot_starts = [horizon_start + timedelta(seconds=slot_seconds * t) for t in range(n)]
-    friday_slots = {t for t, start in enumerate(slot_starts) if is_lifepo4_full_cycle_day(start.astimezone(tz).date())}
+    slot_starts, friday_slots, sunset_index = _friday_slots_and_sunset(horizon_start, slot_seconds, n, tz, friday_sunset_at)
     friday_full_cycle = bool(friday_slots)
 
-    sunset_index: int | None = None
-    if friday_sunset_at is not None:
-        for t in range(n + 1):
-            boundary = horizon_start + timedelta(seconds=slot_seconds * t)
-            if boundary <= friday_sunset_at:
-                sunset_index = t
-            else:
-                break
-
     prob = pulp.LpProblem("minyad_v3_plan", pulp.LpMinimize)
-
-    ch = [pulp.LpVariable(f"ch_{t}", lowBound=0, upBound=max_charge_w) for t in range(n)]
-    dis = [pulp.LpVariable(f"dis_{t}", lowBound=0, upBound=max_discharge_w) for t in range(n)]
-    gimp = [pulp.LpVariable(f"gimp_{t}", lowBound=0) for t in range(n)]
-    gexp = [pulp.LpVariable(f"gexp_{t}", lowBound=0, upBound=max(0.0, export_cap_w)) for t in range(n)]
-    # Free curtailment term: pv_forecast_w is a forecast ceiling, not a commitment. Without this,
-    # constraint 1 is infeasible any time forecast PV exceeds load + max_charge_w + export_cap_w
-    # (common on a sunny day with a hardware-limited charger and export disabled) — real inverters
-    # clip excess PV the same way. Curtailing costs nothing in the objective.
-    curtail = [pulp.LpVariable(f"curtail_{t}", lowBound=0) for t in range(n)]
-    soc = [pulp.LpVariable(f"soc_{t}", lowBound=0, upBound=capacity) for t in range(n + 1)]
-    slack_lo = [pulp.LpVariable(f"slack_lo_{t}", lowBound=0) for t in range(n + 1)]
-    slack_hi = [pulp.LpVariable(f"slack_hi_{t}", lowBound=0) for t in range(n + 1)]
+    lp = _LpVars(n, max_charge_w, max_discharge_w, export_cap_w, capacity)
 
     soc0 = soc_now_pct / 100.0 * capacity
-    prob += soc[0] == soc0, "initial_soc"
+    prob += lp.soc[0] == soc0, "initial_soc"
 
     floor_wh = soc_floor_pct / 100.0 * capacity
     ceil_wh = soc_ceiling_pct / 100.0 * capacity
     hard_floor_wh = 0.05 * capacity
 
-    for t in range(n):
-        # 1. power balance (with free curtailment of unusable forecast PV, see above)
-        prob += curtail[t] <= pv_forecast_w[t], f"curtail_cap_{t}"
-        prob += (pv_forecast_w[t] - curtail[t]) + dis[t] + gimp[t] == load_forecast_w[t] + ch[t] + gexp[t], f"balance_{t}"
-        # 2. SoC dynamics
-        prob += soc[t + 1] == soc[t] + (ch[t] * one_way_efficiency - dis[t] * (1.0 / one_way_efficiency)) * dt_h, f"dynamics_{t}"
-        # 4. grid-charge gating (forced solar-only on Friday slots regardless of the setting)
-        if not grid_charge_enabled or t in friday_slots:
-            surplus_cap = max(0.0, pv_forecast_w[t] - load_forecast_w[t]) + grid_charge_relax_w
-            prob += ch[t] <= surplus_cap, f"solar_only_{t}"
+    _add_balance_and_dynamics_constraints(prob, lp, n, pv_forecast_w, load_forecast_w, dt_h, one_way_efficiency, grid_charge_enabled, friday_slots, grid_charge_relax_w)
+    _add_soc_band_constraints(prob, lp, n, horizon_start, slot_seconds, tz, floor_wh, ceil_wh, hard_floor_wh, capacity)
+    _add_target_constraints(prob, lp, n, sunset_index, capacity, terminal_soc_pct)
 
-    for t in range(n + 1):
-        # 3. soft SoC band + hard bounds (hard bound skipped at t=0: soc[0] is pinned to the live reading,
-        # which may transiently sit below the hard floor; the LP must stay feasible regardless).
-        # The ceiling is Friday-aware (spec 4.2's soc_ceiling_effective): without this, constraint 3
-        # would fight the Friday-sunset target the entire day, since exceeding the ordinary ceiling
-        # anywhere en route to 99% is soft-penalized — the LP would rather fake-satisfy constraint 5
-        # with a single large slack than actually charge using free solar.
-        boundary = horizon_start + timedelta(seconds=slot_seconds * t)
-        ceil_wh_t = capacity if is_lifepo4_full_cycle_day(boundary.astimezone(tz).date()) else ceil_wh
-        prob += soc[t] >= floor_wh - slack_lo[t], f"soft_floor_{t}"
-        prob += soc[t] <= ceil_wh_t + slack_hi[t], f"soft_ceiling_{t}"
-        if t > 0:
-            prob += soc[t] >= hard_floor_wh, f"hard_floor_{t}"
-
-    # 5. Friday full-cycle target at sunset
-    if sunset_index is not None:
-        target_wh = FRIDAY_SUNSET_HARD_TARGET_PCT / 100.0 * capacity
-        prob += soc[sunset_index] >= target_wh - slack_hi[sunset_index], "friday_sunset_target"
-
-    # 6. terminal condition
-    terminal_wh = terminal_soc_pct / 100.0 * capacity
-    prob += soc[n] >= terminal_wh - slack_lo[n], "terminal_soc"
-
-    objective = pulp.lpSum(
-        price_import[t] * gimp[t] * dt_h / 1000.0
-        - price_export[t] * gexp[t] * dt_h / 1000.0
-        + cycle_cost_eur_kwh * (ch[t] + dis[t]) * dt_h / 1000.0
-        for t in range(n)
-    ) + pulp.lpSum(10.0 * (slack_lo[t] + slack_hi[t]) / 1000.0 for t in range(n + 1))
-    prob += objective
+    prob += _build_objective(lp, n, price_import, price_export, cycle_cost_eur_kwh, dt_h)
 
     prob.solve(pulp.PULP_CBC_CMD(msg=0))
     status = pulp.LpStatus[prob.status]
@@ -162,29 +252,7 @@ def solve_slot_plan(
     price_source_vec = price_source if price_source is not None else ["fallback"] * n
     cloud_cover_vec = cloud_cover_pct if cloud_cover_pct is not None else [None] * n
 
-    slots: list[Slot] = []
-    for t in range(n):
-        ch_val = ch[t].value() or 0.0
-        dis_val = dis[t].value() or 0.0
-        pv_minus_load_surplus = max(0.0, pv_forecast_w[t] - load_forecast_w[t])
-        planned_grid_charge_w = max(0.0, ch_val - pv_minus_load_surplus)
-        slots.append(
-            Slot(
-                start=slot_starts[t],
-                soc_target_pct=(soc[t + 1].value() or 0.0) / capacity * 100.0,
-                planned_grid_charge_w=int(round(planned_grid_charge_w)),
-                planned_export_w=int(round(gexp[t].value() or 0.0)),
-                pv_forecast_w=int(round(pv_forecast_w[t])),
-                load_forecast_w=int(round(load_forecast_w[t])),
-                charge_w=int(round(ch_val)),
-                discharge_w=int(round(dis_val)),
-                curtailment_w=int(round(curtail[t].value() or 0.0)),
-                price_source=price_source_vec[t],
-                cloud_cover_pct=cloud_cover_vec[t],
-                price_import=price_import[t],
-                price_export=price_export[t],
-            )
-        )
+    slots = _extract_slots(lp, n, slot_starts, pv_forecast_w, load_forecast_w, capacity, price_source_vec, cloud_cover_vec, price_import, price_export)
 
     return SlotPlan(
         generated_at=generated_at,
