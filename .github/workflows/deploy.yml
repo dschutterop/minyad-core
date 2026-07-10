@@ -64,6 +64,7 @@ jobs:
       - self-hosted
       - minyad
     needs: test
+    environment: production
     permissions:
       contents: read
     steps:
@@ -82,18 +83,24 @@ jobs:
         env:
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
         run: |
-          ENV_FILE=".env"
+          ENV_FILE=""
           if [ -n "${DEPLOY_PATH}" ] && [ -f "${DEPLOY_PATH}/.env" ]; then
             ENV_FILE="${DEPLOY_PATH}/.env"
+          elif [ -f ".env" ]; then
+            ENV_FILE=".env"
+          else
+            echo "::error::.env with SONAR_HOST and SONAR_TOKEN not found. Checked workspace .env and DEPLOY_PATH/.env; DEPLOY_PATH='${DEPLOY_PATH}'."
+            exit 1
           fi
 
-          test -f "${ENV_FILE}"
           set -a
           . "${ENV_FILE}"
           set +a
 
-          test -n "${SONAR_HOST}"
-          test -n "${SONAR_TOKEN}"
+          if [ -z "${SONAR_HOST}" ] || [ -z "${SONAR_TOKEN}" ]; then
+            echo "::error::SONAR_HOST and SONAR_TOKEN must be set in ${ENV_FILE}."
+            exit 1
+          fi
           echo "::add-mask::${SONAR_TOKEN}"
 
           case "${SONAR_HOST}" in
