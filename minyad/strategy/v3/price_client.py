@@ -72,7 +72,7 @@ class PriceStore:
     def set_from_entsoe(self, day: str, points: list[dict[str, Any]]) -> None:
         self._points_by_day[day] = points
         if len(self._points_by_day) > MAX_CACHED_DAYS:
-            oldest = sorted(self._points_by_day)[0]
+            oldest = min(self._points_by_day)
             del self._points_by_day[oldest]
 
     def set_market_signal(self, payload: dict[str, Any] | list[dict[str, Any]], *, now: datetime | None = None) -> None:

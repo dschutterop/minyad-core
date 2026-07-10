@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -30,6 +30,35 @@ FRIDAY_SUNSET_HARD_TARGET_PCT = 99.0
 
 class PlannerSolveError(RuntimeError):
     """Raised when the LP does not reach an Optimal solution."""
+
+
+@dataclass(frozen=True)
+class SlotPlanInputs:
+    horizon_start: datetime
+    slot_seconds: int
+    horizon_slots: int
+    soc_now_pct: float
+    pv_forecast_w: list[float]
+    load_forecast_w: list[float]
+    price_import: list[float]
+    price_export: list[float]
+    capacity_wh: float
+    max_charge_w: float
+    max_discharge_w: float
+    one_way_efficiency: float
+    cycle_cost_eur_kwh: float
+    export_cap_w: float
+    grid_charge_enabled: bool
+    grid_charge_relax_w: float
+    terminal_soc_pct: float
+    soc_floor_pct: float
+    soc_ceiling_pct: float
+    friday_sunset_at: datetime | None
+    pv_calibration_factor: float
+    generated_at: datetime
+    tz: ZoneInfo = AMSTERDAM
+    price_source: list[str] | None = None
+    cloud_cover_pct: list[float | None] | None = None
 
 
 def _slot_floor(moment: datetime, slot_seconds: int) -> datetime:
@@ -194,81 +223,82 @@ def _extract_slots(
     return slots
 
 
-def solve_slot_plan(
-    *,
-    horizon_start: datetime,
-    slot_seconds: int,
-    horizon_slots: int,
-    soc_now_pct: float,
-    pv_forecast_w: list[float],
-    load_forecast_w: list[float],
-    price_import: list[float],
-    price_export: list[float],
-    capacity_wh: float,
-    max_charge_w: float,
-    max_discharge_w: float,
-    one_way_efficiency: float,
-    cycle_cost_eur_kwh: float,
-    export_cap_w: float,
-    grid_charge_enabled: bool,
-    grid_charge_relax_w: float,
-    terminal_soc_pct: float,
-    soc_floor_pct: float,
-    soc_ceiling_pct: float,
-    friday_sunset_at: datetime | None,
-    pv_calibration_factor: float,
-    generated_at: datetime,
-    tz: ZoneInfo = AMSTERDAM,
-    price_source: list[str] | None = None,
-    cloud_cover_pct: list[float | None] | None = None,
-) -> SlotPlan:
+def solve_slot_plan(inputs: SlotPlanInputs) -> SlotPlan:
     """Solve the spec-3.5 linear program and return a :class:`SlotPlan`.
 
     Pure function of its inputs (no I/O) so it can be unit tested directly.
     Raises :class:`PlannerSolveError` if the solver does not reach Optimal.
     """
-    n = horizon_slots
-    dt_h = slot_seconds / 3600.0
-    capacity = capacity_wh
+    n = inputs.horizon_slots
+    dt_h = inputs.slot_seconds / 3600.0
+    capacity = inputs.capacity_wh
 
-    slot_starts, friday_slots, sunset_index = _friday_slots_and_sunset(horizon_start, slot_seconds, n, tz, friday_sunset_at)
+    slot_starts, friday_slots, sunset_index = _friday_slots_and_sunset(
+        inputs.horizon_start,
+        inputs.slot_seconds,
+        n,
+        inputs.tz,
+        inputs.friday_sunset_at,
+    )
     friday_full_cycle = bool(friday_slots)
 
     prob = pulp.LpProblem("minyad_v3_plan", pulp.LpMinimize)
-    lp = _LpVars(n, max_charge_w, max_discharge_w, export_cap_w, capacity)
+    lp = _LpVars(n, inputs.max_charge_w, inputs.max_discharge_w, inputs.export_cap_w, capacity)
 
-    soc0 = soc_now_pct / 100.0 * capacity
+    soc0 = inputs.soc_now_pct / 100.0 * capacity
     prob += lp.soc[0] == soc0, "initial_soc"
 
-    floor_wh = soc_floor_pct / 100.0 * capacity
-    ceil_wh = soc_ceiling_pct / 100.0 * capacity
+    floor_wh = inputs.soc_floor_pct / 100.0 * capacity
+    ceil_wh = inputs.soc_ceiling_pct / 100.0 * capacity
     hard_floor_wh = 0.05 * capacity
 
-    _add_balance_and_dynamics_constraints(prob, lp, n, pv_forecast_w, load_forecast_w, dt_h, one_way_efficiency, grid_charge_enabled, friday_slots, grid_charge_relax_w)
-    _add_soc_band_constraints(prob, lp, n, horizon_start, slot_seconds, tz, floor_wh, ceil_wh, hard_floor_wh, capacity)
-    _add_target_constraints(prob, lp, n, sunset_index, capacity, terminal_soc_pct)
+    _add_balance_and_dynamics_constraints(
+        prob,
+        lp,
+        n,
+        inputs.pv_forecast_w,
+        inputs.load_forecast_w,
+        dt_h,
+        inputs.one_way_efficiency,
+        inputs.grid_charge_enabled,
+        friday_slots,
+        inputs.grid_charge_relax_w,
+    )
+    _add_soc_band_constraints(prob, lp, n, inputs.horizon_start, inputs.slot_seconds, inputs.tz, floor_wh, ceil_wh, hard_floor_wh, capacity)
+    _add_target_constraints(prob, lp, n, sunset_index, capacity, inputs.terminal_soc_pct)
 
-    prob += _build_objective(lp, n, price_import, price_export, cycle_cost_eur_kwh, dt_h)
+    prob += _build_objective(lp, n, inputs.price_import, inputs.price_export, inputs.cycle_cost_eur_kwh, dt_h)
 
     prob.solve(pulp.PULP_CBC_CMD(msg=0))
     status = pulp.LpStatus[prob.status]
     if status != "Optimal":
         raise PlannerSolveError(status)
 
-    price_source_vec = price_source if price_source is not None else ["fallback"] * n
-    cloud_cover_vec = cloud_cover_pct if cloud_cover_pct is not None else [None] * n
+    price_source_vec = inputs.price_source if inputs.price_source is not None else ["fallback"] * n
+    cloud_cover_vec = inputs.cloud_cover_pct if inputs.cloud_cover_pct is not None else [None] * n
 
-    slots = _extract_slots(lp, n, slot_starts, pv_forecast_w, load_forecast_w, capacity, price_source_vec, cloud_cover_vec, price_import, price_export)
+    slots = _extract_slots(
+        lp,
+        n,
+        slot_starts,
+        inputs.pv_forecast_w,
+        inputs.load_forecast_w,
+        capacity,
+        price_source_vec,
+        cloud_cover_vec,
+        inputs.price_import,
+        inputs.price_export,
+    )
 
     return SlotPlan(
-        generated_at=generated_at,
-        valid_from=horizon_start,
-        slot_seconds=slot_seconds,
-        soc_start_pct=soc_now_pct,
+        generated_at=inputs.generated_at,
+        valid_from=inputs.horizon_start,
+        slot_seconds=inputs.slot_seconds,
+        soc_start_pct=inputs.soc_now_pct,
         slots=slots,
         friday_full_cycle=friday_full_cycle,
         solver_status=status,
-        pv_calibration_factor=pv_calibration_factor,
+        pv_calibration_factor=inputs.pv_calibration_factor,
     )
 
 
@@ -445,33 +475,35 @@ class RollingPlanner:
         friday_sunset_at = await self._friday_sunset_in_horizon(horizon_start, slot_seconds, horizon_slots)
 
         plan = solve_slot_plan(
-            horizon_start=horizon_start,
-            slot_seconds=slot_seconds,
-            horizon_slots=horizon_slots,
-            soc_now_pct=soc_now_pct,
-            pv_forecast_w=pv_forecast,
-            load_forecast_w=load_forecast,
-            price_import=market_inputs.price_import,
-            price_export=market_inputs.price_export,
-            capacity_wh=settings.capacity_wh,
-            max_charge_w=settings.effective_max_charge_w,
-            max_discharge_w=settings.max_discharge_w,
-            one_way_efficiency=settings.one_way_efficiency,
-            cycle_cost_eur_kwh=settings.cycle_cost_eur_kwh,
-            export_cap_w=settings.export_cap_w,
-            grid_charge_enabled=settings.grid_charge_enabled,
-            grid_charge_relax_w=settings.grid_charge_relax_w,
-            terminal_soc_pct=settings.terminal_soc_pct,
-            soc_floor_pct=settings.soc_floor,
-            soc_ceiling_pct=settings.soc_ceiling,
-            friday_sunset_at=friday_sunset_at,
-            # SlotPlan.pv_calibration_factor is now purely a telemetry summary (mean of the
-            # per-hour vector actually used above); nothing downstream reads it for forecasting.
-            pv_calibration_factor=sum(self.pv_calibration_factors) / len(self.pv_calibration_factors),
-            generated_at=now,
-            tz=self.tz,
-            price_source=market_inputs.price_source_by_slot,
-            cloud_cover_pct=cloud_cover_pct,
+            SlotPlanInputs(
+                horizon_start=horizon_start,
+                slot_seconds=slot_seconds,
+                horizon_slots=horizon_slots,
+                soc_now_pct=soc_now_pct,
+                pv_forecast_w=pv_forecast,
+                load_forecast_w=load_forecast,
+                price_import=market_inputs.price_import,
+                price_export=market_inputs.price_export,
+                capacity_wh=settings.capacity_wh,
+                max_charge_w=settings.effective_max_charge_w,
+                max_discharge_w=settings.max_discharge_w,
+                one_way_efficiency=settings.one_way_efficiency,
+                cycle_cost_eur_kwh=settings.cycle_cost_eur_kwh,
+                export_cap_w=settings.export_cap_w,
+                grid_charge_enabled=settings.grid_charge_enabled,
+                grid_charge_relax_w=settings.grid_charge_relax_w,
+                terminal_soc_pct=settings.terminal_soc_pct,
+                soc_floor_pct=settings.soc_floor,
+                soc_ceiling_pct=settings.soc_ceiling,
+                friday_sunset_at=friday_sunset_at,
+                # SlotPlan.pv_calibration_factor is now purely a telemetry summary (mean of the
+                # per-hour vector actually used above); nothing downstream reads it for forecasting.
+                pv_calibration_factor=sum(self.pv_calibration_factors) / len(self.pv_calibration_factors),
+                generated_at=now,
+                tz=self.tz,
+                price_source=market_inputs.price_source_by_slot,
+                cloud_cover_pct=cloud_cover_pct,
+            )
         )
         if market_inputs.market_signal_ids or market_inputs.constraint_reasons:
             plan = replace(

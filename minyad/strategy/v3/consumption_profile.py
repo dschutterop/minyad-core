@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -38,8 +39,6 @@ async def fetch_flex_load_wh(
     api_key: str | None,
     start: datetime,
     end: datetime,
-    *,
-    timeout: float = 10.0,
 ) -> dict[datetime, float]:
     """Fetch Vesper's own dispatched Wh per 15-minute slot for ``[start, end)``.
 
@@ -51,10 +50,11 @@ async def fetch_flex_load_wh(
     ca_file = os.getenv("VESPER_CA_FILE") or os.getenv("MINYAD_INTERNAL_CA_FILE", "/run/minyad/tls/internal.crt")
     verify: str | bool = ca_file if Path(ca_file).is_file() else True
     try:
-        async with httpx.AsyncClient(timeout=timeout, verify=verify) as client:
-            response = await client.get(f"{vesper_api_url}/api/minyad/dispatch-ledger", params=params, headers=headers)
-            response.raise_for_status()
-            data = response.json()
+        async with asyncio.timeout(10.0):
+            async with httpx.AsyncClient(verify=verify) as client:
+                response = await client.get(f"{vesper_api_url}/api/minyad/dispatch-ledger", params=params, headers=headers)
+                response.raise_for_status()
+                data = response.json()
     except Exception:
         LOGGER.warning("Unable to fetch Vesper dispatch ledger; treating flex load as zero", exc_info=True)
         return {}

@@ -6,7 +6,7 @@ import pytest
 
 from minyad.strategy.v2.consumption_profile import ConsumptionProfile
 from minyad.strategy.v3.consumption_profile import HouseholdLoadProfile
-from minyad.strategy.v3.planner import PlannerSolveError, RollingPlanner, build_fallback_plan, solve_slot_plan
+from minyad.strategy.v3.planner import PlannerSolveError, RollingPlanner, SlotPlanInputs, build_fallback_plan, solve_slot_plan
 from minyad.strategy.v3.constants import Settings
 
 TZ = ZoneInfo("Europe/Amsterdam")
@@ -14,7 +14,7 @@ HORIZON_SLOTS = 96
 SLOT_SECONDS = 900
 
 
-def _base_kwargs(**overrides):
+def _base_inputs(**overrides):
     horizon_start = datetime(2026, 6, 29, 0, 0, tzinfo=TZ)  # Monday
     kwargs = dict(
         horizon_start=horizon_start,
@@ -42,11 +42,11 @@ def _base_kwargs(**overrides):
         tz=TZ,
     )
     kwargs.update(overrides)
-    return kwargs
+    return SlotPlanInputs(**kwargs)
 
 
 def test_invariant_2_zero_pv_discharges_never_grid_charges_never_exports():
-    plan = solve_slot_plan(**_base_kwargs())
+    plan = solve_slot_plan(_base_inputs())
     assert plan.solver_status == "Optimal"
     assert all(slot.planned_grid_charge_w == 0 for slot in plan.slots)
     assert all(slot.planned_export_w == 0 for slot in plan.slots)
@@ -71,7 +71,7 @@ def test_invariant_3_friday_full_cycle_reaches_target_without_grid_charge():
     for t in range(4, 62):
         pv[t] = 1500.0
     plan = solve_slot_plan(
-        **_base_kwargs(
+        _base_inputs(
             horizon_start=horizon_start,
             generated_at=horizon_start,
             pv_forecast_w=pv,
@@ -87,7 +87,7 @@ def test_invariant_3_friday_full_cycle_reaches_target_without_grid_charge():
 
 def test_invariant_11_no_simultaneous_charge_and_discharge():
     pv = [1500.0 if 20 <= t <= 60 else 0.0 for t in range(HORIZON_SLOTS)]
-    plan = solve_slot_plan(**_base_kwargs(pv_forecast_w=pv))
+    plan = solve_slot_plan(_base_inputs(pv_forecast_w=pv))
     assert plan.solver_status == "Optimal"
     assert all(not (slot.charge_w > 0 and slot.discharge_w > 0) for slot in plan.slots)
 
@@ -96,7 +96,7 @@ def test_invariant_12_solver_failure_raises_plannersolveerror():
     # SoC starts at 1% with zero PV and grid charging disabled: ch is forced to 0, so the
     # hard 5% floor at slot 1 can never be reached -> genuinely infeasible LP.
     with pytest.raises(PlannerSolveError):
-        solve_slot_plan(**_base_kwargs(soc_now_pct=1.0))
+        solve_slot_plan(_base_inputs(soc_now_pct=1.0))
 
 
 def test_fallback_plan_holds_flat_soc():

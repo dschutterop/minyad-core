@@ -84,8 +84,7 @@ class FakeAsyncClient:
     payload = {}
     fail = False
 
-    def __init__(self, *, timeout, verify):
-        self.timeout = timeout
+    def __init__(self, *, verify):
         self.verify = verify
 
     async def __aenter__(self):
@@ -95,7 +94,7 @@ class FakeAsyncClient:
         return False
 
     async def get(self, url, *, params, headers):
-        FakeAsyncClient.calls.append({"url": url, "params": params, "headers": headers, "timeout": self.timeout, "verify": self.verify})
+        FakeAsyncClient.calls.append({"url": url, "params": params, "headers": headers, "verify": self.verify})
         if FakeAsyncClient.fail:
             raise RuntimeError("boom")
         return FakeResponse(FakeAsyncClient.payload)
