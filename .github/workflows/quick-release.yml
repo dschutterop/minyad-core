@@ -1,9 +1,6 @@
-name: Full release
+name: Quick release
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 concurrency:
@@ -17,6 +14,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     env:
       PYTHONPATH: ${{ github.workspace }}
       DB_URL: postgresql+asyncpg://minyad:minyad@127.0.0.1:5432/minyad
@@ -41,7 +39,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r minyad-trade/requirements.txt -r host-services/requirements.txt pytest pytest-asyncio pytest-cov
+          python -m pip install -r requirements.txt -r minyad-trade/requirements.txt -r host-services/requirements.txt pytest pytest-asyncio
 
       - name: Validate production compose config
         run: |
@@ -49,87 +47,13 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/dev/null
 
       - name: Run tests
-        run: pytest --cov=. --cov-report=xml
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml
-          path: coverage.xml
-          if-no-files-found: error
-
-  sonar:
-    name: SonarQube
-    runs-on:
-      - self-hosted
-      - minyad
-    needs:
-      - test
-      - trivy
-    environment: production
-    permissions:
-      contents: read
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Download coverage report
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-xml
-          path: .
-
-      - name: Download Trivy reports
-        uses: actions/download-artifact@v4
-        with:
-          pattern: trivy-report-*
-          path: trivy-reports
-          merge-multiple: true
-
-      - name: Convert Trivy reports for SonarQube
-        run: python3 scripts/trivy_to_sonar.py --ignore-unfixed --output sonar-trivy-issues.json "trivy-reports/*.json"
-
-      - name: Load SonarQube environment
-        env:
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
-        run: |
-          ENV_FILE=""
-          if [ -n "${DEPLOY_PATH}" ] && [ -f "${DEPLOY_PATH}/.env" ]; then
-            ENV_FILE="${DEPLOY_PATH}/.env"
-          elif [ -f ".env" ]; then
-            ENV_FILE=".env"
-          else
-            echo "::error::.env with SONAR_HOST and SONAR_TOKEN not found. Checked workspace .env and DEPLOY_PATH/.env; DEPLOY_PATH='${DEPLOY_PATH}'."
-            exit 1
-          fi
-
-          set -a
-          . "${ENV_FILE}"
-          set +a
-
-          if [ -z "${SONAR_HOST}" ] || [ -z "${SONAR_TOKEN}" ]; then
-            echo "::error::SONAR_HOST and SONAR_TOKEN must be set in ${ENV_FILE}."
-            exit 1
-          fi
-          echo "::add-mask::${SONAR_TOKEN}"
-
-          case "${SONAR_HOST}" in
-            http://*|https://*) SONAR_HOST_URL="${SONAR_HOST}" ;;
-            *) SONAR_HOST_URL="http://${SONAR_HOST}" ;;
-          esac
-
-          echo "SONAR_HOST_URL=${SONAR_HOST_URL}" >> "${GITHUB_ENV}"
-          echo "SONAR_TOKEN=${SONAR_TOKEN}" >> "${GITHUB_ENV}"
-
-      - name: Run SonarQube scan
-        uses: SonarSource/sonarqube-scan-action@v6
+        run: pytest
 
   build:
     name: Build ${{ matrix.service }}
     runs-on: ubuntu-latest
     needs: test
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
@@ -189,88 +113,12 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-  trivy:
-    name: Trivy ${{ matrix.service }}
-    runs-on:
-      - self-hosted
-      - minyad
-    needs: build
-    permissions:
-      contents: read
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - migrate
-          - ingestion
-          - control
-          - strategy
-          - deadman
-          - api
-          - frontend
-          - mobile-frontend
-          - forecast
-          - agent
-          - trade
-          - reporting
-          - monitoring
-    steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Scan image
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
-          format: json
-          output: trivy-report-${{ matrix.service }}.json
-          vuln-type: os,library
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "0"
-
-      - name: Upload Trivy report
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-report-${{ matrix.service }}
-          path: trivy-report-${{ matrix.service }}.json
-          if-no-files-found: error
-
-  trivy-gate:
-    name: Trivy gate
-    runs-on:
-      - self-hosted
-      - minyad
-    needs: trivy
-    permissions:
-      contents: read
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Download Trivy reports
-        uses: actions/download-artifact@v4
-        with:
-          pattern: trivy-report-*
-          path: trivy-reports
-          merge-multiple: true
-
-      - name: Fail on fixable high or critical vulnerabilities
-        run: python3 scripts/trivy_to_sonar.py --ignore-unfixed --output sonar-trivy-issues.json --fail-on-severity HIGH --fail-on-severity CRITICAL "trivy-reports/*.json"
-
   deploy:
     name: Deploy
     runs-on:
       - self-hosted
       - minyad
-    needs:
-      - sonar
-      - trivy-gate
+    needs: build
     if: github.ref == 'refs/heads/main'
     environment: production
     permissions:
