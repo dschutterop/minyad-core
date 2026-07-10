@@ -179,12 +179,56 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
+  trivy:
+    name: Trivy ${{ matrix.service }}
+    runs-on:
+      - self-hosted
+      - minyad
+    needs: build
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - migrate
+          - ingestion
+          - control
+          - strategy
+          - deadman
+          - api
+          - frontend
+          - mobile-frontend
+          - forecast
+          - agent
+          - trade
+          - reporting
+          - monitoring
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scan image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+          format: table
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
   deploy:
     name: Deploy
     runs-on:
       - self-hosted
       - minyad
-    needs: build
+    needs: trivy
     if: github.ref == 'refs/heads/main'
     environment: production
     permissions:
