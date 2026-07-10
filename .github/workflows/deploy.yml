@@ -19,10 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: ${{ github.workspace }}
-      DB_URL: postgresql+asyncpg://minyad:minyad@127.0.0.1:5432/minyad
-      ENCRYPTION_KEY: REDACTED-PLACEHOLDER-FERNET-KEY
-      MINYAD_API_SECRET: test-secret
-      MQTT_HOST: 127.0.0.1
+      MQTT_HOST: ${{ vars.CI_MQTT_HOST || 'localhost' }}
       MQTT_PORT: 1883
     steps:
       - name: Check out repository
@@ -37,6 +34,21 @@ jobs:
             requirements.txt
             minyad-trade/requirements.txt
             host-services/requirements.txt
+
+      - name: Configure test secrets
+        run: |
+          python - <<'PY' >> "${GITHUB_ENV}"
+          import base64
+          import os
+          import secrets
+
+          db_password = secrets.token_urlsafe(24)
+          encryption_key = base64.urlsafe_b64encode(os.urandom(32)).decode()
+          api_secret = secrets.token_hex(32)
+          print(f"DB_URL=postgresql+asyncpg://minyad:{db_password}@localhost:5432/minyad")
+          print(f"ENCRYPTION_KEY={encryption_key}")
+          print(f"MINYAD_API_SECRET={api_secret}")
+          PY
 
       - name: Install test dependencies
         run: |
@@ -305,7 +317,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOST_SERVICE_UNITS: ${{ vars.HOST_SERVICE_UNITS || 'dsmr_bridge.service goodwe_bridge.service enphase_bridge.service enphase_token_refresh.timer' }}
           MINYAD_IMAGE_TAG: ${{ github.sha }}
-          MINYAD_METRICS_BIND_IP: ${{ vars.MINYAD_METRICS_BIND_IP || '192.168.110.2' }}
+          MINYAD_METRICS_BIND_IP: ${{ vars.MINYAD_METRICS_BIND_IP }}
           MINYAD_PROMETHEUS_SOURCE: ${{ vars.MINYAD_PROMETHEUS_SOURCE }}
         run: |
           test -n "${DEPLOY_PATH}"

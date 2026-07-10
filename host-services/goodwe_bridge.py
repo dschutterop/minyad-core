@@ -52,7 +52,7 @@ STATUS_UNREACHABLE = "unreachable"
 STATUS_ERROR = "error"
 CLIENT_ID = "goodwe-bridge"
 METRICS_PORT = int(os.getenv("METRICS_PORT", "9107"))
-METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+METRICS_ADDR = os.getenv("METRICS_ADDR", "")
 VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
 
 PROMETHEUS_REGISTRY = CollectorRegistry()

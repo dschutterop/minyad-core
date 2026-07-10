@@ -13,7 +13,7 @@ import paho.mqtt.client as mqtt
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default=os.getenv("MQTT_HOST", "minyad-mqtt"))
     parser.add_argument("--port", type=int, default=11883)
     parser.add_argument("--topic", default="#", help="Topic filter (default: #)")
     parser.add_argument("--username", default=os.getenv("MQTT_USER"))

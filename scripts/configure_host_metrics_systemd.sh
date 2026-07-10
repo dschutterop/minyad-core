@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-bind_ip="${MINYAD_METRICS_BIND_IP:-192.168.110.2}"
+bind_ip="${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}"
 
 if [[ "${bind_ip}" == "127.0.0.1" || "${bind_ip}" == "::1" ]]; then
   echo "Refusing to configure host metrics on loopback: ${bind_ip}" >&2

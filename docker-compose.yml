@@ -44,7 +44,15 @@ services:
       - |
         mkdir -p /run/minyad/tls
         if [ ! -s /run/minyad/tls/internal.crt ] || [ ! -s /run/minyad/tls/internal.key ]; then
-          cat > /tmp/minyad-internal-openssl.cnf <<'EOF'
+          tls_ip_sans="$${MINYAD_TLS_IP_SANS:-}"
+          ip_san_lines=""
+          ip_san_index=1
+          for ip_san in $$(printf '%s' "$$tls_ip_sans" | tr ',' ' '); do
+            ip_san_lines="$${ip_san_lines}IP.$${ip_san_index} = $${ip_san}
+        "
+            ip_san_index=$$((ip_san_index + 1))
+          done
+          cat > /tmp/minyad-internal-openssl.cnf <<EOF
         [req]
         distinguished_name = req_distinguished_name
         x509_extensions = v3_req
@@ -67,9 +75,8 @@ services:
         DNS.6 = vesper
         DNS.7 = localhost
         DNS.8 = pknpapp001
-        DNS.9 = minyad-host.example
-        IP.1 = 127.0.0.1
-        IP.2 = 192.168.110.2
+        DNS.9 = $${MINYAD_HOST_DNS:-minyad-host.example}
+        $${ip_san_lines}
         EOF
           openssl req -x509 -newkey rsa:4096 -sha256 -days 36500 -nodes \
             -keyout /run/minyad/tls/internal.key \
@@ -100,13 +107,13 @@ services:
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     ports:
-      - "127.0.0.1:1884:1883"
+      - "${MINYAD_MQTT_BIND_IP:?MINYAD_MQTT_BIND_IP must be set}:1884:1883"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
     networks: [minyad-internal, minyad-public]
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -p 1883 -u \"$$MQTT_USER\" -P \"$$MQTT_PASS\" -t healthcheck -n"]
+      test: ["CMD-SHELL", "mosquitto_pub -h localhost -p 1883 -u \"$$MQTT_USER\" -P \"$$MQTT_PASS\" -t healthcheck -n"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -123,9 +130,9 @@ services:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
       METRICS_PORT: 9106
-      METRICS_ADDR: 0.0.0.0
+      METRICS_ADDR: ${MINYAD_CONTAINER_BIND_ADDR:?MINYAD_CONTAINER_BIND_ADDR must be set}
     ports:
-      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9106:9106"
+      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9106:9106"
     depends_on:
       minyad-mqtt:
         condition: service_healthy
@@ -142,9 +149,9 @@ services:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
       METRICS_PORT: 9102
-      METRICS_ADDR: 0.0.0.0
+      METRICS_ADDR: ${MINYAD_CONTAINER_BIND_ADDR:?MINYAD_CONTAINER_BIND_ADDR must be set}
     ports:
-      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9102:9102"
+      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9102:9102"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -163,10 +170,10 @@ services:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
       METRICS_PORT: 9103
-      METRICS_ADDR: 0.0.0.0
+      METRICS_ADDR: ${MINYAD_CONTAINER_BIND_ADDR:?MINYAD_CONTAINER_BIND_ADDR must be set}
       STRATEGY_V2_PRIMARY: ${STRATEGY_V2_PRIMARY:-false}
     ports:
-      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9103:9103"
+      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9103:9103"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -206,7 +213,7 @@ services:
         - >-
           python -c "import ssl, urllib.request;
           ctx = ssl.create_default_context(cafile='/run/minyad/tls/internal.crt');
-          urllib.request.urlopen('https://127.0.0.1:8080/health', timeout=2, context=ctx).read()"
+          urllib.request.urlopen('https://localhost:8080/health', timeout=2, context=ctx).read()"
       interval: 5s
       timeout: 5s
       retries: 12
@@ -229,11 +236,12 @@ services:
       SHADOW_MODE: ${STRATEGY3_SHADOW_MODE:-false}
       MQTT_CLIENT_ID: minyad-strategy-v3
       METRICS_PORT: 9104
-      METRICS_ADDR: 0.0.0.0
+      METRICS_ADDR: ${MINYAD_CONTAINER_BIND_ADDR:?MINYAD_CONTAINER_BIND_ADDR must be set}
+      MINYAD_HEALTH_BIND_ADDR: ${MINYAD_CONTAINER_BIND_ADDR:?MINYAD_CONTAINER_BIND_ADDR must be set}
       MINYAD_TLS_CERT_FILE: /run/minyad/tls/internal.crt
       MINYAD_TLS_KEY_FILE: /run/minyad/tls/internal.key
     ports:
-      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9104:9104"
+      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9104:9104"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -250,7 +258,7 @@ services:
         - >-
           python -c "import ssl, urllib.request;
           ctx = ssl.create_default_context(cafile='/run/minyad/tls/internal.crt');
-          urllib.request.urlopen('https://127.0.0.1:8080/health', timeout=2, context=ctx).read()"
+          urllib.request.urlopen('https://localhost:8080/health', timeout=2, context=ctx).read()"
       interval: 5s
       timeout: 5s
       retries: 12
@@ -289,7 +297,7 @@ services:
       - uvicorn
       - main:app
       - --host
-      - 0.0.0.0
+      - ${MINYAD_CONTAINER_BIND_ADDR:?MINYAD_CONTAINER_BIND_ADDR must be set}
       - --port
       - "8000"
       - --ssl-certfile
@@ -304,7 +312,7 @@ services:
       minyad-mqtt:
         condition: service_healthy
     ports:
-      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9101:8000"
+      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9101:8000"
       - target: 8000
         published: "8002"
     networks: [minyad-internal, minyad-public]
@@ -316,7 +324,7 @@ services:
         - >-
           python -c "import ssl, urllib.request;
           ctx = ssl.create_default_context(cafile='/run/minyad/tls/internal.crt');
-          urllib.request.urlopen('https://127.0.0.1:8000/health', timeout=2, context=ctx).read()"
+          urllib.request.urlopen('https://localhost:8000/health', timeout=2, context=ctx).read()"
       interval: 5s
       timeout: 5s
       retries: 12
@@ -415,9 +423,9 @@ services:
       MQTT_HOST: minyad-mqtt
       MQTT_PORT: 1883
       METRICS_PORT: 9105
-      METRICS_ADDR: 0.0.0.0
+      METRICS_ADDR: ${MINYAD_CONTAINER_BIND_ADDR:?MINYAD_CONTAINER_BIND_ADDR must be set}
     ports:
-      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9105:9105"
+      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9105:9105"
     depends_on:
       minyad-mqtt:
         condition: service_healthy
@@ -452,7 +460,7 @@ services:
     volumes:
       - /:/host:ro,rslave
     ports:
-      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9110:9100"
+      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9110:9100"
     networks: [minyad-public]
 
   minyad-cadvisor:
@@ -468,7 +476,7 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
     ports:
-      - "${MINYAD_METRICS_BIND_IP:-127.0.0.1}:9111:8080"
+      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9111:8080"
     networks: [minyad-public]
 
 networks:

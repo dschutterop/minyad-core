@@ -8,7 +8,6 @@ Type=simple
 User=minyad
 WorkingDirectory=/opt/minyad/host-services
 EnvironmentFile=/opt/minyad/host-services/.env
-Environment=METRICS_ADDR=192.168.110.2
 ExecStart=/opt/minyad/host-services/venv/bin/python dsmr_bridge.py
 Restart=always
 RestartSec=10

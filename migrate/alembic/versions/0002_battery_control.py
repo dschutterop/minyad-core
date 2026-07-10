@@ -36,7 +36,7 @@ DEFAULT_SETTINGS = {
     "battery.max_discharge_w": "5000",
     "battery.max_charge_a": "30",
     "battery.nominal_v": "48",
-    "battery.inverter_ip": "192.168.1.50",
+    "battery.inverter_ip": "",
     "battery.inverter_retries": "5",
     "battery.inverter_delay": "3",
 }

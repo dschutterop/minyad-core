@@ -45,7 +45,7 @@ CONTROL_REFRESH_INTERVAL_SEC = int(os.getenv("CONTROL_REFRESH_INTERVAL_SEC", "30
 ACTIVE_COMMAND_RETRY_INTERVAL_SEC = int(os.getenv("ACTIVE_COMMAND_RETRY_INTERVAL_SEC", "60"))
 STRATEGY_V2_PRIMARY = os.getenv("STRATEGY_V2_PRIMARY", "false").strip().lower() in {"1", "true", "yes", "on"}
 METRICS_PORT = int(os.getenv("METRICS_PORT", "9103"))
-METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+METRICS_ADDR = os.getenv("METRICS_ADDR", "")
 VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
 BATTERY_TOPIC_TYPES = {
     "soc": int,

@@ -13,4 +13,4 @@ RUN groupadd --gid 1000 minyad \
     && useradd --uid 1000 --gid minyad --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin minyad
 WORKDIR /app/module
 USER 1000:1000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "exec uvicorn main:app --host \"${MINYAD_CONTAINER_BIND_ADDR:-localhost}\" --port 8080"]
