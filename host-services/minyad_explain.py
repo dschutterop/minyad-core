@@ -179,18 +179,14 @@ def direction(sp: int) -> tuple[str, int]:
     return "Idle", 0
 
 
-def explain_line(cur, row: dict[str, Any], verbose: bool = False) -> dict[str, Any]:
-    ts = row["timestamp"]
-    d, watts = direction(int(row["setpoint_w"] or 0))
+def _resolve_grid_power(cur, row: dict[str, Any], ts: datetime) -> float | None:
     grid = row.get("grid_power_at_time")
-    if grid is None:
-        gp = nearest(cur, "power_curve_points", ts, "grid")
-        grid = gp and (gp.get("net_w") if "net_w" in gp else gp.get("power_w"))
-    remaining = forecast_remaining_kwh(cur, ts)
-    solar_actual = nearest(cur, "power_curve_points", ts, "solar")
-    solar_forecast = nearest(cur, "solar_forecast_points", ts)
-    actual_solar_w = solar_actual and (solar_actual.get("power_w") or solar_actual.get("net_w"))
-    forecast_solar_w = solar_forecast and (solar_forecast.get("estimated_w") or solar_forecast.get("power_w"))
+    if grid is not None:
+        return grid
+    gp = nearest(cur, "power_curve_points", ts, "grid")
+    return gp and (gp.get("net_w") if "net_w" in gp else gp.get("power_w"))
+
+def _explain_line_parts(row: dict[str, Any], remaining: float | None, grid: float | None) -> list[str]:
     parts = [f"SoC {row['battery_soc_at_time']:.0f}%" if row.get("battery_soc_at_time") is not None else "SoC unknown"]
     if remaining is not None:
         parts.append(f"solar forecast +{remaining:.1f}kWh remaining")
@@ -201,6 +197,18 @@ def explain_line(cur, row: dict[str, Any], verbose: bool = False) -> dict[str, A
             parts.append(f"grid import {grid/1000:.1f}kW")
         else:
             parts.append("grid balanced")
+    return parts
+
+def explain_line(cur, row: dict[str, Any], verbose: bool = False) -> dict[str, Any]:
+    ts = row["timestamp"]
+    d, watts = direction(int(row["setpoint_w"] or 0))
+    grid = _resolve_grid_power(cur, row, ts)
+    remaining = forecast_remaining_kwh(cur, ts)
+    solar_actual = nearest(cur, "power_curve_points", ts, "solar")
+    solar_forecast = nearest(cur, "solar_forecast_points", ts)
+    actual_solar_w = solar_actual and (solar_actual.get("power_w") or solar_actual.get("net_w"))
+    forecast_solar_w = solar_forecast and (solar_forecast.get("estimated_w") or solar_forecast.get("power_w"))
+    parts = _explain_line_parts(row, remaining, grid)
     text = f"{ts.astimezone(LOCAL_TZ):%H:%M} — {d} @ {watts}W: " + ", ".join(parts) + "."
     if verbose:
         text += f" reason: {row.get('trigger_reason')}; old→new {row.get('old_setpoint_w')}→{row.get('setpoint_w')}W; floor/ceiling {row.get('soc_floor')}/{row.get('soc_ceiling')}%; solar forecast/actual {forecast_solar_w}/{actual_solar_w}W."
@@ -244,7 +252,7 @@ def thresholds(settings: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def main() -> None:
+def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Explain Minyad charge/discharge setpoint changes")
     p.add_argument("--range", dest="range_", help="day, week, month, YYYY-MM-DD, or HH:MM-HH:MM")
     p.add_argument("--why", action="store_true", help="deep dive on most recent decision")
@@ -254,39 +262,52 @@ def main() -> None:
     args = p.parse_args()
     if not args.why and not args.range_:
         p.error("--range is required unless --why is used")
+    return args
+
+def _resolve_window(cur, args: argparse.Namespace) -> Window | None:
+    if not args.why:
+        return parse_window(args.range_)
+    cur.execute("select min(timestamp) as first, max(timestamp) as last from setpoint_log")
+    bounds = cur.fetchone()
+    if not bounds or bounds["last"] is None:
+        return None
+    return Window(bounds["last"] - timedelta(seconds=1), bounds["last"] + timedelta(seconds=1), "most recent")
+
+def _build_payload(args: argparse.Namespace, rows: list[dict[str, Any]], explained: list[dict[str, Any]], win: Window, settings: dict[str, str]) -> Any:
+    if args.summary:
+        return summary(rows, win.start.astimezone(timezone.utc), win.end.astimezone(timezone.utc))
+    if args.why:
+        return explained[-1] | {"thresholds_and_weights": thresholds(settings)}
+    return explained
+
+def _print_payload(args: argparse.Namespace, payload: Any, explained: list[dict[str, Any]]) -> None:
+    if args.format == "json":
+        print(json.dumps(payload, indent=2, default=str))
+    elif args.format == "table":
+        print("TIME                 OLD→NEW W  MODE       SOC   GRID W  EXPLANATION")
+        for e in explained:
+            print(f"{e['timestamp'][:19]:19} {str(e['old_setpoint_w']):>4}→{e['setpoint_w']:<5} {e['direction']:<10} {str(e['soc']):>5} {str(e['grid_power_w']):>7}  {e['text']}")
+    elif isinstance(payload, dict):
+        print(json.dumps(payload, indent=2, default=str) if args.summary else payload["text"] + "\n" + json.dumps(payload["thresholds_and_weights"], indent=2))
+    else:
+        for e in explained:
+            print(e["text"])
+
+def main() -> None:
+    args = _parse_args()
     with connect() as conn, conn.cursor() as cur:
         settings = load_settings(cur)
-        if args.why:
-            cur.execute("select min(timestamp) as first, max(timestamp) as last from setpoint_log")
-            bounds = cur.fetchone()
-            if not bounds or bounds["last"] is None:
-                print("no decisions in this range")
-                return
-            win = Window(bounds["last"] - timedelta(seconds=1), bounds["last"] + timedelta(seconds=1), "most recent")
-        else:
-            win = parse_window(args.range_)
+        win = _resolve_window(cur, args)
+        if win is None:
+            print("no decisions in this range")
+            return
         rows = load_decisions(cur, win.start, win.end)
         if not rows:
             print(json.dumps({"message": "no decisions in this range", "range": win.label}) if args.format == "json" else "no decisions in this range")
             return
         explained = [explain_line(cur, r, args.verbose or args.why) for r in rows]
-        if args.summary:
-            payload = summary(rows, win.start.astimezone(timezone.utc), win.end.astimezone(timezone.utc))
-        elif args.why:
-            payload = explained[-1] | {"thresholds_and_weights": thresholds(settings)}
-        else:
-            payload = explained
-        if args.format == "json":
-            print(json.dumps(payload, indent=2, default=str))
-        elif args.format == "table":
-            print("TIME                 OLD→NEW W  MODE       SOC   GRID W  EXPLANATION")
-            for e in explained:
-                print(f"{e['timestamp'][:19]:19} {str(e['old_setpoint_w']):>4}→{e['setpoint_w']:<5} {e['direction']:<10} {str(e['soc']):>5} {str(e['grid_power_w']):>7}  {e['text']}")
-        elif isinstance(payload, dict):
-            print(json.dumps(payload, indent=2, default=str) if args.summary else payload["text"] + "\n" + json.dumps(payload["thresholds_and_weights"], indent=2))
-        else:
-            for e in explained:
-                print(e["text"])
+        payload = _build_payload(args, rows, explained, win, settings)
+        _print_payload(args, payload, explained)
 
 if __name__ == "__main__":
     main()

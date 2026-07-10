@@ -567,17 +567,10 @@ def value_is_fresh_iso(value: Any, max_age_seconds: int = 120) -> tuple[bool, in
     return age <= max_age_seconds, age
 
 
-def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None = None) -> dict[str, Any]:
-    api_status = component_status("API", "ok", "Minyad API process is serving requests", endpoint="/health")
-    db_status = component_status(
-        "PostgreSQL",
-        "ok" if db_ok else "error",
-        "Database query succeeded" if db_ok else f"Database query failed: {db_error or 'unknown error'}",
-        endpoint="DB_URL",
-    )
+def _mqtt_health_component() -> dict[str, Any]:
     mqtt_info = mqtt.connection_info()
     mqtt_ok = bool(mqtt_info.get("connected"))
-    mqtt_status = component_status(
+    return component_status(
         "MQTT broker",
         "ok" if mqtt_ok else "error",
         "API MQTT client is connected" if mqtt_ok else "API MQTT client is not connected",
@@ -585,11 +578,13 @@ def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None
         **mqtt_info,
     )
 
+
+def _battery_health_component(cache: dict[str, Any]) -> dict[str, Any]:
     battery_required = ("soc", "power_w", "voltage", "mode", "bridge_status", "bridge_last_seen")
     battery_missing = [key for key in battery_required if not cache.get(key)]
     bridge_fresh, bridge_age = value_is_fresh_iso(cache.get("bridge_last_seen"), 90)
     battery_ok = not battery_missing and str(cache.get("bridge_status", "")).lower() == "online" and bridge_fresh
-    battery = component_status(
+    return component_status(
         "Battery / GoodWe bridge",
         "ok" if battery_ok else "warning",
         "GoodWe bridge telemetry is current" if battery_ok else "Missing, stale, or offline GoodWe telemetry",
@@ -600,11 +595,13 @@ def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None
         age_seconds=bridge_age,
     )
 
+
+def _grid_health_component(cache: dict[str, Any]) -> dict[str, Any]:
     grid_required = ("grid_net_power_w", "grid_timestamp", "grid_status")
     grid_missing = [key for key in grid_required if not cache.get(key)]
     grid_fresh, grid_age = value_is_fresh_iso(cache.get("grid_timestamp"), 120)
     grid_ok = not grid_missing and grid_fresh
-    grid = component_status(
+    return component_status(
         "DSMR / grid meter",
         "ok" if grid_ok else "warning",
         "Grid meter telemetry is current" if grid_ok else "Missing or stale DSMR grid telemetry",
@@ -615,10 +612,12 @@ def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None
         age_seconds=grid_age,
     )
 
+
+def _solar_health_component(cache: dict[str, Any]) -> dict[str, Any]:
     solar_fresh, solar_age = value_is_fresh_iso(cache.get("solar_updated_at") or cache.get("solar_bridge_last_seen"), 180)
     inverter_keys = [key for key in cache if key.startswith("solar_inverter_") and key.endswith("_power_w")]
     solar_ok = bool(cache.get("solar_power_w") is not None or inverter_keys) and solar_fresh
-    solar = component_status(
+    return component_status(
         "Solar / Enphase bridge",
         "ok" if solar_ok else "warning",
         "Solar production telemetry is current" if solar_ok else "Missing or stale solar telemetry",
@@ -628,6 +627,20 @@ def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None
         age_seconds=solar_age,
         inverter_count=len(inverter_keys),
     )
+
+
+def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None = None) -> dict[str, Any]:
+    api_status = component_status("API", "ok", "Minyad API process is serving requests", endpoint="/health")
+    db_status = component_status(
+        "PostgreSQL",
+        "ok" if db_ok else "error",
+        "Database query succeeded" if db_ok else f"Database query failed: {db_error or 'unknown error'}",
+        endpoint="DB_URL",
+    )
+    mqtt_status = _mqtt_health_component()
+    battery = _battery_health_component(cache)
+    grid = _grid_health_component(cache)
+    solar = _solar_health_component(cache)
 
     endpoint_items = [
         component_status("Dashboard state", "ok", "Energy dashboard API endpoint is registered", endpoint="/api/state"),
@@ -1759,6 +1772,52 @@ async def latest_pv_uncertainty_bands(session: AsyncSession) -> dict[str, dict[s
     return {row.cloud_class: {"p10_multiplier": float(row.p10_multiplier), "p90_multiplier": float(row.p90_multiplier)} for row in rows}
 
 
+async def _dashboard_forecast_curves(
+    session: SessionDep, now_: datetime, end: datetime, step_seconds: int
+) -> tuple[str, str | None, dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    empty_curves: dict[str, list[dict[str, Any]]] = {
+        "forecast": [],
+        "load_forecast": [],
+        "battery_forecast": [],
+        "grid_forecast": [],
+        "curtailment_forecast": [],
+        "pv_p10_forecast": [],
+        "pv_p90_forecast": [],
+    }
+    plan_row, latest_plan_status = await _current_forecast_plan(session)
+    if plan_row is None:
+        plan_status = "fallback" if latest_plan_status == "FALLBACK" else "missing"
+        return plan_status, None, empty_curves, []
+
+    generated_at = plan_row["generated_at"]
+    if generated_at.tzinfo is None:
+        generated_at = generated_at.replace(tzinfo=timezone.utc)
+    plan_generated_at = generated_at.isoformat()
+    is_fresh = generated_at > datetime.now(timezone.utc) - timedelta(minutes=PLAN_STALE_MINUTES)
+    # A FALLBACK plan (solver couldn't produce a real solution, e.g. Open-Meteo was
+    # unreachable) is a flat pv_forecast_w=0/load_forecast_w=0 hold — persisted with a fresh
+    # generated_at like any other plan, so freshness alone can't tell it apart from a real
+    # forecast. Treat it the same as "no plan": never show a fabricated flat-zero line.
+    is_real_plan = plan_row.get("solver_status") != "FALLBACK"
+    if not is_fresh:
+        return "stale", plan_generated_at, empty_curves, []
+    if not is_real_plan:
+        return "fallback", plan_generated_at, empty_curves, []
+
+    battery_conf = await battery_settings(session)
+    capacity_wh = float(battery_conf.get("capacity_wh", 10240))
+    mqtt_payload = latest_mqtt_status()
+    soc_now = (
+        coerce_float_status_value("soc", mqtt_payload.get("soc", 50))
+        if mqtt_payload.get("soc") not in (None, "")
+        else 50.0
+    )
+    uncertainty_bands = await latest_pv_uncertainty_bands(session)
+    curves, price_source_points = build_plan_curves(plan_row["payload"], capacity_wh, soc_now, now_, end, uncertainty_bands)
+    curves = {key: interpolate_points(points, step_seconds) for key, points in curves.items()}
+    return "ok", plan_generated_at, curves, price_source_points
+
+
 @app.get("/dashboard/curves")
 async def dashboard_curves(
     session: SessionDep,
@@ -1798,52 +1857,7 @@ async def dashboard_curves(
             "net_w": round(float(row["net_w"])) if row["net_w"] is not None else round(float(row["power_w"] or 0)),
         })
 
-    plan_row = await latest_slot_plan(session)
-    latest_plan_status = plan_row.get("solver_status") if plan_row is not None else None
-    if plan_row is not None and latest_plan_status == "FALLBACK":
-        plan_row = await latest_slot_plan(session, include_fallback=False)
-    plan_status = "missing"
-    plan_generated_at: str | None = None
-    curves: dict[str, list[dict[str, Any]]] = {
-        "forecast": [],
-        "load_forecast": [],
-        "battery_forecast": [],
-        "grid_forecast": [],
-        "curtailment_forecast": [],
-        "pv_p10_forecast": [],
-        "pv_p90_forecast": [],
-    }
-    price_source_points: list[dict[str, Any]] = []
-    if plan_row is not None:
-        generated_at = plan_row["generated_at"]
-        if generated_at.tzinfo is None:
-            generated_at = generated_at.replace(tzinfo=timezone.utc)
-        plan_generated_at = generated_at.isoformat()
-        is_fresh = generated_at > datetime.now(timezone.utc) - timedelta(minutes=PLAN_STALE_MINUTES)
-        # A FALLBACK plan (solver couldn't produce a real solution, e.g. Open-Meteo was
-        # unreachable) is a flat pv_forecast_w=0/load_forecast_w=0 hold — persisted with a fresh
-        # generated_at like any other plan, so freshness alone can't tell it apart from a real
-        # forecast. Treat it the same as "no plan": never show a fabricated flat-zero line.
-        is_real_plan = plan_row.get("solver_status") != "FALLBACK"
-        if is_fresh and is_real_plan:
-            plan_status = "ok"
-            battery_conf = await battery_settings(session)
-            capacity_wh = float(battery_conf.get("capacity_wh", 10240))
-            mqtt_payload = latest_mqtt_status()
-            soc_now = (
-                coerce_float_status_value("soc", mqtt_payload.get("soc", 50))
-                if mqtt_payload.get("soc") not in (None, "")
-                else 50.0
-            )
-            uncertainty_bands = await latest_pv_uncertainty_bands(session)
-            curves, price_source_points = build_plan_curves(plan_row["payload"], capacity_wh, soc_now, now_, end, uncertainty_bands)
-            curves = {key: interpolate_points(points, step_seconds) for key, points in curves.items()}
-        elif not is_fresh:
-            plan_status = "stale"
-        else:
-            plan_status = "fallback"
-    elif latest_plan_status == "FALLBACK":
-        plan_status = "fallback"
+    plan_status, plan_generated_at, curves, price_source_points = await _dashboard_forecast_curves(session, now_, end, step_seconds)
 
     return {
         "window": window,
@@ -1955,16 +1969,10 @@ async def api_forecast(session: SessionDep, hours_ahead: int = 12) -> dict[str, 
     hours = max(1, min(48, hours_ahead))
     now_ = datetime.now(timezone.utc)
     end = now_ + timedelta(hours=hours)
-    plan_row = await latest_slot_plan(session)
-    latest_plan_status = plan_row.get("solver_status") if plan_row is not None else None
-    if plan_row is not None and latest_plan_status == "FALLBACK":
-        plan_row = await latest_slot_plan(session, include_fallback=False)
-    plan_generated_at = plan_row["generated_at"] if plan_row is not None else None
-    if plan_generated_at is not None and plan_generated_at.tzinfo is None:
-        plan_generated_at = plan_generated_at.replace(tzinfo=timezone.utc)
-    if plan_generated_at is None or plan_generated_at <= now_ - timedelta(minutes=PLAN_STALE_MINUTES):
-        status = "fallback" if plan_row is None and latest_plan_status == "FALLBACK" else "missing" if plan_row is None else "stale"
-        return {"hours_ahead": hours, "plan_status": status, "points": []}
+    plan_row, latest_plan_status = await _current_forecast_plan(session)
+    stale_status = _forecast_stale_status(plan_row, latest_plan_status, now_)
+    if stale_status is not None:
+        return {"hours_ahead": hours, "plan_status": stale_status, "points": []}
     if plan_row.get("solver_status") == "FALLBACK":
         # See dashboard_curves: a FALLBACK plan is a flat pv_forecast_w=0 hold, not a real
         # forecast — treat it the same as no plan rather than returning fabricated zeros.
@@ -1979,6 +1987,25 @@ async def api_forecast(session: SessionDep, hours_ahead: int = 12) -> dict[str, 
     )
     curves, _ = build_plan_curves(plan_row["payload"], capacity_wh, soc_now, now_, end)
     return {"hours_ahead": hours, "plan_status": "ok", "points": interpolate_points(curves["forecast"], 60)}
+
+
+async def _current_forecast_plan(session: SessionDep) -> tuple[dict[str, Any] | None, str | None]:
+    plan_row = await latest_slot_plan(session)
+    latest_plan_status = plan_row.get("solver_status") if plan_row is not None else None
+    if plan_row is not None and latest_plan_status == "FALLBACK":
+        plan_row = await latest_slot_plan(session, include_fallback=False)
+    return plan_row, latest_plan_status
+
+
+def _forecast_stale_status(plan_row: dict[str, Any] | None, latest_plan_status: str | None, now_: datetime) -> str | None:
+    plan_generated_at = plan_row["generated_at"] if plan_row is not None else None
+    if plan_generated_at is not None and plan_generated_at.tzinfo is None:
+        plan_generated_at = plan_generated_at.replace(tzinfo=timezone.utc)
+    if plan_generated_at is None or plan_generated_at <= now_ - timedelta(minutes=PLAN_STALE_MINUTES):
+        if plan_row is None and latest_plan_status == "FALLBACK":
+            return "fallback"
+        return "missing" if plan_row is None else "stale"
+    return None
 
 
 @app.post("/api/control/battery", dependencies=MUTATION_AUTH)
@@ -2087,6 +2114,20 @@ async def _fetch_log_rows(session: AsyncSession, query: str, params: dict[str, A
     return [_serialize_log_row(row) for row in rows]
 
 
+async def _collect_log(
+    session: AsyncSession,
+    logs: dict[str, Any],
+    unavailable: list[str],
+    table: str,
+    query: str,
+    params: dict[str, Any],
+) -> None:
+    if await _table_exists(session, table):
+        logs[table] = await _fetch_log_rows(session, query, params)
+    else:
+        unavailable.append(table)
+
+
 @app.get("/api/agent/logs", dependencies=[Depends(require_api_key)])
 async def agent_operational_logs(
     session: SessionDep,
@@ -2103,16 +2144,13 @@ async def agent_operational_logs(
     logs: dict[str, Any] = {}
     unavailable: list[str] = []
 
-    if await _table_exists(session, "agent_decisions"):
-        logs["agent_decisions"] = await _fetch_log_rows(session, """
-            select id, created_at, action_taken, setpoint_w, reasoning, confidence, input_snapshot, dry_run, model
-            from agent_decisions
-            where created_at >= :since and created_at <= :until
-            order by created_at desc, id desc
-            limit :limit
-        """, params)
-    else:
-        unavailable.append("agent_decisions")
+    await _collect_log(session, logs, unavailable, "agent_decisions", """
+        select id, created_at, action_taken, setpoint_w, reasoning, confidence, input_snapshot, dry_run, model
+        from agent_decisions
+        where created_at >= :since and created_at <= :until
+        order by created_at desc, id desc
+        limit :limit
+    """, params)
 
     if await _table_exists(session, "setpoint_log"):
         columns = await setpoint_log_columns(session)
@@ -2128,29 +2166,23 @@ async def agent_operational_logs(
     else:
         unavailable.append("setpoint_log")
 
-    if await _table_exists(session, "strategy_decisions"):
-        logs["strategy_decisions"] = await _fetch_log_rows(session, """
-            select id, timestamp, mode, soc_floor, soc_ceiling, forecast_ghi, trigger_reason, applied_at
-            from strategy_decisions
-            where timestamp >= :since and timestamp <= :until
-            order by timestamp desc, id desc
-            limit :limit
-        """, params)
-    else:
-        unavailable.append("strategy_decisions")
+    await _collect_log(session, logs, unavailable, "strategy_decisions", """
+        select id, timestamp, mode, soc_floor, soc_ceiling, forecast_ghi, trigger_reason, applied_at
+        from strategy_decisions
+        where timestamp >= :since and timestamp <= :until
+        order by timestamp desc, id desc
+        limit :limit
+    """, params)
 
-    if await _table_exists(session, "day_plans"):
-        logs["day_plans"] = await _fetch_log_rows(session, """
-            select id, plan_date, solar_mode, forecast_ghi_kwh_m2, effective_soc_floor,
-                   effective_soc_ceiling, grid_charge_windows, price_discharge_windows,
-                   planned_soc_at_sunset, valid_until, reason, created_at
-            from day_plans
-            where created_at <= :until and valid_until >= :since
-            order by created_at desc, id desc
-            limit :limit
-        """, params)
-    else:
-        unavailable.append("day_plans")
+    await _collect_log(session, logs, unavailable, "day_plans", """
+        select id, plan_date, solar_mode, forecast_ghi_kwh_m2, effective_soc_floor,
+               effective_soc_ceiling, grid_charge_windows, price_discharge_windows,
+               planned_soc_at_sunset, valid_until, reason, created_at
+        from day_plans
+        where created_at <= :until and valid_until >= :since
+        order by created_at desc, id desc
+        limit :limit
+    """, params)
 
     if await _table_exists(session, "slot_plans"):
         columns = await _table_columns(session, "slot_plans")
@@ -2165,16 +2197,13 @@ async def agent_operational_logs(
     else:
         unavailable.append("slot_plans")
 
-    if await _table_exists(session, "strategy_shadow_log"):
-        logs["strategy_shadow_log"] = await _fetch_log_rows(session, """
-            select id, ts, v2_setpoint_w, v3_setpoint_w, soc, net_grid_w, v3_reason, created_at
-            from strategy_shadow_log
-            where ts >= :since and ts <= :until
-            order by ts desc, id desc
-            limit :limit
-        """, params)
-    else:
-        unavailable.append("strategy_shadow_log")
+    await _collect_log(session, logs, unavailable, "strategy_shadow_log", """
+        select id, ts, v2_setpoint_w, v3_setpoint_w, soc, net_grid_w, v3_reason, created_at
+        from strategy_shadow_log
+        where ts >= :since and ts <= :until
+        order by ts desc, id desc
+        limit :limit
+    """, params)
 
     if await _table_exists(session, "agent_messages"):
         columns = await _table_columns(session, "agent_messages")
@@ -2196,26 +2225,20 @@ async def agent_operational_logs(
     else:
         unavailable.append("agent_messages")
 
-    if await _table_exists(session, "telemetry_log"):
-        logs["telemetry_log"] = await _fetch_log_rows(session, """
-            select id, timestamp, topic, payload
-            from telemetry_log
-            where timestamp >= :since and timestamp <= :until
-            order by timestamp desc, id desc
-            limit :limit
-        """, params)
-    else:
-        unavailable.append("telemetry_log")
+    await _collect_log(session, logs, unavailable, "telemetry_log", """
+        select id, timestamp, topic, payload
+        from telemetry_log
+        where timestamp >= :since and timestamp <= :until
+        order by timestamp desc, id desc
+        limit :limit
+    """, params)
 
-    if await _table_exists(session, "battery_override"):
-        logs["battery_override"] = await _fetch_log_rows(session, """
-            select *
-            from battery_override
-            order by id
-            limit :limit
-        """, params)
-    else:
-        unavailable.append("battery_override")
+    await _collect_log(session, logs, unavailable, "battery_override", """
+        select *
+        from battery_override
+        order by id
+        limit :limit
+    """, params)
 
     settings_rows = (await session.execute(text("""
         select key, value, updated_at

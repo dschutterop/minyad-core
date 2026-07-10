@@ -510,27 +510,25 @@ class GoodWeBridge:
         self.modbus_writes_total += 1
         return "success"
 
-    async def _apply_api_command(self, charge: int, discharge: int) -> tuple[str, bool | None]:
+    def _select_api_command(self, charge: int, discharge: int) -> tuple[str, int, Any]:
         if charge > 0 and discharge <= 0:
-            command, target = "charge", charge
-            call = self.backend.set_charge
-        elif discharge > 0 and charge <= 0:
-            command, target = "discharge", discharge
-            call = self.backend.set_discharge
-        elif charge > 0 and discharge > 0:
+            return "charge", charge, self.backend.set_charge
+        if discharge > 0 and charge <= 0:
+            return "discharge", discharge, self.backend.set_discharge
+        if charge > 0 and discharge > 0:
             if charge >= discharge:
                 command, target = "charge", charge
-                call = self.backend.set_charge
             else:
                 command, target = "discharge", discharge
-                call = self.backend.set_discharge
             logger.warning(
                 "[api] Conflicting charge/discharge targets received; choosing api_command=%s target_power_w=%s charge_limit_w=%s discharge_limit_w=%s",
                 command, target, charge, discharge,
             )
-        else:
-            command, target = "stop_forced_mode", 0
-            call = getattr(self.backend, "stop_forced_mode", None)
+            return command, target, self.backend.set_charge if command == "charge" else self.backend.set_discharge
+        return "stop_forced_mode", 0, getattr(self.backend, "stop_forced_mode", None)
+
+    async def _apply_api_command(self, charge: int, discharge: int) -> tuple[str, bool | None]:
+        command, target, call = self._select_api_command(charge, discharge)
         current = (command, target)
         age = None if self._last_api_command_monotonic is None else monotonic() - self._last_api_command_monotonic
         if current == self._last_api_command and not (age is not None and age >= self.config.write_refresh_interval_s):
