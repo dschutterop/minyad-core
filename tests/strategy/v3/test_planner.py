@@ -127,9 +127,11 @@ async def _run_pv_per_hour_factor_test():
     now = datetime(2026, 7, 1, 10, 0, tzinfo=TZ)  # exactly on the hour, local time
 
     async def ghi_fetcher(**kwargs):
+        await asyncio.sleep(0)
         return [(now + timedelta(hours=i), 100.0) for i in range(-1, 4)]
 
     async def sunset_fetcher(target_date, **kwargs):
+        await asyncio.sleep(0)
         return datetime.combine(target_date, datetime.min.time(), TZ).replace(hour=21)
 
     # 8 slots of 15 minutes = two full hours: 10:00-11:00 then 11:00-12:00.
@@ -156,12 +158,15 @@ async def _run_load_temperature_correction_test():
     now = datetime(2026, 7, 1, 14, 0, tzinfo=TZ)  # Wednesday afternoon
 
     async def ghi_fetcher(**kwargs):
+        await asyncio.sleep(0)
         return [(now + timedelta(hours=i), 0.0) for i in range(-1, 4)]
 
     async def sunset_fetcher(target_date, **kwargs):
+        await asyncio.sleep(0)
         return datetime.combine(target_date, datetime.min.time(), TZ).replace(hour=21)
 
     async def temperature_fetcher(**kwargs):
+        await asyncio.sleep(0)
         return [(now + timedelta(hours=i), 30.0) for i in range(-1, 4)]  # flat 30 degC forecast
 
     settings = Settings(initial={"strategy3.horizon_slots": "4"})
@@ -189,9 +194,11 @@ async def _run_pv_clipping_test():
     now = datetime(2026, 7, 1, 12, 0, tzinfo=TZ)
 
     async def ghi_fetcher(**kwargs):
+        await asyncio.sleep(0)
         return [(now + timedelta(hours=i), 1000.0) for i in range(-1, 2)]
 
     async def sunset_fetcher(target_date, **kwargs):
+        await asyncio.sleep(0)
         return datetime.combine(target_date, datetime.min.time(), TZ).replace(hour=21)
 
     settings = Settings(initial={"strategy3.horizon_slots": "4", "site.inverter_ac_max_w": "3000"})
@@ -208,9 +215,11 @@ async def _run_market_trace_metadata_test():
     now = datetime(2026, 7, 1, 10, 0, tzinfo=TZ)
 
     async def ghi_fetcher(**kwargs):
+        await asyncio.sleep(0)
         return [(now + timedelta(hours=i), 0.0) for i in range(8)]
 
     async def sunset_fetcher(target_date, **kwargs):
+        await asyncio.sleep(0)
         return datetime.combine(target_date, datetime.min.time(), TZ).replace(hour=21)
 
     settings = Settings(initial={"strategy3.horizon_slots": "4"})

@@ -105,6 +105,7 @@ def test_invariant_22_market_signal_in_shadow_mode_does_not_dispatch():
         seen["payload"] = payload
 
     async def recalculate_plan():
+        await asyncio.sleep(0)
         seen["recalculated"] = True
 
     svc.planner.on_market_signal = on_market_signal

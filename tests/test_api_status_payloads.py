@@ -63,6 +63,7 @@ def test_battery_status_includes_soc_limit_override_flag(monkeypatch):
         },
     )
     async def skip_curve_store(*_args, **_kwargs):
+        await asyncio.sleep(0)
         return None
 
     monkeypatch.setattr(api_main, "store_power_curve_point", skip_curve_store)

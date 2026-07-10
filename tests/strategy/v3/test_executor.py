@@ -177,7 +177,7 @@ def test_export_block_threshold_widens_with_planned_export():
     plan = make_plan(clock.now, planned_export_w=200)
     executor.current_setpoint_w = -400
     # export of -250W would normally trip the 100W threshold, but plan allows 200W more room (300W)
-    decision = executor.tick(ExecutorState(-250, battery_soc=50, current_setpoint_w=-400), plan, tracker())
+    executor.tick(ExecutorState(-250, battery_soc=50, current_setpoint_w=-400), plan, tracker())
     assert not executor._export_blocked
 
 

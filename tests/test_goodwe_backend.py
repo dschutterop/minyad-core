@@ -42,6 +42,7 @@ def install_goodwe_stub():
             }
 
     async def connect(_host, family=None):
+        await asyncio.sleep(0)
         fake_goodwe.connect_calls += 1
         inverter = FakeInverter()
         fake_goodwe.instances.append(inverter)

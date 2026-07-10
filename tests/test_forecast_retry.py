@@ -45,8 +45,10 @@ class FlakyAsyncClient:
 def test_fetch_solar_forecast_retries_transient_request_errors(monkeypatch):
     FlakyAsyncClient.attempts = 0
     sleeps = []
+    real_sleep = forecast_main.asyncio.sleep
 
     async def fake_sleep(delay):
+        await real_sleep(0)
         sleeps.append(delay)
 
     monkeypatch.setattr(forecast_main.httpx, "AsyncClient", FlakyAsyncClient)
