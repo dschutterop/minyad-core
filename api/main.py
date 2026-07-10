@@ -80,6 +80,14 @@ MUTATION_AUTH = [Depends(require_api_key)]
 HTTP_400_RESPONSE = {400: {"description": "Bad request"}}
 HTTP_404_RESPONSE = {404: {"description": "Not found"}}
 HTTP_422_RESPONSE = {422: {"description": "Unprocessable entity"}}
+UTC_OFFSET_SUFFIX = "+00:00"
+DEBUG_LOGGING_SETTING_QUERY = "select value from settings where key = 'system.debug_logging'"
+SETTING_UPSERT_QUERY = """
+                insert into settings (key, value, encrypted, updated_at) values (:key, :value, false, now())
+                on conflict (key) do update set value=:value, encrypted=false, updated_at=now()
+            """
+MESSAGE_NOT_FOUND_DETAIL = "message not found"
+TOPIC_CONTROL_OVERRIDE = "minyad/control/override"
 
 STARTUP_AT = datetime.now(timezone.utc)
 MQTT_EVENTS: deque[dict[str, str]] = deque(maxlen=100)
@@ -231,7 +239,7 @@ async def _refresh_debug_setting() -> None:
         await asyncio.sleep(30)
         try:
             async with AsyncSessionLocal() as session:
-                result = await session.execute(text("select value from settings where key = 'system.debug_logging'"))
+                result = await session.execute(text(DEBUG_LOGGING_SETTING_QUERY))
                 val = result.scalar_one_or_none() or "false"
                 new_debug = val == "true"
                 if new_debug != _debug_enabled:
@@ -528,7 +536,7 @@ def parse_bridge_last_seen(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", UTC_OFFSET_SUFFIX))
     except ValueError:
         return None
     if parsed.tzinfo is None:
@@ -826,7 +834,7 @@ async def publish_battery_mqtt_settings(settings: dict[str, Any] | None = None) 
 async def startup() -> None:
     global _debug_refresh_task
     async with AsyncSessionLocal() as session:
-        result = await session.execute(text("select value from settings where key = 'system.debug_logging'"))
+        result = await session.execute(text(DEBUG_LOGGING_SETTING_QUERY))
         val = result.scalar_one_or_none() or "false"
         _apply_log_level(val == "true")
     mqtt.start()
@@ -863,7 +871,7 @@ async def health_status(session: SessionDep) -> dict[str, Any]:
 
 @app.get("/debug/status")
 async def debug_status(session: SessionDep) -> dict[str, Any]:
-    result = await session.execute(text("select value from settings where key = 'system.debug_logging'"))
+    result = await session.execute(text(DEBUG_LOGGING_SETTING_QUERY))
     debug_val = result.scalar_one_or_none() or "false"
     with MQTT_STATUS_LOCK:
         cache = dict(MQTT_STATUS)
@@ -963,10 +971,7 @@ async def update_claude_agent_settings(
     for key, value in data.items():
         stored = "true" if isinstance(value, bool) and value else "false" if isinstance(value, bool) else str(value)
         await session.execute(
-            text("""
-                insert into settings (key, value, encrypted, updated_at) values (:key, :value, false, now())
-                on conflict (key) do update set value=:value, encrypted=false, updated_at=now()
-            """),
+            text(SETTING_UPSERT_QUERY),
             {"key": f"claude_agent.{key}", "value": stored},
         )
     if data:
@@ -1014,10 +1019,7 @@ async def update_asset_steering_settings(
         elif key != "daily_recalculate_local_time":
             raise HTTPException(status_code=422, detail=f"unknown setting {key}")
         await session.execute(
-            text("""
-                insert into settings (key, value, encrypted, updated_at) values (:key, :value, false, now())
-                on conflict (key) do update set value=:value, encrypted=false, updated_at=now()
-            """),
+            text(SETTING_UPSERT_QUERY),
             {"key": f"strategy.{key}", "value": str(value)},
         )
     await session.commit()
@@ -1180,10 +1182,7 @@ async def update_trade_settings(update: TradeSettingsUpdate, session: SessionDep
         elif key != "poll_time_local":
             raise HTTPException(status_code=422, detail=f"unknown setting {key}")
         await session.execute(
-            text("""
-                insert into settings (key, value, encrypted, updated_at) values (:key, :value, false, now())
-                on conflict (key) do update set value=:value, encrypted=false, updated_at=now()
-            """),
+            text(SETTING_UPSERT_QUERY),
             {"key": f"trade.{key}", "value": str(value)},
         )
     await session.commit()
@@ -1277,7 +1276,7 @@ def parse_status_timestamp(value: Any) -> datetime | None:
     if value in (None, ""):
         return None
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value).replace("Z", UTC_OFFSET_SUFFIX))
     except ValueError:
         LOGGER.warning("Ignoring invalid status timestamp: %r", value)
         return None
@@ -1653,7 +1652,7 @@ def _bucket_expr(column: str, seconds: int) -> str:
 def interpolate_points(points: list[dict[str, Any]], step_seconds: int) -> list[dict[str, Any]]:
     if len(points) < 2 or step_seconds >= 900:
         return points
-    parsed = [(datetime.fromisoformat(p["timestamp"].replace("Z", "+00:00")), p["power_w"]) for p in points]
+    parsed = [(datetime.fromisoformat(p["timestamp"].replace("Z", UTC_OFFSET_SUFFIX)), p["power_w"]) for p in points]
     output = []
     for (left_ts, left_w), (right_ts, right_w) in zip(parsed, parsed[1:]):
         span = max(1, (right_ts - left_ts).total_seconds())
@@ -2079,7 +2078,7 @@ async def list_agent_decisions(
 def _parse_log_datetime(value: str | None) -> datetime | None:
     if value is None:
         return None
-    normalized = value.replace("Z", "+00:00")
+    normalized = value.replace("Z", UTC_OFFSET_SUFFIX)
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
@@ -2363,7 +2362,7 @@ async def get_agent_message(message_id: int, session: SessionDep) -> dict[str, A
         where id = :id
     """), {"id": message_id})).mappings().first()
     if row is None:
-        raise HTTPException(status_code=404, detail="message not found")
+        raise HTTPException(status_code=404, detail=MESSAGE_NOT_FOUND_DETAIL)
     root_id = row["thread_id"] or row["id"]
     thread_rows = (await session.execute(text("""
         select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity, archived_at, operator_ack_at, agent_ack_at
@@ -2395,7 +2394,7 @@ async def mark_agent_message_read(message_id: int, session: SessionDep) -> dict[
         returning id, read_at
     """), {"id": message_id})).mappings().first()
     if row is None:
-        raise HTTPException(status_code=404, detail="message not found")
+        raise HTTPException(status_code=404, detail=MESSAGE_NOT_FOUND_DETAIL)
     await session.commit()
     return {"status": "ok", "id": row["id"], "read_at": row["read_at"].replace(tzinfo=timezone.utc).isoformat()}
 
@@ -2409,7 +2408,7 @@ async def archive_agent_message(message_id: int, session: SessionDep) -> dict[st
         returning id, archived_at
     """), {"id": message_id})).mappings().first()
     if row is None:
-        raise HTTPException(status_code=404, detail="message not found")
+        raise HTTPException(status_code=404, detail=MESSAGE_NOT_FOUND_DETAIL)
     await session.commit()
     return {"status": "ok", "id": row["id"], "archived_at": row["archived_at"].replace(tzinfo=timezone.utc).isoformat()}
 
@@ -2424,7 +2423,7 @@ async def acknowledge_agent_message(message_id: int, session: SessionDep, actor:
         returning id, operator_ack_at, agent_ack_at
     """), {"id": message_id})).mappings().first()
     if row is None:
-        raise HTTPException(status_code=404, detail="message not found")
+        raise HTTPException(status_code=404, detail=MESSAGE_NOT_FOUND_DETAIL)
     await session.commit()
     return {"status": "ok", **serialize_agent_message(row)}
 
@@ -2433,7 +2432,7 @@ async def acknowledge_agent_message(message_id: int, session: SessionDep, actor:
 async def delete_agent_message(message_id: int, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("delete from agent_messages where id = :id returning id"), {"id": message_id})).mappings().first()
     if row is None:
-        raise HTTPException(status_code=404, detail="message not found")
+        raise HTTPException(status_code=404, detail=MESSAGE_NOT_FOUND_DETAIL)
     await session.commit()
     return {"status": "ok", "id": row["id"]}
 
@@ -2484,7 +2483,7 @@ async def set_battery_override(request: BatteryOverrideRequest, session: Session
     await session.commit()
     payload = request.model_dump()
     payload["mode"] = mode
-    mqtt.client.publish("minyad/control/override", json.dumps(payload), qos=0, retain=False)
+    mqtt.client.publish(TOPIC_CONTROL_OVERRIDE, json.dumps(payload), qos=0, retain=False)
     return {"status": "ok", **payload}
 
 
@@ -2492,7 +2491,7 @@ async def set_battery_override(request: BatteryOverrideRequest, session: Session
 async def clear_battery_override(session: SessionDep) -> dict[str, str]:
     await session.execute(text("update battery_override set mode='none', watts=null, duration_seconds=null, expires_at=null, override_soc_limits=false, updated_at=now() where id=1"))
     await session.commit()
-    mqtt.client.publish("minyad/control/override", json.dumps({"mode": "none"}), qos=0, retain=False)
+    mqtt.client.publish(TOPIC_CONTROL_OVERRIDE, json.dumps({"mode": "none"}), qos=0, retain=False)
     return {"status": "ok", "mode": "none"}
 
 
@@ -2520,10 +2519,7 @@ async def update_battery_settings(update: BatterySettingsUpdate, session: Sessio
         elif key not in TEXT_KEYS:
             raise HTTPException(status_code=422, detail=f"unknown setting {key}")
         await session.execute(
-            text("""
-                insert into settings (key, value, encrypted, updated_at) values (:key, :value, false, now())
-                on conflict (key) do update set value=:value, encrypted=false, updated_at=now()
-            """),
+            text(SETTING_UPSERT_QUERY),
             {"key": f"battery.{key}", "value": str(value)},
         )
     merged_after_validation = {**current, **data}
@@ -2537,5 +2533,5 @@ async def update_battery_settings(update: BatterySettingsUpdate, session: Sessio
     await session.commit()
     settings = await battery_settings(session)
     await publish_battery_mqtt_settings(settings)
-    mqtt.client.publish("minyad/control/override", json.dumps({"mode": "reload_settings"}), qos=0, retain=False)
+    mqtt.client.publish(TOPIC_CONTROL_OVERRIDE, json.dumps({"mode": "reload_settings"}), qos=0, retain=False)
     return settings

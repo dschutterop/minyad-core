@@ -39,6 +39,10 @@ configure_container_logging(getattr(logging, os.getenv("LOG_LEVEL", "INFO").uppe
 LOGGER = logging.getLogger(__name__)
 AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 PV_STALE_SECONDS = 300
+TOPIC_SETPOINT = "minyad/strategy/setpoint_w"
+TOPIC_CONTROL_OVERRIDE = "minyad/control/override"
+TOPIC_CONTROL_CHARGE = "minyad/control/charge_w"
+TOPIC_CONTROL_DISCHARGE = "minyad/control/discharge_w"
 # Cross-service secret, same pattern as MINYAD_API_SECRET/VESPER_API_SECRET already used the
 # other way around (Vesper polling Minyad's surplus endpoint) — env var, not a settings-table
 # row, since it's a shared credential rather than a tunable parameter.
@@ -94,7 +98,7 @@ _TOPIC_MAP = {
         "soc_floor": "minyad/strategy3/soc_floor",
     },
     False: {
-        "setpoint_w": "minyad/strategy/setpoint_w",
+        "setpoint_w": TOPIC_SETPOINT,
         "plan": "minyad/strategy/plan",
         "decision": "minyad/strategy/decision",
         "soc_floor": "minyad/strategy/soc_floor",
@@ -142,12 +146,12 @@ class StrategyService:
             "minyad/solar/production_w",
             "minyad/market/signals",
             "minyad/trade/prices/da/+/full",
-            "minyad/control/override",
+            TOPIC_CONTROL_OVERRIDE,
             "minyad/strategy/reload",
             "minyad/bridge/last_seen",
         ]
         if self.shadow_mode:
-            topics.append("minyad/strategy/setpoint_w")
+            topics.append(TOPIC_SETPOINT)
         for topic in topics:
             self.mqtt.subscribe(topic, self._on_mqtt)
         self.mqtt.start()
@@ -205,10 +209,10 @@ class StrategyService:
         if topic == "minyad/strategy/reload":
             await self.settings.reload()
             return
-        if topic == "minyad/control/override":
+        if topic == TOPIC_CONTROL_OVERRIDE:
             await self.overrides.apply_payload(decoded)
             return
-        if topic == "minyad/strategy/setpoint_w":
+        if topic == TOPIC_SETPOINT:
             try:
                 self.v2_setpoint_w = int(float(decoded))
             except ValueError:
@@ -364,14 +368,14 @@ class StrategyService:
         if self.shadow_mode:
             return
         if setpoint_w > 0:
-            self.mqtt.publish("minyad/control/charge_w", str(setpoint_w))
-            self.mqtt.publish("minyad/control/discharge_w", "0")
+            self.mqtt.publish(TOPIC_CONTROL_CHARGE, str(setpoint_w))
+            self.mqtt.publish(TOPIC_CONTROL_DISCHARGE, "0")
         elif setpoint_w < 0:
-            self.mqtt.publish("minyad/control/charge_w", "0")
-            self.mqtt.publish("minyad/control/discharge_w", str(abs(setpoint_w)))
+            self.mqtt.publish(TOPIC_CONTROL_CHARGE, "0")
+            self.mqtt.publish(TOPIC_CONTROL_DISCHARGE, str(abs(setpoint_w)))
         else:
-            self.mqtt.publish("minyad/control/charge_w", "0")
-            self.mqtt.publish("minyad/control/discharge_w", "0")
+            self.mqtt.publish(TOPIC_CONTROL_CHARGE, "0")
+            self.mqtt.publish(TOPIC_CONTROL_DISCHARGE, "0")
 
     def publish_plan(self, plan: SlotPlan) -> None:
         self.mqtt.publish(self._topic("plan"), json.dumps(_plan_payload(plan)), retain=True)

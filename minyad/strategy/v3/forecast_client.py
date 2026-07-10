@@ -7,7 +7,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-AMSTERDAM = ZoneInfo("Europe/Amsterdam")
+AMSTERDAM_TZ_NAME = "Europe/Amsterdam"
+AMSTERDAM = ZoneInfo(AMSTERDAM_TZ_NAME)
 SCHIPLUIDEN_LAT = 51.97
 SCHIPLUIDEN_LON = 4.31
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
@@ -31,7 +32,7 @@ async def fetch_ghi_hourly(
         "latitude": lat,
         "longitude": lon,
         "hourly": "shortwave_radiation",
-        "timezone": "Europe/Amsterdam",
+        "timezone": AMSTERDAM_TZ_NAME,
         "past_days": past_days,
         "forecast_days": forecast_days,
     }
@@ -68,7 +69,7 @@ async def fetch_temperature_hourly(
         "latitude": lat,
         "longitude": lon,
         "hourly": "temperature_2m",
-        "timezone": "Europe/Amsterdam",
+        "timezone": AMSTERDAM_TZ_NAME,
         "past_days": past_days,
         "forecast_days": forecast_days,
     }
@@ -104,7 +105,7 @@ async def fetch_cloud_cover_hourly(
         "latitude": lat,
         "longitude": lon,
         "hourly": "cloud_cover",
-        "timezone": "Europe/Amsterdam",
+        "timezone": AMSTERDAM_TZ_NAME,
         "past_days": past_days,
         "forecast_days": forecast_days,
     }
@@ -157,7 +158,7 @@ async def fetch_sunset(
         "latitude": lat,
         "longitude": lon,
         "daily": "sunset",
-        "timezone": "Europe/Amsterdam",
+        "timezone": AMSTERDAM_TZ_NAME,
         "start_date": target_date.isoformat(),
         "end_date": target_date.isoformat(),
     }

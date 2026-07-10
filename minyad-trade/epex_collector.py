@@ -44,6 +44,7 @@ DAY_AHEAD_DEFAULTS = _CONFIG.DAY_AHEAD_DEFAULTS
 ENTSOE = _CONFIG.ENTSOE
 MQTT_TOPICS = _CONFIG.MQTT_TOPICS
 ALLOWED_ENTSOE_HOST = "web-api.tp.entsoe.eu"
+UTC_OFFSET_SUFFIX = "+00:00"
 METRICS_PORT = int(os.getenv("METRICS_PORT", "9105"))
 METRICS_ADDR = os.getenv("METRICS_ADDR", "")
 VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
@@ -143,7 +144,7 @@ def _points_for_period(period: ET.Element, ns: dict[str, str]) -> list[dict[str,
     start_element = period.find("./ns:timeInterval/ns:start", ns)
     if start_element is None or not start_element.text:
         return []
-    interval_start = datetime.fromisoformat(start_element.text.replace("Z", "+00:00"))
+    interval_start = datetime.fromisoformat(start_element.text.replace("Z", UTC_OFFSET_SUFFIX))
 
     points: list[dict[str, Any]] = []
     for point in period.findall("./ns:Point", ns):
@@ -215,7 +216,7 @@ def publish_prices(mqtt: MinyadMqttClient, prices: list[dict[str, Any]]) -> None
 
 
 def _price_vector_signal(day: str, prices: list[dict[str, Any]]) -> dict[str, Any]:
-    starts = [datetime.fromisoformat(str(point["starts_at"]).replace("Z", "+00:00")) for point in prices]
+    starts = [datetime.fromisoformat(str(point["starts_at"]).replace("Z", UTC_OFFSET_SUFFIX)) for point in prices]
     valid_from = min(starts)
     valid_until = max(starts) + timedelta(hours=1)
     created_at = datetime.now(timezone.utc).astimezone(AMSTERDAM_TZ)
@@ -247,7 +248,7 @@ def _prices_available_hours(prices: list[dict[str, Any]], now: datetime) -> floa
     latest_until: datetime | None = None
     for point in prices:
         try:
-            starts_at = datetime.fromisoformat(str(point["starts_at"]).replace("Z", "+00:00"))
+            starts_at = datetime.fromisoformat(str(point["starts_at"]).replace("Z", UTC_OFFSET_SUFFIX))
         except (KeyError, ValueError):
             continue
         until = starts_at + timedelta(hours=1)

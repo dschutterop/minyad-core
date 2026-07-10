@@ -28,6 +28,7 @@ load_dotenv(REPO_ROOT / ".env")
 load_dotenv(HOST_SERVICES_DIR / ".env", override=True)
 
 LOCAL_TZ = ZoneInfo(os.getenv("MINYAD_TZ", "Europe/Amsterdam"))
+NO_DECISIONS_MESSAGE = "no decisions in this range"
 CONTROL_MAIN = REPO_ROOT / "control" / "main.py"
 HYSTERESIS = REPO_ROOT / "control" / "hysteresis.py"
 STRATEGY = REPO_ROOT / "minyad" / "strategy" / "charge_controller.py"
@@ -299,11 +300,11 @@ def main() -> None:
         settings = load_settings(cur)
         win = _resolve_window(cur, args)
         if win is None:
-            print("no decisions in this range")
+            print(NO_DECISIONS_MESSAGE)
             return
         rows = load_decisions(cur, win.start, win.end)
         if not rows:
-            print(json.dumps({"message": "no decisions in this range", "range": win.label}) if args.format == "json" else "no decisions in this range")
+            print(json.dumps({"message": NO_DECISIONS_MESSAGE, "range": win.label}) if args.format == "json" else NO_DECISIONS_MESSAGE)
             return
         explained = [explain_line(cur, r, args.verbose or args.why) for r in rows]
         payload = _build_payload(args, rows, explained, win, settings)

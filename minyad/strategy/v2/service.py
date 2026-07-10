@@ -47,6 +47,8 @@ TOPIC_DECISION = "minyad/strategy/decision"
 TOPIC_SOC_FLOOR = "minyad/strategy/soc_floor"
 TOPIC_FLOOR_DRIFT = "minyad/strategy/floor_drift_factor"
 TOPIC_FLOOR_REMAINING = "minyad/strategy/floor_remaining_expected_wh"
+TOPIC_CONTROL_CHARGE = "minyad/control/charge_w"
+TOPIC_CONTROL_DISCHARGE = "minyad/control/discharge_w"
 
 
 class StrategyService:
@@ -194,14 +196,14 @@ class StrategyService:
     def publish_setpoint(self, setpoint_w: int) -> None:
         self.mqtt.publish(TOPIC_SETPOINT, str(setpoint_w), retain=True)
         if setpoint_w > 0:
-            self.mqtt.publish("minyad/control/charge_w", str(setpoint_w))
-            self.mqtt.publish("minyad/control/discharge_w", "0")
+            self.mqtt.publish(TOPIC_CONTROL_CHARGE, str(setpoint_w))
+            self.mqtt.publish(TOPIC_CONTROL_DISCHARGE, "0")
         elif setpoint_w < 0:
-            self.mqtt.publish("minyad/control/charge_w", "0")
-            self.mqtt.publish("minyad/control/discharge_w", str(abs(setpoint_w)))
+            self.mqtt.publish(TOPIC_CONTROL_CHARGE, "0")
+            self.mqtt.publish(TOPIC_CONTROL_DISCHARGE, str(abs(setpoint_w)))
         else:
-            self.mqtt.publish("minyad/control/charge_w", "0")
-            self.mqtt.publish("minyad/control/discharge_w", "0")
+            self.mqtt.publish(TOPIC_CONTROL_CHARGE, "0")
+            self.mqtt.publish(TOPIC_CONTROL_DISCHARGE, "0")
 
     def publish_active_plan(self) -> None:
         if self.plan is None:
