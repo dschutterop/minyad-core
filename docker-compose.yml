@@ -99,11 +99,12 @@ services:
       - /bin/sh
       - -ec
       - |
-        test -n "$$MQTT_USER" && test -n "$$MQTT_PASS"
+        test -n "$$MQTT_USER"
+        test -n "$$MQTT_PASS"
         rm -f /tmp/minyad-mosquitto.passwd
-        mosquitto_passwd -c -b /tmp/minyad-mosquitto.passwd "$$MQTT_USER" "$$MQTT_PASS"
+        install -m 600 /dev/null /tmp/minyad-mosquitto.passwd
+        mosquitto_passwd -b /tmp/minyad-mosquitto.passwd "$$MQTT_USER" "$$MQTT_PASS"
         chown mosquitto:mosquitto /tmp/minyad-mosquitto.passwd
-        chmod 600 /tmp/minyad-mosquitto.passwd
         exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
