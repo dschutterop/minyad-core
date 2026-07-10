@@ -11,6 +11,7 @@ from pydantic import ValidationError
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 if "shared.db" in sys.modules and not hasattr(sys.modules["shared.db"], "get_session"):
     async def _get_session():
+        await asyncio.sleep(0)
         yield None
     sys.modules["shared.db"].get_session = _get_session
 

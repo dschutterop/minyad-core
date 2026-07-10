@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 os.environ.setdefault("API_BASE_URL", "https://minyad-api:8000")
@@ -15,6 +16,7 @@ def test_api_proxy_preserves_api_prefix(monkeypatch):
     monkeypatch.setattr(frontend_main, "MINYAD_API_SECRET", "proxy-secret")
 
     async def fake_request(self, method, url, **kwargs):
+        await asyncio.sleep(0)
         captured["method"] = method
         captured["url"] = url
         captured["params"] = kwargs.get("params")
@@ -37,6 +39,7 @@ def test_api_proxy_replaces_browser_supplied_api_key(monkeypatch):
     monkeypatch.setattr(frontend_main, "MINYAD_API_SECRET", "trusted-proxy-secret")
 
     async def fake_request(self, method, url, **kwargs):
+        await asyncio.sleep(0)
         captured["headers"] = kwargs.get("headers")
         return httpx.Response(200, json={"status": "ok"})
 
@@ -57,6 +60,7 @@ def test_api_proxy_falls_back_to_legacy_unprefixed_route(monkeypatch):
     calls = []
 
     async def fake_request(self, method, url, **kwargs):
+        await asyncio.sleep(0)
         calls.append(url)
         if url == "/api/grid/status":
             return httpx.Response(404, json={"detail": "Not Found"})

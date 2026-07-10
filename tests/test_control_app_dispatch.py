@@ -243,9 +243,11 @@ def test_handle_message_override_reload_settings(monkeypatch):
     calls = {"reload": 0, "guard": 0}
 
     async def fake_reload():
+        await asyncio.sleep(0)
         calls["reload"] += 1
 
     async def fake_guard():
+        await asyncio.sleep(0)
         calls["guard"] += 1
 
     monkeypatch.setattr(app, "reload_settings", fake_reload)

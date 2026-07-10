@@ -59,6 +59,7 @@ def test_grid_status_stores_solar_curve_point(monkeypatch):
     stored = []
 
     async def fake_store_power_curve_point(session, source, power_w, **kwargs):
+        await asyncio.sleep(0)
         stored.append((source, power_w, kwargs))
 
     class FakeSession:

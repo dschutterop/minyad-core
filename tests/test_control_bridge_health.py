@@ -22,6 +22,7 @@ spec.loader.exec_module(control_main)
 
 
 async def noop_store_status(**_values):
+    await asyncio.sleep(0)
     return None
 
 
@@ -148,6 +149,7 @@ def test_battery_mode_accepts_goodwe_text_payload(monkeypatch):
     stored = {}
 
     async def capture_store_status(**values):
+        await asyncio.sleep(0)
         stored.update(values)
 
     monkeypatch.setattr(control_main, "store_status", capture_store_status)
@@ -162,6 +164,7 @@ def test_invalid_numeric_battery_payload_is_ignored(monkeypatch):
     stored = {}
 
     async def capture_store_status(**values):
+        await asyncio.sleep(0)
         stored.update(values)
 
     monkeypatch.setattr(control_main, "store_status", capture_store_status)
@@ -195,6 +198,7 @@ def test_grid_net_power_import_is_converted_to_negative_surplus(monkeypatch):
     stored = {}
 
     async def capture_store_status(**values):
+        await asyncio.sleep(0)
         stored.update(values)
 
     monkeypatch.setattr(control_main, "store_status", capture_store_status)
@@ -213,6 +217,7 @@ def test_below_floor_export_charges_instead_of_adopting_idle_discharge(monkeypat
     stored = {}
 
     async def capture_store_status(**values):
+        await asyncio.sleep(0)
         stored.update(values)
 
     monkeypatch.setattr(control_main, "store_status", capture_store_status)
@@ -443,6 +448,7 @@ def test_battery_soc_topic_updates_latest_soc(monkeypatch):
     stored = {}
 
     async def capture_store_status(**values):
+        await asyncio.sleep(0)
         stored.update(values)
 
     monkeypatch.setattr(control_main, "store_status", capture_store_status)
@@ -457,6 +463,7 @@ def test_battery_power_topic_updates_latest_power(monkeypatch):
     stored = {}
 
     async def capture_store_status(**values):
+        await asyncio.sleep(0)
         stored.update(values)
 
     monkeypatch.setattr(control_main, "store_status", capture_store_status)
@@ -487,6 +494,7 @@ def test_idle_import_while_battery_discharging_adopts_and_increases_setpoint(mon
     stored = {}
 
     async def capture_store_status(**values):
+        await asyncio.sleep(0)
         stored.update(values)
 
     monkeypatch.setattr(control_main, "store_status", capture_store_status)

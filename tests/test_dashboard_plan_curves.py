@@ -93,12 +93,15 @@ def test_api_forecast_uses_recent_real_plan_when_latest_plan_is_fallback(monkeyp
     }
 
     async def fake_latest_slot_plan(session, *, include_fallback=True):
+        await asyncio.sleep(0)
         return fallback_row if include_fallback else real_row
 
     async def fake_battery_settings(session):
+        await asyncio.sleep(0)
         return {"capacity_wh": 10240}
 
     async def fake_uncertainty_bands(session):
+        await asyncio.sleep(0)
         return {}
 
     monkeypatch.setattr(api_main, "latest_slot_plan", fake_latest_slot_plan)

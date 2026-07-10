@@ -83,9 +83,11 @@ def test_adjusted_decision_log_not_due_before_interval():
 
 def test_v2_non_primary_does_not_start_mqtt_or_scheduler(monkeypatch):
     async def noop_async(*args, **kwargs):
+        await asyncio.sleep(0)
         return None
 
     async def no_plan(*args, **kwargs):
+        await asyncio.sleep(0)
         return None
 
     class BlockedMqtt:
@@ -100,6 +102,7 @@ def test_v2_non_primary_does_not_start_mqtt_or_scheduler(monkeypatch):
     health_started = False
 
     async def fake_health_server():
+        await asyncio.sleep(0)
         nonlocal health_started
         health_started = True
 
