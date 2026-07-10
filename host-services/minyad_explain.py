@@ -216,7 +216,7 @@ def explain_line(cur, row: dict[str, Any], verbose: bool = False) -> dict[str, A
     return {"timestamp": ts.isoformat(), "old_setpoint_w": row.get("old_setpoint_w"), "setpoint_w": row.get("setpoint_w"), "direction": d.lower(), "watts": watts, "soc": row.get("battery_soc_at_time"), "grid_power_w": grid, "solar_forecast_w": forecast_solar_w, "solar_actual_w": actual_solar_w, "solar_forecast_remaining_kwh": remaining, "reason": row.get("trigger_reason"), "text": text}
 
 
-def summary(rows: list[dict[str, Any]], start: datetime, end: datetime) -> dict[str, Any]:
+def summary(rows: list[dict[str, Any]], end: datetime) -> dict[str, Any]:
     cycles = {"charge": 0, "discharge": 0, "idle": 0}
     seconds = {"charge": 0.0, "discharge": 0.0, "idle": 0.0}
     socs = [float(r["battery_soc_at_time"]) for r in rows if r.get("battery_soc_at_time") is not None]
@@ -276,7 +276,7 @@ def _resolve_window(cur, args: argparse.Namespace) -> Window | None:
 
 def _build_payload(args: argparse.Namespace, rows: list[dict[str, Any]], explained: list[dict[str, Any]], win: Window, settings: dict[str, str]) -> Any:
     if args.summary:
-        return summary(rows, win.start.astimezone(timezone.utc), win.end.astimezone(timezone.utc))
+        return summary(rows, win.end.astimezone(timezone.utc))
     if args.why:
         return explained[-1] | {"thresholds_and_weights": thresholds(settings)}
     return explained

@@ -261,7 +261,6 @@ class ControlApp:
                     bridge_last_seen_error="",
                     available=True,
                 )
-            return
 
     async def handle_grid_power_topic(self, topic: str, decoded: str) -> None:
         try:
@@ -686,16 +685,13 @@ class ControlApp:
             if soc is not None and soc >= soc_ceiling:
                 reason = "slow_balance_soc_ceiling"
                 raw_target = 0
-                new_target = raw_target
             elif residual_export_w > 0:
                 adjustment = int(self._clamp(residual_export_w * BALANCE_GAIN, BALANCE_STEP_W, 500))
                 raw_target = previous_target + adjustment
-                new_target = raw_target
                 reason = "slow_balance_export"
             elif residual_import_w > 0:
                 adjustment = -int(self._clamp(residual_import_w * BALANCE_GAIN, BALANCE_STEP_W, 500))
                 raw_target = previous_target + adjustment
-                new_target = raw_target
                 reason = "slow_balance_import"
             charge_cap_inputs = self._charge_cap_inputs()
             max_charge_power_w = self._max_charge_power_w()

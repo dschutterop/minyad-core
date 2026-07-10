@@ -86,7 +86,7 @@ class StrategyDecision:
     mode: str
     soc_floor: int
     soc_ceiling: int
-    setpoint_w: int | None  # negative = charge, positive = discharge
+    setpoint_w: int | None
     discharge_allowed: bool
     reason: str
     valid_until: datetime

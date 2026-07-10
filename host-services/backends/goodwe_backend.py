@@ -99,11 +99,12 @@ class GoodWeBackend:
             await self._send_command(inv, f"032c050000173b{charge_pct:02x}", "03AC")
             await self._send_command(inv, f"032d050000173b{discharge_pct:02x}", "03AD")
         logger.info(
-            "[api] GoodWe limits applied charge_limit_w=%s (%s%%) discharge_limit_w=%s (%s%%)",
+            "[api] GoodWe limits applied charge_limit_w=%s (%s%%) discharge_limit_w=%s (%s%%) state_changed=%s",
             max(0, min(self.max_w, int(charge_limit_w))),
             charge_pct,
             max(0, min(self.max_w, int(discharge_limit_w))),
             discharge_pct,
+            state_changed,
         )
         return True
 

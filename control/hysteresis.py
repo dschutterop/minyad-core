@@ -136,9 +136,9 @@ class HysteresisController:
             )
             self._transition(ControlState.IDLE, "cooldown elapsed")
             return self._evaluate_idle_sample(surplus_w, now, immediate=True) or ControlState.IDLE
-        # Allow the opposite direction to bypass remaining cooldown if its
-        # trigger has been sustained for start_duration — this prevents a
-        # 10-minute blind spot when e.g. solar appears right after discharge.
+        return self._cooldown_bypass_transition(surplus_w, now)
+
+    def _cooldown_bypass_transition(self, surplus_w: int, now: float) -> ControlState | None:
         if self._cooldown_direction is ControlState.DISCHARGING and surplus_w >= self.start_w:
             if self._charge_since is None:
                 self._charge_since = now
