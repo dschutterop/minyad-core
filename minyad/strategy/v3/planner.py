@@ -89,14 +89,20 @@ def _add_balance_and_dynamics_constraints(
 ) -> None:
     for t in range(n):
         # 1. power balance (with free curtailment of unusable forecast PV, see _LpVars.curtail)
-        prob += lp.curtail[t] <= pv_forecast_w[t], f"curtail_cap_{t}"
-        prob += (pv_forecast_w[t] - lp.curtail[t]) + lp.dis[t] + lp.gimp[t] == load_forecast_w[t] + lp.ch[t] + lp.gexp[t], f"balance_{t}"
+        prob.addConstraint(lp.curtail[t] <= pv_forecast_w[t], f"curtail_cap_{t}")
+        prob.addConstraint(
+            (pv_forecast_w[t] - lp.curtail[t]) + lp.dis[t] + lp.gimp[t] == load_forecast_w[t] + lp.ch[t] + lp.gexp[t],
+            f"balance_{t}",
+        )
         # 2. SoC dynamics
-        prob += lp.soc[t + 1] == lp.soc[t] + (lp.ch[t] * one_way_efficiency - lp.dis[t] * (1.0 / one_way_efficiency)) * dt_h, f"dynamics_{t}"
+        prob.addConstraint(
+            lp.soc[t + 1] == lp.soc[t] + (lp.ch[t] * one_way_efficiency - lp.dis[t] * (1.0 / one_way_efficiency)) * dt_h,
+            f"dynamics_{t}",
+        )
         # 4. grid-charge gating (forced solar-only on Friday slots regardless of the setting)
         if not grid_charge_enabled or t in friday_slots:
             surplus_cap = max(0.0, pv_forecast_w[t] - load_forecast_w[t]) + grid_charge_relax_w
-            prob += lp.ch[t] <= surplus_cap, f"solar_only_{t}"
+            prob.addConstraint(lp.ch[t] <= surplus_cap, f"solar_only_{t}")
 
 
 def _add_soc_band_constraints(
@@ -120,10 +126,10 @@ def _add_soc_band_constraints(
         # with a single large slack than actually charge using free solar.
         boundary = horizon_start + timedelta(seconds=slot_seconds * t)
         ceil_wh_t = capacity if is_lifepo4_full_cycle_day(boundary.astimezone(tz).date()) else ceil_wh
-        prob += lp.soc[t] >= floor_wh - lp.slack_lo[t], f"soft_floor_{t}"
-        prob += lp.soc[t] <= ceil_wh_t + lp.slack_hi[t], f"soft_ceiling_{t}"
+        prob.addConstraint(lp.soc[t] >= floor_wh - lp.slack_lo[t], f"soft_floor_{t}")
+        prob.addConstraint(lp.soc[t] <= ceil_wh_t + lp.slack_hi[t], f"soft_ceiling_{t}")
         if t > 0:
-            prob += lp.soc[t] >= hard_floor_wh, f"hard_floor_{t}"
+            prob.addConstraint(lp.soc[t] >= hard_floor_wh, f"hard_floor_{t}")
 
 
 def _add_target_constraints(
@@ -132,11 +138,11 @@ def _add_target_constraints(
     # 5. Friday full-cycle target at sunset
     if sunset_index is not None:
         target_wh = FRIDAY_SUNSET_HARD_TARGET_PCT / 100.0 * capacity
-        prob += lp.soc[sunset_index] >= target_wh - lp.slack_hi[sunset_index], "friday_sunset_target"
+        prob.addConstraint(lp.soc[sunset_index] >= target_wh - lp.slack_hi[sunset_index], "friday_sunset_target")
 
     # 6. terminal condition
     terminal_wh = terminal_soc_pct / 100.0 * capacity
-    prob += lp.soc[n] >= terminal_wh - lp.slack_lo[n], "terminal_soc"
+    prob.addConstraint(lp.soc[n] >= terminal_wh - lp.slack_lo[n], "terminal_soc")
 
 
 def _build_objective(

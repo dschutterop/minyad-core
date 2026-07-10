@@ -391,8 +391,8 @@ class StrategyService:
     def publish_floor_telemetry(self, tracker_result: TrackerResult) -> None:
         self.mqtt.publish(self._topic("soc_floor"), f"{tracker_result.floor_dyn_pct:.2f}", retain=True)
 
-    def publish_decision(self, decision: StrategyDecision, tracker_result: TrackerResult) -> None:
-        self.mqtt.publish(self._topic("decision"), json.dumps(_decision_payload(decision, tracker_result)), retain=False)
+    def publish_decision(self, decision: StrategyDecision, _tracker_result: TrackerResult) -> None:
+        self.mqtt.publish(self._topic("decision"), json.dumps(_decision_payload(decision)), retain=False)
 
     async def log_setpoint(self, decision: StrategyDecision, tracker_result: TrackerResult) -> None:
         async with AsyncSessionLocal() as session:
@@ -446,7 +446,7 @@ class StrategyService:
                 "status": "ok",
                 "shadow_mode": self.shadow_mode,
                 "state": asdict(self.state),
-                "last_decision": _decision_payload(self.last_decision, None) if self.last_decision else None,
+                "last_decision": _decision_payload(self.last_decision) if self.last_decision else None,
             }
 
         server = uvicorn.Server(
@@ -532,7 +532,7 @@ def _plan_payload(plan: SlotPlan) -> dict[str, Any]:
     }
 
 
-def _decision_payload(decision: StrategyDecision | None, tracker_result: TrackerResult | None) -> dict[str, Any] | None:
+def _decision_payload(decision: StrategyDecision | None) -> dict[str, Any] | None:
     if decision is None:
         return None
     return {

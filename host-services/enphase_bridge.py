@@ -223,7 +223,7 @@ def summarize_inverter_production(inverters: list[dict[str, Any]]) -> tuple[dict
 
 def set_production_limit(watts: int) -> None:
     """Future hook for Enphase production curtailment."""
-    # TODO: D8.x systems may expose curtailment through endpoints such as
+    # D8.x systems may expose curtailment through endpoints such as
     # /ivp/ss/pel_settings, /ivp/ss/gen_config, or related /ivp/ss controls.
     # Activating this likely requires an installer token or firmware downgrade;
     # keep this function replaceable so write support can be added without

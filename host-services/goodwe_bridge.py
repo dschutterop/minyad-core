@@ -719,7 +719,7 @@ class GoodWeBridge:
     def _check_charge_limit_effect(self, state: InverterState) -> None:
         if self._pending_charge_check is None:
             return
-        started_at, charge_limit_w, previous_power = self._pending_charge_check
+        started_at, _, previous_power = self._pending_charge_check
         if monotonic() - started_at < self.config.min_write_interval_s:
             return
         current_power = state.battery_power_w

@@ -62,9 +62,6 @@ async def fetch_solar_forecast() -> list[dict]:
                     exc,
                 )
                 await asyncio.sleep(delay)
-            except httpx.HTTPStatusError:
-                raise
-
     hourly = data["hourly"]
     points = []
     for forecast_time, direct, diffuse, shortwave in zip(

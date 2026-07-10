@@ -105,7 +105,7 @@ def split_baseline_rows(
 
 
 def _is_weekend(moment: datetime, tz: ZoneInfo) -> bool:
-    return moment.astimezone(tz).weekday() >= 5  # Saturday=5, Sunday=6
+    return moment.astimezone(tz).weekday() >= 5
 
 
 def _daypart_of(moment: datetime, tz: ZoneInfo) -> str:

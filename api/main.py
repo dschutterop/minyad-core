@@ -435,7 +435,7 @@ def grid_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in payload.items()
-        if key.startswith("grid_") or key.startswith("solar_")
+        if key.startswith(("grid_", "solar_"))
     }
 
 
@@ -1381,6 +1381,16 @@ def _status_text(value: Any, fallback: str = "UNKNOWN") -> str:
     return text_value or fallback
 
 
+def _battery_phase(control_state: str, activity_state: str, battery_charge_w: int, battery_discharge_w: int) -> str:
+    if control_state == "COOLDOWN":
+        return "cooldown"
+    if activity_state == "CHARGING" or control_state == "CHARGING" or battery_charge_w > 0:
+        return "charging"
+    if activity_state == "DISCHARGING" or control_state == "DISCHARGING" or battery_discharge_w > 0:
+        return "discharging"
+    return "idle"
+
+
 def build_surplus_payload(
     grid: dict[str, Any],
     battery: dict[str, Any],
@@ -1411,14 +1421,7 @@ def build_surplus_payload(
     gross_surplus_w = remaining_surplus_w + battery_charge_w
     control_state = _status_text(battery.get("control_state") or battery.get("state"), "IDLE")
     activity_state = _status_text(battery.get("state") or derive_battery_state(battery), control_state)
-    if control_state == "COOLDOWN":
-        battery_phase = "cooldown"
-    elif activity_state == "CHARGING" or control_state == "CHARGING" or battery_charge_w > 0:
-        battery_phase = "charging"
-    elif activity_state == "DISCHARGING" or control_state == "DISCHARGING" or battery_discharge_w > 0:
-        battery_phase = "discharging"
-    else:
-        battery_phase = "idle"
+    battery_phase = _battery_phase(control_state, activity_state, battery_charge_w, battery_discharge_w)
 
     return {
         "api_version": SURPLUS_API_VERSION,
