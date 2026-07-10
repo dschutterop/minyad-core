@@ -33,6 +33,7 @@ AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 LIFEPO4_FULL_CYCLE_WEEKDAY = 4  # Friday, using Python's Monday=0 convention.
 LIFEPO4_FULL_CYCLE_CEILING = 100
 STATUS_HYSTERESE = "HYSTERESE"
+LOOP_NOT_INITIALIZED_MESSAGE = "control app event loop is not initialized"
 BRIDGE_LAST_SEEN_STALE_SECONDS = int(os.getenv("BRIDGE_LAST_SEEN_STALE_SECONDS", "60"))
 MIN_TARGET_CHANGE_W = int(os.getenv("MIN_TARGET_CHANGE_W", os.getenv("TARGET_MIN_CHANGE_W", "100")))
 GRID_DEADBAND_W = int(os.getenv("GRID_DEADBAND_W", "150"))
@@ -205,27 +206,27 @@ class ControlApp:
 
     def _schedule_start_charging(self) -> None:
         if self.loop is None:
-            raise RuntimeError("control app event loop is not initialized")
+            raise RuntimeError(LOOP_NOT_INITIALIZED_MESSAGE)
         asyncio.run_coroutine_threadsafe(self.start_charging(), self.loop)
 
     def _schedule_stop_charging(self) -> None:
         if self.loop is None:
-            raise RuntimeError("control app event loop is not initialized")
+            raise RuntimeError(LOOP_NOT_INITIALIZED_MESSAGE)
         asyncio.run_coroutine_threadsafe(self.stop_charging(), self.loop)
 
     def _schedule_start_discharging(self) -> None:
         if self.loop is None:
-            raise RuntimeError("control app event loop is not initialized")
+            raise RuntimeError(LOOP_NOT_INITIALIZED_MESSAGE)
         asyncio.run_coroutine_threadsafe(self.start_discharging(), self.loop)
 
     def _schedule_stop_discharging(self) -> None:
         if self.loop is None:
-            raise RuntimeError("control app event loop is not initialized")
+            raise RuntimeError(LOOP_NOT_INITIALIZED_MESSAGE)
         asyncio.run_coroutine_threadsafe(self.stop_discharging(), self.loop)
 
     def _on_mqtt(self, topic: str, payload: bytes) -> None:
         if self.loop is None:
-            raise RuntimeError("control app event loop is not initialized")
+            raise RuntimeError(LOOP_NOT_INITIALIZED_MESSAGE)
         self.loop.call_soon_threadsafe(asyncio.create_task, self.handle_message(topic, payload))
 
     async def handle_message(self, topic: str, payload: bytes) -> None:

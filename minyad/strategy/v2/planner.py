@@ -14,7 +14,8 @@ from sqlalchemy import text
 from .constants import Settings
 from .models import DayPlan, Window
 
-AMSTERDAM = ZoneInfo("Europe/Amsterdam")
+AMSTERDAM_TZ_NAME = "Europe/Amsterdam"
+AMSTERDAM = ZoneInfo(AMSTERDAM_TZ_NAME)
 SCHIPLUIDEN_LAT = 51.97
 SCHIPLUIDEN_LON = 4.31
 LIFEPO4_FULL_CYCLE_WEEKDAY = 4  # Friday, using Python's Monday=0 convention.
@@ -27,7 +28,7 @@ class StrategyPlanner:
         settings: Settings,
         db_session_factory: Any | None = None,
         *,
-        timezone_name: str = "Europe/Amsterdam",
+        timezone_name: str = AMSTERDAM_TZ_NAME,
         ghi_fetcher: Any | None = None,
     ) -> None:
         self.settings = settings
@@ -97,7 +98,7 @@ class StrategyPlanner:
             "hourly": "shortwave_radiation",
             "start_date": plan_date.isoformat(),
             "end_date": plan_date.isoformat(),
-            "timezone": "Europe/Amsterdam",
+            "timezone": AMSTERDAM_TZ_NAME,
         }
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.get("https://api.open-meteo.com/v1/forecast", params=params)
