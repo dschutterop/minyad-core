@@ -74,10 +74,9 @@ class ModbusBackend:
     async def _connect(self) -> AsyncModbusTcpClient:
         if self.client is None:
             self.client = AsyncModbusTcpClient(self.host, port=self.port, timeout=self.timeout)
-        if not self.client.connected:
-            if not await self.client.connect():
-                logger.warning("[modbus] Modbus connection failed to %s:%s", self.host, self.port)
-                raise ConnectionError(f"Modbus gateway unreachable at {self.host}:{self.port}")
+        if not self.client.connected and not await self.client.connect():
+            logger.warning("[modbus] Modbus connection failed to %s:%s", self.host, self.port)
+            raise ConnectionError(f"Modbus gateway unreachable at {self.host}:{self.port}")
         return self.client
 
     async def _read_holding_registers(self, address: int, count: int) -> list[int]:

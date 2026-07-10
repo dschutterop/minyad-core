@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import os
 
 import pytest
@@ -16,7 +15,7 @@ def test_api_key_rejects_missing_server_secret(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.delenv("MINYAD_API_SECRET", raising=False)
 
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(require_api_key("provided"))
+        require_api_key("provided")
 
     assert exc.value.status_code == 401
 
@@ -24,10 +23,10 @@ def test_api_key_rejects_missing_server_secret(monkeypatch: pytest.MonkeyPatch) 
 def test_api_key_uses_constant_time_secret_comparison(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MINYAD_API_SECRET", "expected-secret")
 
-    asyncio.run(require_api_key("expected-secret"))
+    require_api_key("expected-secret")
 
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(require_api_key("wrong-secret"))
+        require_api_key("wrong-secret")
 
     assert exc.value.status_code == 401
 

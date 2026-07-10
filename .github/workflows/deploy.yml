@@ -112,7 +112,7 @@ jobs:
         run: ${PYTHON_BIN} scripts/trivy_to_sonar.py --ignore-unfixed --output sonar-trivy-issues.json "trivy-reports/*.json"
 
       - name: Run linters
-        run: ${PYTHON_BIN} -m ruff check --select FAST002,RUF029,F841,SIM102 --fix --unsafe-fixes .
+        run: ${PYTHON_BIN} -m ruff check --preview --select FAST002,RUF029,F841,SIM102 --fix --unsafe-fixes .
 
       - name: Load SonarQube environment
         env:

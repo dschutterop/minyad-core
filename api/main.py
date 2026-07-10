@@ -11,7 +11,7 @@ import secrets
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
 from threading import Event, Lock
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 from uuid import uuid4
@@ -32,6 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
     from dryad import DRYAD_CACHE_SECONDS, build_dryad_payload, load_dryad_history, load_dryad_inputs
 from shared.db import AsyncSessionLocal, get_session
 from shared.mqtt_client import MinyadMqttClient
+
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 app = FastAPI(title="Minyad API")
 app.add_middleware(
@@ -68,7 +70,7 @@ LOGGER = logging.getLogger(__name__)
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-async def require_api_key(key: str | None = Security(API_KEY_HEADER)) -> None:
+def require_api_key(key: str | None = Security(API_KEY_HEADER)) -> None:
     expected = os.getenv("MINYAD_API_SECRET", "")
     if not expected or not key or not secrets.compare_digest(key, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -828,7 +830,7 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/health/status")
-async def health_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def health_status(session: SessionDep) -> dict[str, Any]:
     db_ok = True
     db_error = None
     try:
@@ -842,7 +844,7 @@ async def health_status(session: AsyncSession = Depends(get_session)) -> dict[st
 
 
 @app.get("/debug/status")
-async def debug_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def debug_status(session: SessionDep) -> dict[str, Any]:
     result = await session.execute(text("select value from settings where key = 'system.debug_logging'"))
     debug_val = result.scalar_one_or_none() or "false"
     with MQTT_STATUS_LOCK:
@@ -866,7 +868,7 @@ async def debug_status(session: AsyncSession = Depends(get_session)) -> dict[str
 
 
 @app.get("/system-settings")
-async def get_system_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def get_system_settings(session: SessionDep) -> dict[str, Any]:
     result = await session.execute(text("select key, value from settings where key in ('system.debug_logging', 'system.theme', 'system.language')"))
     settings = {row.key: row.value for row in result}
     return {
@@ -877,7 +879,7 @@ async def get_system_settings(session: AsyncSession = Depends(get_session)) -> d
 
 
 @app.put("/system-settings", dependencies=MUTATION_AUTH)
-async def update_system_settings(update: SystemSettingsUpdate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def update_system_settings(update: SystemSettingsUpdate, session: SessionDep) -> dict[str, Any]:
     if update.debug_logging is not None:
         val = "true" if update.debug_logging else "false"
         await session.execute(
@@ -927,7 +929,7 @@ async def claude_agent_settings(session: AsyncSession) -> dict[str, Any]:
 
 @app.get("/api/claude-agent/settings")
 @app.get("/claude-agent/settings")
-async def get_claude_agent_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def get_claude_agent_settings(session: SessionDep) -> dict[str, Any]:
     return await claude_agent_settings(session)
 
 
@@ -937,7 +939,7 @@ async def get_claude_agent_settings(session: AsyncSession = Depends(get_session)
 @app.put("/claude-agent/settings", dependencies=MUTATION_AUTH)
 async def update_claude_agent_settings(
     update: ClaudeAgentSettingsUpdate,
-    session: AsyncSession = Depends(get_session),
+    session: SessionDep,
 ) -> dict[str, Any]:
     data = update.model_dump(exclude_unset=True)
     for key, value in data.items():
@@ -976,14 +978,14 @@ async def asset_steering_settings(session: AsyncSession) -> dict[str, Any]:
 
 
 @app.get("/asset-steering/settings")
-async def get_asset_steering_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def get_asset_steering_settings(session: SessionDep) -> dict[str, Any]:
     return await asset_steering_settings(session)
 
 
 @app.put("/asset-steering/settings", dependencies=MUTATION_AUTH)
 async def update_asset_steering_settings(
     update: AssetSteeringSettingsUpdate,
-    session: AsyncSession = Depends(get_session),
+    session: SessionDep,
 ) -> dict[str, Any]:
     data = update.model_dump(exclude_unset=True)
     for key, value in data.items():
@@ -1005,7 +1007,7 @@ async def update_asset_steering_settings(
 
 
 @app.get("/asset-steering/status")
-async def asset_steering_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def asset_steering_status(session: SessionDep) -> dict[str, Any]:
     latest_decision = (await session.execute(text("""
         select id, timestamp, mode, soc_floor, soc_ceiling, forecast_ghi, trigger_reason, applied_at
         from strategy_decisions order by timestamp desc limit 1
@@ -1088,9 +1090,9 @@ def setpoint_log_select_list(columns: set[str]) -> str:
 
 @app.get("/reporting/decisions")
 async def reporting_decisions(
-    limit: int = Query(default=50, ge=1, le=50),
-    offset: int = Query(default=0, ge=0),
-    session: AsyncSession = Depends(get_session),
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=50)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
     columns = await setpoint_log_columns(session)
     if not columns:
@@ -1139,12 +1141,12 @@ async def get_trade_prices() -> dict[str, Any]:
 
 
 @app.get("/trade/settings")
-async def get_trade_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def get_trade_settings(session: SessionDep) -> dict[str, Any]:
     return await trade_settings(session)
 
 
 @app.put("/trade/settings", dependencies=MUTATION_AUTH)
-async def update_trade_settings(update: TradeSettingsUpdate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def update_trade_settings(update: TradeSettingsUpdate, session: SessionDep) -> dict[str, Any]:
     data = update.model_dump(exclude_unset=True)
     for key, value in data.items():
         if key in TRADE_NUMERIC_LIMITS:
@@ -1173,13 +1175,13 @@ async def update_trade_settings(update: TradeSettingsUpdate, session: AsyncSessi
 
 
 @app.get("/settings")
-async def list_settings(session: AsyncSession = Depends(get_session)) -> list[dict[str, object]]:
+async def list_settings(session: SessionDep) -> list[dict[str, object]]:
     result = await session.execute(text("select key, encrypted, updated_at from settings order by key"))
     return [{"key": row.key, "encrypted": row.encrypted, "updated_at": row.updated_at} for row in result]
 
 
 @app.post("/api-keys", status_code=202, dependencies=MUTATION_AUTH)
-async def scaffold_api_key(request: ApiKeyCreate, session: AsyncSession = Depends(get_session)) -> dict[str, str]:
+async def scaffold_api_key(request: ApiKeyCreate, session: SessionDep) -> dict[str, str]:
     await session.execute(text("select id from api_keys where name = :name"), {"name": request.name})
     return {"status": "scaffolded", "message": "API key generation is intentionally not implemented yet"}
 
@@ -1460,7 +1462,7 @@ async def household_status_payload(session: AsyncSession, store: bool = True) ->
 
 
 @app.get("/battery/status")
-async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def battery_status(session: SessionDep) -> dict[str, Any]:
     status = await session.execute(text("select key, value from settings where key like 'battery.status.%'"))
     payload: dict[str, Any] = {row.key.removeprefix("battery.status."): row.value for row in status}
     LOGGER.debug("battery_status: db keys=%s", sorted(payload.keys()))
@@ -1510,7 +1512,7 @@ async def battery_status(session: AsyncSession = Depends(get_session)) -> dict[s
 
 
 @app.get("/grid/status")
-async def grid_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def grid_status(session: SessionDep) -> dict[str, Any]:
     grid_payload = grid_status_payload(latest_mqtt_status())
     if not grid_payload:
         try:
@@ -1545,7 +1547,7 @@ async def grid_status(session: AsyncSession = Depends(get_session)) -> dict[str,
 
 
 @app.get("/dsmr/status")
-async def dsmr_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def dsmr_status(session: SessionDep) -> dict[str, Any]:
     return await grid_status(session)
 
 
@@ -1561,7 +1563,7 @@ async def solar_status() -> dict[str, Any]:
 
 
 @app.get("/household/status")
-async def household_status(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def household_status(session: SessionDep) -> dict[str, Any]:
     return await household_status_payload(session)
 
 
@@ -1757,9 +1759,9 @@ async def latest_pv_uncertainty_bands(session: AsyncSession) -> dict[str, dict[s
 
 @app.get("/dashboard/curves")
 async def dashboard_curves(
+    session: SessionDep,
     window: Literal["5m", "hour", "day", "week", "month", "year"] = "day",
-    offset: int | None = Query(default=None, ge=-120, le=0),
-    session: AsyncSession = Depends(get_session),
+    offset: Annotated[int | None, Query(ge=-120, le=0)] = None,
 ) -> dict[str, Any]:
     duration, step_seconds, table_name = WINDOWS[window]
     start, end, now_ = dashboard_window_bounds(window, duration, period_offset=offset)
@@ -1862,7 +1864,7 @@ async def dashboard_curves(
 
 
 @app.get("/dashboard/forecast-quality")
-async def dashboard_forecast_quality(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def dashboard_forecast_quality(session: SessionDep) -> dict[str, Any]:
     """Small quality block for the dashboard (spec 5.3): yesterday's MAE/bias per curve/horizon."""
     latest_date = (await session.execute(text("select max(for_date) from forecast_accuracy_daily"))).scalar_one_or_none()
     if latest_date is None:
@@ -1882,7 +1884,7 @@ async def dashboard_forecast_quality(session: AsyncSession = Depends(get_session
 
 
 @app.get("/api/state")
-async def api_state(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def api_state(session: SessionDep) -> dict[str, Any]:
     battery = await battery_status(session)
     grid = await grid_status(session)
     household = await household_status_payload(session, store=False)
@@ -1895,7 +1897,7 @@ async def api_state(session: AsyncSession = Depends(get_session)) -> dict[str, A
 
 
 @app.get("/api/v1/surplus")
-async def api_v1_surplus(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def api_v1_surplus(session: SessionDep) -> dict[str, Any]:
     battery = await battery_status(session)
     grid = await grid_status(session)
     settings = await battery_settings(session)
@@ -1903,14 +1905,17 @@ async def api_v1_surplus(session: AsyncSession = Depends(get_session)) -> dict[s
 
 
 @app.get("/api/v1/dryad")
-async def api_v1_dryad(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def api_v1_dryad(session: SessionDep) -> dict[str, Any]:
     now_ = datetime.now(timezone.utc)
     with DRYAD_CACHE_LOCK:
         cached_at = DRYAD_CACHE.get("computed_at")
         cached_payload = DRYAD_CACHE.get("payload")
-        if isinstance(cached_at, datetime) and cached_payload is not None:
-            if (now_ - cached_at).total_seconds() < DRYAD_CACHE_SECONDS:
-                return cached_payload
+        if (
+            isinstance(cached_at, datetime)
+            and cached_payload is not None
+            and (now_ - cached_at).total_seconds() < DRYAD_CACHE_SECONDS
+        ):
+            return cached_payload
 
     inputs = await load_dryad_inputs(session, now_)
     payload = build_dryad_payload(
@@ -1927,8 +1932,8 @@ async def api_v1_dryad(session: AsyncSession = Depends(get_session)) -> dict[str
 
 @app.get("/api/v1/dryad/history")
 async def api_v1_dryad_history(
-    days: int = Query(default=30, ge=1, le=400),
-    session: AsyncSession = Depends(get_session),
+    session: SessionDep,
+    days: Annotated[int, Query(ge=1, le=400)] = 30,
 ) -> dict[str, Any]:
     timezone_name = os.getenv("MINYAD_TIMEZONE", "Europe/Amsterdam")
     return {
@@ -1939,12 +1944,12 @@ async def api_v1_dryad_history(
 
 
 @app.get("/api/surplus")
-async def api_surplus(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def api_surplus(session: SessionDep) -> dict[str, Any]:
     return await api_v1_surplus(session)
 
 
 @app.get("/api/forecast")
-async def api_forecast(hours_ahead: int = 12, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def api_forecast(session: SessionDep, hours_ahead: int = 12) -> dict[str, Any]:
     hours = max(1, min(48, hours_ahead))
     now_ = datetime.now(timezone.utc)
     end = now_ + timedelta(hours=hours)
@@ -1975,7 +1980,7 @@ async def api_forecast(hours_ahead: int = 12, session: AsyncSession = Depends(ge
 
 
 @app.post("/api/control/battery", dependencies=MUTATION_AUTH)
-async def api_control_battery(request: AgentBatteryControlRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def api_control_battery(request: AgentBatteryControlRequest, session: SessionDep) -> dict[str, Any]:
     if request.setpoint_w > 0:
         override = BatteryOverrideRequest(mode="force_charge", watts=request.setpoint_w, duration_seconds=request.duration_minutes * 60)
         action = "charge"
@@ -1993,7 +1998,7 @@ async def api_control_battery(request: AgentBatteryControlRequest, session: Asyn
 
 
 @app.post("/api/agent/decisions", status_code=201, dependencies=MUTATION_AUTH)
-async def create_agent_decision(request: AgentDecisionRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def create_agent_decision(request: AgentDecisionRequest, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("""
         insert into agent_decisions (action_taken, setpoint_w, reasoning, confidence, input_snapshot, dry_run, model)
         values (:action_taken, :setpoint_w, :reasoning, :confidence, cast(:input_snapshot as jsonb), :dry_run, :model)
@@ -2027,8 +2032,8 @@ def serialize_agent_decision(row: Any) -> dict[str, Any]:
 
 @app.get("/api/agent/decisions")
 async def list_agent_decisions(
-    limit: int = Query(default=50, ge=1, le=200),
-    session: AsyncSession = Depends(get_session),
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[dict[str, Any]]:
     rows = (await session.execute(text("""
         select id, created_at, action_taken, setpoint_w, reasoning, confidence, input_snapshot, dry_run, model
@@ -2082,11 +2087,11 @@ async def _fetch_log_rows(session: AsyncSession, query: str, params: dict[str, A
 
 @app.get("/api/agent/logs", dependencies=[Depends(require_api_key)])
 async def agent_operational_logs(
-    hours_lookback: int = Query(default=24, ge=1, le=168),
-    limit: int = Query(default=50, ge=1, le=100),
-    since: str | None = Query(default=None),
-    until: str | None = Query(default=None),
-    session: AsyncSession = Depends(get_session),
+    session: SessionDep,
+    hours_lookback: Annotated[int, Query(ge=1, le=168)] = 24,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    since: Annotated[str | None, Query()] = None,
+    until: Annotated[str | None, Query()] = None,
 ) -> dict[str, Any]:
     until_dt = _parse_log_datetime(until) or datetime.now(timezone.utc)
     since_dt = _parse_log_datetime(since) or (until_dt - timedelta(hours=hours_lookback))
@@ -2274,12 +2279,12 @@ def serialize_agent_message(row: Any) -> dict[str, Any]:
 
 @app.get("/api/messages")
 async def list_agent_messages(
+    session: SessionDep,
     unread: bool | None = None,
     category: Literal["anomaly", "suggestion", "info", "reply"] | None = None,
     sender: Literal["agent", "operator"] | None = None,
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
     archived: bool | None = False,
-    session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
     clauses = []
     params: dict[str, Any] = {"limit": limit}
@@ -2310,8 +2315,8 @@ async def list_agent_messages(
 
 @app.get("/api/messages/unread-count")
 async def agent_messages_unread_count(
+    session: SessionDep,
     sender: Literal["agent", "operator"] | None = "agent",
-    session: AsyncSession = Depends(get_session),
 ) -> dict[str, int]:
     clause = "read_at is null and archived_at is null"
     params: dict[str, Any] = {}
@@ -2323,7 +2328,7 @@ async def agent_messages_unread_count(
 
 
 @app.get("/api/messages/{message_id}")
-async def get_agent_message(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def get_agent_message(message_id: int, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("""
         select id, created_at, sender, category, subject, body, related_decision_id, read_at, thread_id, severity, archived_at, operator_ack_at, agent_ack_at
         from agent_messages
@@ -2342,7 +2347,7 @@ async def get_agent_message(message_id: int, session: AsyncSession = Depends(get
 
 
 @app.post("/api/messages", status_code=201, dependencies=MUTATION_AUTH)
-async def create_agent_message(request: AgentMessageCreate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def create_agent_message(request: AgentMessageCreate, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("""
         insert into agent_messages (sender, category, subject, body, related_decision_id, thread_id, severity, operator_ack_at, agent_ack_at)
         values (:sender, :category, :subject, :body, :related_decision_id, :thread_id, :severity, case when :sender = 'operator' then now() else null end, case when :sender = 'agent' then now() else null end)
@@ -2353,7 +2358,7 @@ async def create_agent_message(request: AgentMessageCreate, session: AsyncSessio
 
 
 @app.patch("/api/messages/{message_id}/read", dependencies=MUTATION_AUTH)
-async def mark_agent_message_read(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def mark_agent_message_read(message_id: int, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("""
         update agent_messages
         set read_at = coalesce(read_at, now()),
@@ -2368,7 +2373,7 @@ async def mark_agent_message_read(message_id: int, session: AsyncSession = Depen
 
 
 @app.patch("/api/messages/{message_id}/archive", dependencies=MUTATION_AUTH)
-async def archive_agent_message(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def archive_agent_message(message_id: int, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("""
         update agent_messages
         set archived_at = coalesce(archived_at, now())
@@ -2382,7 +2387,7 @@ async def archive_agent_message(message_id: int, session: AsyncSession = Depends
 
 
 @app.patch("/api/messages/{message_id}/ack", dependencies=MUTATION_AUTH)
-async def acknowledge_agent_message(message_id: int, actor: Literal["operator", "agent"] = "operator", session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def acknowledge_agent_message(message_id: int, session: SessionDep, actor: Literal["operator", "agent"] = "operator") -> dict[str, Any]:
     column = "operator_ack_at" if actor == "operator" else "agent_ack_at"
     row = (await session.execute(text(f"""
         update agent_messages
@@ -2397,7 +2402,7 @@ async def acknowledge_agent_message(message_id: int, actor: Literal["operator", 
 
 
 @app.delete("/api/messages/{message_id}", dependencies=MUTATION_AUTH)
-async def delete_agent_message(message_id: int, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def delete_agent_message(message_id: int, session: SessionDep) -> dict[str, Any]:
     row = (await session.execute(text("delete from agent_messages where id = :id returning id"), {"id": message_id})).mappings().first()
     if row is None:
         raise HTTPException(status_code=404, detail="message not found")
@@ -2406,7 +2411,7 @@ async def delete_agent_message(message_id: int, session: AsyncSession = Depends(
 
 
 @app.post("/battery/override", dependencies=MUTATION_AUTH)
-async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def set_battery_override(request: BatteryOverrideRequest, session: SessionDep) -> dict[str, Any]:
     mode = _normalize_battery_override_mode(request.mode)
     settings = await battery_settings(session)
     soc_floor = int(settings.get("soc_floor", 20))
@@ -2456,7 +2461,7 @@ async def set_battery_override(request: BatteryOverrideRequest, session: AsyncSe
 
 
 @app.delete("/battery/override", dependencies=MUTATION_AUTH)
-async def clear_battery_override(session: AsyncSession = Depends(get_session)) -> dict[str, str]:
+async def clear_battery_override(session: SessionDep) -> dict[str, str]:
     await session.execute(text("update battery_override set mode='none', watts=null, duration_seconds=null, expires_at=null, override_soc_limits=false, updated_at=now() where id=1"))
     await session.commit()
     mqtt.client.publish("minyad/control/override", json.dumps({"mode": "none"}), qos=0, retain=False)
@@ -2465,13 +2470,13 @@ async def clear_battery_override(session: AsyncSession = Depends(get_session)) -
 
 @app.get("/api/battery/settings")
 @app.get("/battery/settings")
-async def get_battery_settings(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def get_battery_settings(session: SessionDep) -> dict[str, Any]:
     return await battery_settings(session)
 
 
 @app.put("/api/battery/settings", dependencies=MUTATION_AUTH)
 @app.put("/battery/settings", dependencies=MUTATION_AUTH)
-async def update_battery_settings(update: BatterySettingsUpdate, session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
+async def update_battery_settings(update: BatterySettingsUpdate, session: SessionDep) -> dict[str, Any]:
     data = update.model_dump(exclude_unset=True)
     current = await battery_settings(session)
     merged = {**current, **data}
