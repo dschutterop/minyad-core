@@ -326,7 +326,7 @@ class StrategyService:
         server = uvicorn.Server(
             uvicorn.Config(
                 app,
-                host="0.0.0.0",
+                host=os.getenv("MINYAD_HEALTH_BIND_ADDR", "localhost"),
                 port=8080,
                 log_level="info",
                 ssl_certfile=os.getenv("MINYAD_TLS_CERT_FILE") or None,

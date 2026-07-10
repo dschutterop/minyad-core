@@ -45,7 +45,7 @@ PV_STALE_SECONDS = 300
 VESPER_API_URL = os.getenv("VESPER_API_URL", "")
 VESPER_API_SECRET = os.getenv("VESPER_API_SECRET", "")
 METRICS_PORT = int(os.getenv("METRICS_PORT", "9104"))
-METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+METRICS_ADDR = os.getenv("METRICS_ADDR", "")
 VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
 
 PROMETHEUS_REGISTRY = CollectorRegistry()
@@ -463,7 +463,7 @@ class StrategyService:
         server = uvicorn.Server(
             uvicorn.Config(
                 app,
-                host="0.0.0.0",
+                host=os.getenv("MINYAD_HEALTH_BIND_ADDR", "localhost"),
                 port=8080,
                 log_level="info",
                 ssl_certfile=os.getenv("MINYAD_TLS_CERT_FILE") or None,

@@ -28,7 +28,7 @@ STATUS_STALE = "stale"
 STATUS_DISCONNECTED = "disconnected"
 STATUS_INTERVAL_SECONDS = 30
 METRICS_PORT = int(os.getenv("METRICS_PORT", "9108"))
-METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+METRICS_ADDR = os.getenv("METRICS_ADDR", "")
 VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
 
 PROMETHEUS_REGISTRY = CollectorRegistry()

@@ -33,7 +33,7 @@ MQTT_TOPIC_BRIDGE_LAST_SEEN = "minyad/solar/bridge/last_seen"
 BRIDGE_STATUS_ONLINE = "online"
 BRIDGE_STATUS_ERROR = "error"
 METRICS_PORT = int(os.getenv("METRICS_PORT", "9109"))
-METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+METRICS_ADDR = os.getenv("METRICS_ADDR", "")
 VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
 
 PROMETHEUS_REGISTRY = CollectorRegistry()

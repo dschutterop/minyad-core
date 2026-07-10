@@ -18,10 +18,10 @@ from sqlalchemy import text
 configure_container_logging(logging.INFO)
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_DSMR_BROKER = "192.168.110.2"
+DEFAULT_DSMR_BROKER = os.getenv("DEFAULT_DSMR_BROKER", "minyad-mqtt")
 DEFAULT_DSMR_PORT = 1883
 METRICS_PORT = int(os.getenv("METRICS_PORT", "9102"))
-METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+METRICS_ADDR = os.getenv("METRICS_ADDR", "")
 VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
 PROMETHEUS_REGISTRY = CollectorRegistry()
 

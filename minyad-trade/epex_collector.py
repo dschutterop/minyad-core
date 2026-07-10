@@ -45,7 +45,7 @@ ENTSOE = _CONFIG.ENTSOE
 MQTT_TOPICS = _CONFIG.MQTT_TOPICS
 ALLOWED_ENTSOE_HOST = "web-api.tp.entsoe.eu"
 METRICS_PORT = int(os.getenv("METRICS_PORT", "9105"))
-METRICS_ADDR = os.getenv("METRICS_ADDR", "0.0.0.0")
+METRICS_ADDR = os.getenv("METRICS_ADDR", "")
 VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
 
 PROMETHEUS_REGISTRY = CollectorRegistry()
