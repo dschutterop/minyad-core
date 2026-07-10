@@ -7,4 +7,6 @@ __pycache__/
 htmlcov/
 .coverage
 coverage.xml
+sonar-trivy-issues.json
+trivy-report-*.json
 .DS_Store
