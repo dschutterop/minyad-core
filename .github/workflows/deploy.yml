@@ -8,7 +8,7 @@ on:
     inputs:
       run_trivy:
         description: "Run Trivy image vulnerability scans"
-        required: false
+        required: true
         type: boolean
         default: false
 
