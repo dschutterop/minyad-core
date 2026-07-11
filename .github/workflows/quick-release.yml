@@ -11,9 +11,66 @@ env:
   IMAGE_PREFIX: ghcr.io/${{ github.repository }}
 
 jobs:
+  public-release-gate:
+    name: Public release gate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Run structural public-release blockers
+        id: structural
+        continue-on-error: true
+        run: python3 scripts/public_release_gate.py --require-daniel-approval
+
+      - name: Run gitleaks over full history
+        id: gitleaks
+        continue-on-error: true
+        run: |
+          docker run --rm -v "${PWD}:/repo" zricethezav/gitleaks:latest detect --source /repo --log-opts="--all" --redact --report-format json --report-path /repo/gitleaks-report.json
+
+      - name: Run trufflehog over full history
+        id: trufflehog
+        continue-on-error: true
+        run: |
+          docker run --rm -v "${PWD}:/repo" trufflesecurity/trufflehog:latest git file:///repo --json --no-update --fail > trufflehog-report.json
+
+      - name: Upload secret scan reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-release-secret-scans
+          path: |
+            gitleaks-report.json
+            trufflehog-report.json
+          if-no-files-found: ignore
+
+      - name: Enforce public release gate
+        run: |
+          failed=0
+          if [ "${{ steps.structural.outcome }}" != "success" ]; then
+            echo "::error::Structural public-release blockers failed."
+            failed=1
+          fi
+          if [ "${{ steps.gitleaks.outcome }}" != "success" ]; then
+            echo "::error::gitleaks full-history scan failed."
+            failed=1
+          fi
+          if [ "${{ steps.trufflehog.outcome }}" != "success" ]; then
+            echo "::error::trufflehog full-history scan failed."
+            failed=1
+          fi
+          exit "${failed}"
+
   test:
     name: Test
     runs-on: ubuntu-latest
+    needs: public-release-gate
     if: github.ref == 'refs/heads/main'
     env:
       PYTHONPATH: ${{ github.workspace }}
