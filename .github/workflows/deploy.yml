@@ -8,9 +8,12 @@ on:
     inputs:
       run_trivy:
         description: "Run Trivy image vulnerability scans"
+        # README: `required` only controls whether the manual dispatch form must
+        # provide a value. It does not make Trivy run. Keep `default: true` and
+        # the job conditions below in sync when changing the default behavior.
         required: true
         type: boolean
-        default: false
+        default: true
 
 concurrency:
   group: minyad-deploy
@@ -18,7 +21,7 @@ concurrency:
 
 env:
   IMAGE_PREFIX: ghcr.io/${{ github.repository }}
-  RUN_TRIVY: ${{ inputs.run_trivy == true || inputs.run_trivy == 'true' }}
+  RUN_TRIVY: ${{ github.event_name == 'push' || inputs.run_trivy == true || inputs.run_trivy == 'true' }}
 
 jobs:
   test:
@@ -90,7 +93,7 @@ jobs:
         always()
         && !cancelled()
         && needs.test.result == 'success'
-        && ((inputs.run_trivy != true && inputs.run_trivy != 'true') || needs.trivy.result == 'success')
+        && (!(github.event_name == 'push' || inputs.run_trivy == true || inputs.run_trivy == 'true') || needs.trivy.result == 'success')
       }}
     environment: production
     permissions:
@@ -239,7 +242,7 @@ jobs:
       - self-hosted
       - minyad
     needs: build
-    if: ${{ inputs.run_trivy == true || inputs.run_trivy == 'true' }}
+    if: ${{ github.event_name == 'push' || inputs.run_trivy == true || inputs.run_trivy == 'true' }}
     permissions:
       contents: read
       packages: read
@@ -296,7 +299,7 @@ jobs:
       ${{
         always()
         && !cancelled()
-        && (inputs.run_trivy == true || inputs.run_trivy == 'true')
+        && (github.event_name == 'push' || inputs.run_trivy == true || inputs.run_trivy == 'true')
         && needs.trivy.result == 'success'
       }}
     permissions:
@@ -331,7 +334,7 @@ jobs:
         && !cancelled()
         && needs.build.result == 'success'
         && needs.sonar.result == 'success'
-        && ((inputs.run_trivy != true && inputs.run_trivy != 'true') || needs.trivy-gate.result == 'success')
+        && (!(github.event_name == 'push' || inputs.run_trivy == true || inputs.run_trivy == 'true') || needs.trivy-gate.result == 'success')
       }}
     environment: production
     permissions:
