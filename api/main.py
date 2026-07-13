@@ -33,6 +33,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
     from dryad import DRYAD_CACHE_SECONDS, build_dryad_payload, load_dryad_history, load_dryad_inputs
 from shared.db import AsyncSessionLocal, get_session
 from shared.mqtt_client import MinyadMqttClient
+from minyad.strategy.v3 import forecast_contract
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
@@ -221,6 +222,19 @@ STRATEGY_NUMERIC_LIMITS = {
 }
 PLAN_STALE_MINUTES = 30
 SURPLUS_API_VERSION = "v1"
+MINYAD_FORECAST_SCENARIO_COUNT = 100
+MINYAD_FORECAST_MODEL_VERSION = "strategy-v3-lp"
+# battery.* / strategy3.* keys the LP uses that the surplus endpoint also exposes as metadata,
+# duplicated from minyad.strategy.v3.constants.DEFAULTS to keep this service's DB-only boundary
+# with the strategy package (mirrors _classify_cloud_cover further below).
+BATTERY_LP_META_DEFAULTS = {
+    "battery.capacity_wh": 10240.0,
+    "strategy3.one_way_efficiency": 0.95,
+    "battery.max_charge_w": 1440.0,
+    "battery.max_charge_a": 30.0,
+    "battery.nominal_v": 48.0,
+    "battery.max_discharge_w": 5000.0,
+}
 
 
 def _apply_log_level(debug: bool) -> None:
@@ -1220,6 +1234,35 @@ async def battery_settings(session: AsyncSession) -> dict[str, Any]:
     return settings
 
 
+async def battery_lp_meta(session: AsyncSession) -> dict[str, Any]:
+    """Battery assumptions actually used by the strategy-v3 LP (capacity, round-trip
+    efficiency, effective power limits) for the minyad_forecast battery-metadata block. Real
+    configured values only — never a substitute default presented as if it were configured."""
+    rows = (await session.execute(
+        text("select key, value from settings where key = any(:keys)"),
+        {"keys": list(BATTERY_LP_META_DEFAULTS)},
+    )).all()
+    values = {row.key: row.value for row in rows}
+
+    def _f(key: str) -> float:
+        raw = values.get(key)
+        try:
+            return float(raw) if raw not in (None, "") else float(BATTERY_LP_META_DEFAULTS[key])
+        except (TypeError, ValueError):
+            return float(BATTERY_LP_META_DEFAULTS[key])
+
+    capacity_wh = _f("battery.capacity_wh")
+    max_charge_w = _f("battery.max_charge_w")
+    max_charge_a = _f("battery.max_charge_a")
+    nominal_v = _f("battery.nominal_v")
+    return {
+        "capacity_kwh": round(capacity_wh / 1000.0, 3),
+        "charge_efficiency": _f("strategy3.one_way_efficiency"),
+        "max_charge_w": int(min(max_charge_w, max_charge_a * nominal_v)),
+        "max_discharge_w": int(_f("battery.max_discharge_w")),
+    }
+
+
 def derived_bridge_stale_seconds(settings: dict[str, Any]) -> int:
     return int(settings.get("inverter_poll_interval_s", BATTERY_DEFAULTS["inverter_poll_interval_s"])) + int(
         settings.get("goodwe_poll_interval_grace_s", BATTERY_DEFAULTS["goodwe_poll_interval_grace_s"])
@@ -1397,6 +1440,17 @@ def build_surplus_payload(
     battery: dict[str, Any],
     settings: dict[str, Any] | None = None,
     now: datetime | None = None,
+    *,
+    battery_meta: dict[str, Any] | None = None,
+    attempt_forecast: bool = False,
+    plan_payload: dict[str, Any] | None = None,
+    plan_generated_at: datetime | None = None,
+    plan_solver_status: str | None = None,
+    uncertainty_bands: dict[str, Any] | None = None,
+    scenario_count: int = MINYAD_FORECAST_SCENARIO_COUNT,
+    stale_minutes: int = PLAN_STALE_MINUTES,
+    model_version: str = MINYAD_FORECAST_MODEL_VERSION,
+    forecast_seed: int | None = None,
 ) -> dict[str, Any]:
     """Build the external surplus snapshot used by downstream surplus consumers.
 
@@ -1404,6 +1458,15 @@ def build_surplus_payload(
     grid export after Minyad's battery steering; ``gross_surplus_w`` adds the
     measured battery charge power so a consumer can see that surplus exists even
     while Minyad is still feeding it into the battery.
+
+    ``battery_meta``/``plan_payload``/``uncertainty_bands`` are optional and additive: callers
+    that don't pass ``attempt_forecast=True`` (e.g. existing tests and any surplus consumer
+    written before the minyad_forecast contract existed) get exactly the legacy response shape
+    back, with no ``minyad_forecast`` key and no new ``battery`` fields. ``attempt_forecast=True``
+    opts into the forecast contract — Minyad's authoritative budget/SoC trajectory, or an
+    explicit "unavailable" marker (with a failure reason) if the LP plan isn't fit to publish
+    right now, including when there's no plan at all yet (see
+    minyad.strategy.v3.forecast_contract). It never fabricates a trajectory or quantiles.
     """
     settings = settings or {}
     timestamp = now or datetime.now(timezone.utc)
@@ -1424,7 +1487,26 @@ def build_surplus_payload(
     activity_state = _status_text(battery.get("state") or derive_battery_state(battery), control_state)
     battery_phase = _battery_phase(control_state, activity_state, battery_charge_w, battery_discharge_w)
 
-    return {
+    forecast_outcome: forecast_contract.ForecastBuildOutcome | None = None
+    if attempt_forecast:
+        forecast_outcome = forecast_contract.build_minyad_forecast(
+            plan_payload=plan_payload,
+            plan_generated_at=plan_generated_at,
+            plan_solver_status=plan_solver_status,
+            uncertainty_bands=uncertainty_bands,
+            now=timestamp,
+            stale_minutes=stale_minutes,
+            scenario_count=scenario_count,
+            model_version=model_version,
+            seed=forecast_seed,
+        )
+        if forecast_outcome.validation_status == "invalid":
+            LOGGER.warning(
+                "minyad_forecast unavailable: reason=%s model_version=%s now=%s",
+                forecast_outcome.validation_reason, model_version, timestamp.astimezone(timezone.utc).isoformat(),
+            )
+
+    payload = {
         "api_version": SURPLUS_API_VERSION,
         "timestamp": timestamp.astimezone(timezone.utc).isoformat(),
         "surplus_w": remaining_surplus_w,
@@ -1471,6 +1553,20 @@ def build_surplus_payload(
             "charge_stop_threshold_w": settings.get("stop_w"),
         },
     }
+
+    if battery_meta is not None:
+        payload["battery"].update(battery_meta)
+
+    if forecast_outcome is not None:
+        payload["minyad_forecast"] = forecast_outcome.forecast
+        # Compatibility period (see docs/minyad_forecast_contract.md): Vesper currently reads
+        # battery.soc_trajectory_pct for slot-level SoC; populate it alongside
+        # minyad_forecast.soc_pct rather than only in the new block. Omitted entirely (not a
+        # copied current SoC) when the forecast itself is unavailable.
+        if forecast_outcome.soc_trajectory_pct is not None:
+            payload["battery"]["soc_trajectory_pct"] = forecast_outcome.soc_trajectory_pct
+
+    return payload
 
 
 async def household_status_payload(session: AsyncSession, store: bool = True) -> dict[str, Any]:
@@ -1772,15 +1868,32 @@ def build_plan_curves(
     return curves, price_source
 
 
-async def latest_pv_uncertainty_bands(session: AsyncSession) -> dict[str, dict[str, float]]:
+async def latest_pv_uncertainty_bands(session: AsyncSession) -> dict[str, dict[str, Any]]:
+    """P10-P90 multipliers (dashboard) plus, where the daily calibration run has produced one,
+    the quantile_grid used by minyad.strategy.v3.scenario_forecast to draw PV scenarios for
+    minyad_forecast. A class without a persisted grid yet is still returned (dashboard still
+    wants its p10/p90), just without scenario-generation support until the next calibration."""
     latest_date = (await session.execute(text("select max(calibration_date) from pv_uncertainty_bands"))).scalar_one_or_none()
     if latest_date is None:
         return {}
     rows = (await session.execute(
-        text("select cloud_class, p10_multiplier, p90_multiplier from pv_uncertainty_bands where calibration_date = :d"),
+        text(
+            "select cloud_class, p10_multiplier, p90_multiplier, p25_multiplier, p50_multiplier, quantile_grid "
+            "from pv_uncertainty_bands where calibration_date = :d"
+        ),
         {"d": latest_date},
     )).all()
-    return {row.cloud_class: {"p10_multiplier": float(row.p10_multiplier), "p90_multiplier": float(row.p90_multiplier)} for row in rows}
+    bands: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        band: dict[str, Any] = {"p10_multiplier": float(row.p10_multiplier), "p90_multiplier": float(row.p90_multiplier)}
+        if row.p25_multiplier is not None:
+            band["p25_multiplier"] = float(row.p25_multiplier)
+        if row.p50_multiplier is not None:
+            band["p50_multiplier"] = float(row.p50_multiplier)
+        if row.quantile_grid:
+            band["quantile_grid"] = row.quantile_grid
+        bands[row.cloud_class] = band
+    return bands
 
 
 async def _dashboard_forecast_curves(
@@ -1928,7 +2041,20 @@ async def api_v1_surplus(session: SessionDep) -> dict[str, Any]:
     battery = await battery_status(session)
     grid = await grid_status(session)
     settings = await battery_settings(session)
-    return build_surplus_payload(grid, battery, settings)
+    battery_meta = await battery_lp_meta(session)
+    plan_row, latest_plan_status = await _current_forecast_plan(session)
+    uncertainty_bands = await latest_pv_uncertainty_bands(session)
+    return build_surplus_payload(
+        grid,
+        battery,
+        settings,
+        battery_meta=battery_meta,
+        attempt_forecast=True,
+        plan_payload=plan_row["payload"] if plan_row is not None else None,
+        plan_generated_at=plan_row["generated_at"] if plan_row is not None else None,
+        plan_solver_status=(plan_row.get("solver_status") if plan_row is not None else latest_plan_status),
+        uncertainty_bands=uncertainty_bands,
+    )
 
 
 @app.get("/api/v1/dryad")

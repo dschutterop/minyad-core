@@ -637,11 +637,15 @@ class RollingPlanner:
                 await session.execute(
                     text(
                         """
-                        insert into pv_uncertainty_bands (calibration_date, cloud_class, p10_multiplier, p90_multiplier, sample_count)
-                        values (:calibration_date, :cloud_class, :p10, :p90, :sample_count)
+                        insert into pv_uncertainty_bands
+                          (calibration_date, cloud_class, p10_multiplier, p90_multiplier, p25_multiplier, p50_multiplier, quantile_grid, sample_count)
+                        values (:calibration_date, :cloud_class, :p10, :p90, :p25, :p50, cast(:quantile_grid as jsonb), :sample_count)
                         on conflict (calibration_date, cloud_class) do update set
                           p10_multiplier = excluded.p10_multiplier,
                           p90_multiplier = excluded.p90_multiplier,
+                          p25_multiplier = excluded.p25_multiplier,
+                          p50_multiplier = excluded.p50_multiplier,
+                          quantile_grid = excluded.quantile_grid,
                           sample_count = excluded.sample_count
                         """
                     ),
@@ -650,6 +654,9 @@ class RollingPlanner:
                         "cloud_class": cloud_class,
                         "p10": stats["p10_multiplier"],
                         "p90": stats["p90_multiplier"],
+                        "p25": stats["p25_multiplier"],
+                        "p50": stats["p50_multiplier"],
+                        "quantile_grid": json.dumps(stats["quantile_grid"]),
                         "sample_count": stats["sample_count"],
                     },
                 )

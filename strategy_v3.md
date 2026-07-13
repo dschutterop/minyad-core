@@ -219,6 +219,8 @@ After every successful (non-FALLBACK) plan, publish retained on `minyad/strategy
 
 `surplus_w[t] = max(0, pv[t] − load[t] − ch[t])` from the LP solution — i.e., energy that would otherwise be exported/curtailed and is available for Vesper to dispatch to devices. v3 takes **no** action on this topic itself.
 
+This MQTT publish is a point-forecast hint. The authoritative, quantified contract Vesper actually polls is the HTTP `minyad_forecast` block on `GET /api/v1/surplus` (P50/P25 scenario-derived, plus the SoC trajectory) — see `docs/minyad_forecast_contract.md`. The two are not the same mechanism: don't conflate this MQTT topic with that HTTP contract when reasoning about what Vesper consumes.
+
 ---
 
 ## 8. MQTT interface summary

@@ -21,6 +21,12 @@ CLOUD_COVER_CLEAR_MAX_PCT = 25.0
 CLOUD_COVER_PARTLY_MAX_PCT = 75.0
 MIN_SAMPLES_PER_CLASS = 14 * 4  # spec 4.4.4: >= 14 days of history per class
 
+# Compact empirical-CDF representation persisted per cloud class, used by
+# minyad.strategy.v3.scenario_forecast to draw PV scenarios via inverse-CDF sampling without
+# storing the full raw ratio history. 25/50 are the quantiles the Vesper forecast contract
+# actually needs; the rest give the interpolation enough resolution at the tails.
+QUANTILE_LEVELS: tuple[float, ...] = (1.0, 5.0, 10.0, 25.0, 50.0, 75.0, 90.0, 95.0, 99.0)
+
 
 def classify_cloud_cover(cloud_cover_pct: float) -> str:
     if cloud_cover_pct < CLOUD_COVER_CLEAR_MAX_PCT:
@@ -79,8 +85,10 @@ def compute_uncertainty_bands(
     *,
     min_samples: int = MIN_SAMPLES_PER_CLASS,
 ) -> dict[str, dict[str, Any]]:
-    """P10/P90 multipliers per cloud class; a class with too few samples is omitted entirely
-    (spec 4.4.4: never fabricate a percentile from too little history)."""
+    """P10/P90 multipliers (plus P25/P50 and a full quantile grid) per cloud class; a class
+    with too few samples is omitted entirely (spec 4.4.4: never fabricate a percentile from
+    too little history). The quantile grid is the empirical distribution used by
+    scenario_forecast.py to draw PV scenarios for the Vesper forecast contract."""
     bands: dict[str, dict[str, Any]] = {}
     for cloud_class, ratios in ratios_by_class.items():
         if len(ratios) < min_samples:
@@ -88,6 +96,9 @@ def compute_uncertainty_bands(
         bands[cloud_class] = {
             "p10_multiplier": percentile(ratios, 10.0),
             "p90_multiplier": percentile(ratios, 90.0),
+            "p25_multiplier": percentile(ratios, 25.0),
+            "p50_multiplier": percentile(ratios, 50.0),
+            "quantile_grid": [[level, percentile(ratios, level)] for level in QUANTILE_LEVELS],
             "sample_count": len(ratios),
         }
     return bands
