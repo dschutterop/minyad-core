@@ -8,6 +8,7 @@ previously unexercised.
 
 import os
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
@@ -18,7 +19,6 @@ from api.main import (
     AssetSteeringSettingsUpdate,
     BatteryOverrideRequest,
     BatterySettingsUpdate,
-    Literal,
     TradeSettingsUpdate,
     _numeric_w,
     _status_text,

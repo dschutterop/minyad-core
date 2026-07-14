@@ -4,6 +4,7 @@ import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
@@ -48,7 +49,7 @@ def test_bridge_stale_seconds_is_derived_from_poll_interval_and_grace():
 
 
 def test_battery_override_accepts_and_normalizes_charge_aliases():
-    api_main.BatteryOverrideRequest.model_rebuild(_types_namespace={"Literal": api_main.Literal})
+    api_main.BatteryOverrideRequest.model_rebuild(_types_namespace={"Literal": Literal})
     legacy = api_main.BatteryOverrideRequest(mode="force_on", watts=700)
     current = api_main.BatteryOverrideRequest(mode="force_charge", watts=700)
     soc_override = api_main.BatteryOverrideRequest(mode="force_discharge", watts=700, override_soc_limits=True)
@@ -141,14 +142,14 @@ def test_claude_agent_settings_update_rejects_negative_min_tokens():
 
 
 def test_system_settings_update_accepts_supported_languages():
-    api_main.SystemSettingsUpdate.model_rebuild(_types_namespace={"Literal": api_main.Literal})
+    api_main.SystemSettingsUpdate.model_rebuild(_types_namespace={"Literal": Literal})
 
     assert api_main.SystemSettingsUpdate(language="en").language == "en"
     assert api_main.SystemSettingsUpdate(language="nl").language == "nl"
 
 
 def test_system_settings_update_rejects_unsupported_language():
-    api_main.SystemSettingsUpdate.model_rebuild(_types_namespace={"Literal": api_main.Literal})
+    api_main.SystemSettingsUpdate.model_rebuild(_types_namespace={"Literal": Literal})
 
     with pytest.raises(ValidationError):
         api_main.SystemSettingsUpdate(language="de")
