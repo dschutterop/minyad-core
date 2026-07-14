@@ -152,7 +152,6 @@ try:
     )
 except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker image layout
     from mqtt_handlers import (
-        build_health_status,
         collect_retained_mqtt_status,
         handle_status_mqtt,
         handle_trade_price_mqtt,
@@ -166,14 +165,9 @@ try:
         DEBUG_LOGGING_SETTING_QUERY,
         DRYAD_CACHE,
         DRYAD_CACHE_LOCK,
-        LAST_RETAINED_FETCH,
         MESSAGE_NOT_FOUND_DETAIL,
-        MQTT_EVENTS,
-        MQTT_STATUS,
-        MQTT_STATUS_LOCK,
         MUTATION_AUTH,
         SETTING_UPSERT_QUERY,
-        STARTUP_AT,
         TOPIC_CONTROL_OVERRIDE,
         TRADE_PRICE_CACHE,
         SessionDep,
@@ -188,14 +182,9 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
         DEBUG_LOGGING_SETTING_QUERY,
         DRYAD_CACHE,
         DRYAD_CACHE_LOCK,
-        LAST_RETAINED_FETCH,
         MESSAGE_NOT_FOUND_DETAIL,
-        MQTT_EVENTS,
-        MQTT_STATUS,
-        MQTT_STATUS_LOCK,
         MUTATION_AUTH,
         SETTING_UPSERT_QUERY,
-        STARTUP_AT,
         TOPIC_CONTROL_OVERRIDE,
         TRADE_PRICE_CACHE,
         SessionDep,
@@ -206,7 +195,14 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
         require_api_key,
     )
 try:
+    from api.routers import health as health_router
     from api.routers import settings as settings_router
+    from api.routers.health import (
+        SystemSettingsUpdate,
+        get_system_settings,
+        health,
+        update_system_settings,
+    )
     from api.routers.settings import (
         ALLOWED_TRADE_PRICE_HOST,
         CLAUDE_AGENT_DEFAULTS,
@@ -236,7 +232,14 @@ try:
         update_trade_settings,
     )
 except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker image layout
+    from routers import health as health_router
     from routers import settings as settings_router
+    from routers.health import (
+        SystemSettingsUpdate,
+        get_system_settings,
+        health,
+        update_system_settings,
+    )
     from routers.settings import (
         ALLOWED_TRADE_PRICE_HOST,
         CLAUDE_AGENT_DEFAULTS,
@@ -268,6 +271,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
 from shared.db import AsyncSessionLocal
 
 app.include_router(settings_router.router)
+app.include_router(health_router.router)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -295,6 +299,7 @@ __all__ = [
     "ApiKeyCreate",
     "AssetSteeringSettingsUpdate",
     "ClaudeAgentSettingsUpdate",
+    "SystemSettingsUpdate",
     "TradeSettingsUpdate",
     "_add_months",
     "_battery_phase",
@@ -315,6 +320,7 @@ __all__ = [
     "battery_curve_power_w",
     "battery_health_component",
     "battery_status_payload",
+    "build_health_status",
     "build_plan_curves",
     "build_surplus_payload",
     "cached_status_is_incomplete",
@@ -330,10 +336,12 @@ __all__ = [
     "enrich_bridge_health",
     "get_asset_steering_settings",
     "get_claude_agent_settings",
+    "get_system_settings",
     "get_trade_prices",
     "get_trade_settings",
     "grid_health_component",
     "grid_status_payload",
+    "health",
     "interpolate_points",
     "list_settings",
     "mqtt_status_key",
@@ -352,6 +360,7 @@ __all__ = [
     "trade_settings",
     "update_asset_steering_settings",
     "update_claude_agent_settings",
+    "update_system_settings",
     "update_trade_settings",
     "value_is_fresh_iso",
 ]
@@ -386,12 +395,6 @@ BATTERY_LP_META_DEFAULTS = {
     "battery.nominal_v": 48.0,
     "battery.max_discharge_w": 5000.0,
 }
-
-
-class SystemSettingsUpdate(BaseModel):
-    debug_logging: bool | None = None
-    theme: Literal["system", "light", "dark"] | None = None
-    language: Literal["en", "nl"] | None = None
 
 
 class AgentDecisionRequest(BaseModel):
@@ -485,93 +488,6 @@ async def startup() -> None:
         await publish_battery_mqtt_settings(await battery_settings(session))
         await publish_trade_mqtt_settings(await trade_settings(session))
     _debug_refresh_task = asyncio.create_task(_refresh_debug_setting())
-
-
-@app.get("/health")
-async def health() -> dict[str, Any]:
-    return {"status": "ok", "private_modules": PRIVATE_MODULES_AVAILABLE}
-
-
-@app.get("/health/status")
-async def health_status(session: SessionDep) -> dict[str, Any]:
-    db_ok = True
-    db_error = None
-    try:
-        await session.execute(text("select 1"))
-    except Exception as exc:  # pragma: no cover - depends on deployment database state
-        db_ok = False
-        db_error = str(exc)
-    with MQTT_STATUS_LOCK:
-        cache = dict(MQTT_STATUS)
-    return build_health_status(cache, db_ok=db_ok, db_error=db_error)
-
-
-@app.get("/debug/status")
-async def debug_status(session: SessionDep) -> dict[str, Any]:
-    result = await session.execute(text(DEBUG_LOGGING_SETTING_QUERY))
-    debug_val = result.scalar_one_or_none() or "false"
-    with MQTT_STATUS_LOCK:
-        cache = dict(MQTT_STATUS)
-    with mqtt._subscriptions_lock:
-        subscriptions = list(mqtt._subscriptions.keys())
-    missing_keys = [k for k in ("soc", "soh", "power_w", "voltage", "mode", "bridge_status", "bridge_last_seen") if not cache.get(k)]
-    return {
-        "startup_at": STARTUP_AT.isoformat(),
-        "debug_logging": debug_val == "true",
-        "log_level": logging.getLevelName(logging.getLogger().level),
-        "mqtt": mqtt.connection_info(),
-        "mqtt_subscriptions": subscriptions,
-        "mqtt_status_cache": cache,
-        "mqtt_status_cache_complete": not cached_status_is_incomplete(cache),
-        "mqtt_status_missing_keys": missing_keys,
-        "recent_mqtt_events": list(MQTT_EVENTS)[-50:],
-        "last_retained_fetch": LAST_RETAINED_FETCH,
-        "claude_agent": await claude_agent_settings(session),
-    }
-
-
-@app.get("/system-settings")
-async def get_system_settings(session: SessionDep) -> dict[str, Any]:
-    result = await session.execute(text("select key, value from settings where key in ('system.debug_logging', 'system.theme', 'system.language')"))
-    settings = {row.key: row.value for row in result}
-    return {
-        "debug_logging": settings.get("system.debug_logging", "false") == "true",
-        "theme": settings.get("system.theme", "system"),
-        "language": settings.get("system.language", "en"),
-    }
-
-
-@app.put("/system-settings", dependencies=MUTATION_AUTH)
-async def update_system_settings(update: SystemSettingsUpdate, session: SessionDep) -> dict[str, Any]:
-    if update.debug_logging is not None:
-        val = "true" if update.debug_logging else "false"
-        await session.execute(
-            text("""
-                insert into settings (key, value, encrypted, updated_at) values ('system.debug_logging', :val, false, now())
-                on conflict (key) do update set value=:val, updated_at=now()
-            """),
-            {"val": val},
-        )
-        _apply_log_level(update.debug_logging)
-    if update.theme is not None:
-        await session.execute(
-            text("""
-                insert into settings (key, value, encrypted, updated_at) values ('system.theme', :val, false, now())
-                on conflict (key) do update set value=:val, updated_at=now()
-            """),
-            {"val": update.theme},
-        )
-    if update.language is not None:
-        await session.execute(
-            text("""
-                insert into settings (key, value, encrypted, updated_at) values ('system.language', :val, false, now())
-                on conflict (key) do update set value=:val, updated_at=now()
-            """),
-            {"val": update.language},
-        )
-    if update.debug_logging is not None or update.theme is not None or update.language is not None:
-        await session.commit()
-    return await get_system_settings(session)
 
 
 async def battery_settings(session: AsyncSession) -> dict[str, Any]:
