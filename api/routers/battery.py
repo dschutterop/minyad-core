@@ -218,7 +218,7 @@ async def store_power_curve_point(
         text("""
             insert into power_curve_points
               (timestamp, bucket_start, granularity_seconds, source, power_w, delivered_w, returned_w, net_w, metadata)
-            values (:timestamp, date_trunc('minute', :timestamp), 60, :source, :power_w, :delivered_w, :returned_w, :net_w, cast(:metadata as json))
+            values (:timestamp, date_trunc('minute', :timestamp::timestamptz), 60, :source, :power_w, :delivered_w, :returned_w, :net_w, cast(:metadata as json))
         """),
         {
             "timestamp": timestamp,
