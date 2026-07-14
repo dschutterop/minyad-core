@@ -14,6 +14,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api.main as api_main
+from api.routers import battery as battery_router
+from api.routers import grid as grid_router
 
 pytestmark = pytest.mark.usefixtures("_require_forecast_contract")
 
@@ -167,10 +169,18 @@ async def _noop(*_args, **_kwargs):
     return None
 
 
+def _patch_mqtt_status_and_curve_store(monkeypatch, now):
+    """api_v1_surplus delegates to battery_status/grid_status, which each resolve
+    latest_mqtt_status/store_power_curve_point through their own module globals
+    (api.routers.battery / api.routers.grid), not api.main's — patch both."""
+    for module in (battery_router, grid_router):
+        monkeypatch.setattr(module, "latest_mqtt_status", lambda: _mqtt_status(now))
+        monkeypatch.setattr(module, "store_power_curve_point", _noop)
+
+
 def test_api_v1_surplus_route_returns_valid_minyad_forecast(monkeypatch):
     now = _aligned_now()
-    monkeypatch.setattr(api_main, "latest_mqtt_status", lambda: _mqtt_status(now))
-    monkeypatch.setattr(api_main, "store_power_curve_point", _noop)
+    _patch_mqtt_status_and_curve_store(monkeypatch, now)
 
     session = FakeSession(plan_row=_plan_row(now))
     payload = asyncio.run(api_main.api_v1_surplus(session))
@@ -187,8 +197,7 @@ def test_api_v1_surplus_route_returns_valid_minyad_forecast(monkeypatch):
 
 def test_api_v1_surplus_route_marks_forecast_unavailable_on_fallback_plan(monkeypatch):
     now = _aligned_now()
-    monkeypatch.setattr(api_main, "latest_mqtt_status", lambda: _mqtt_status(now))
-    monkeypatch.setattr(api_main, "store_power_curve_point", _noop)
+    _patch_mqtt_status_and_curve_store(monkeypatch, now)
 
     session = FakeSession(plan_row=_plan_row(now, solver_status="FALLBACK"))
     payload = asyncio.run(api_main.api_v1_surplus(session))
@@ -201,8 +210,7 @@ def test_api_v1_surplus_route_marks_forecast_unavailable_on_fallback_plan(monkey
 
 def test_api_v1_surplus_route_omits_forecast_when_no_plan_exists(monkeypatch):
     now = _aligned_now()
-    monkeypatch.setattr(api_main, "latest_mqtt_status", lambda: _mqtt_status(now))
-    monkeypatch.setattr(api_main, "store_power_curve_point", _noop)
+    _patch_mqtt_status_and_curve_store(monkeypatch, now)
 
     session = FakeSession(plan_row=None)
     payload = asyncio.run(api_main.api_v1_surplus(session))
@@ -215,8 +223,7 @@ def test_api_v1_surplus_route_omits_forecast_when_no_plan_exists(monkeypatch):
 def test_api_v1_surplus_over_http_returns_forecast_and_legacy_fields(monkeypatch):
     """Full HTTP round trip through FastAPI's own routing/serialization, as a downstream consumer would call it."""
     now = _aligned_now()
-    monkeypatch.setattr(api_main, "latest_mqtt_status", lambda: _mqtt_status(now))
-    monkeypatch.setattr(api_main, "store_power_curve_point", _noop)
+    _patch_mqtt_status_and_curve_store(monkeypatch, now)
 
     async def _override_session():
         await asyncio.sleep(0)

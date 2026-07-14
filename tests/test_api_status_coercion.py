@@ -61,6 +61,7 @@ def test_grid_status_stores_solar_curve_point(monkeypatch):
     import asyncio
 
     from api import main as api_main
+    from api.routers import grid as grid_router
 
     stored = []
 
@@ -75,8 +76,8 @@ def test_grid_status_stores_solar_curve_point(monkeypatch):
             self.commits += 1
 
     session = FakeSession()
-    monkeypatch.setattr(api_main, "latest_mqtt_status", lambda: {"solar_power_w": "412"})
-    monkeypatch.setattr(api_main, "store_power_curve_point", fake_store_power_curve_point)
+    monkeypatch.setattr(grid_router, "latest_mqtt_status", lambda: {"solar_power_w": "412"})
+    monkeypatch.setattr(grid_router, "store_power_curve_point", fake_store_power_curve_point)
 
     payload = asyncio.run(api_main.grid_status(session))
 

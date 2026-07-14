@@ -18,6 +18,7 @@ from api.main import (
     derive_battery_state,
     grid_status_payload,
 )
+from api.routers import battery as battery_router
 
 
 def test_battery_status_payload_excludes_grid_keys():
@@ -61,7 +62,7 @@ def test_battery_status_includes_soc_limit_override_flag(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        api_main,
+        battery_router,
         "latest_mqtt_status",
         lambda: {
             "soc": "91",
@@ -78,7 +79,7 @@ def test_battery_status_includes_soc_limit_override_flag(monkeypatch):
         await asyncio.sleep(0)
         return None
 
-    monkeypatch.setattr(api_main, "store_power_curve_point", skip_curve_store)
+    monkeypatch.setattr(battery_router, "store_power_curve_point", skip_curve_store)
 
     payload = asyncio.run(api_main.battery_status(Session()))
 

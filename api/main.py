@@ -141,7 +141,6 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
 try:
     from api.mqtt_handlers import (
         build_health_status,
-        collect_retained_mqtt_status,
         handle_status_mqtt,
         handle_trade_price_mqtt,
         latest_mqtt_status,
@@ -151,7 +150,6 @@ try:
     )
 except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker image layout
     from mqtt_handlers import (
-        collect_retained_mqtt_status,
         handle_status_mqtt,
         handle_trade_price_mqtt,
         latest_mqtt_status,
@@ -191,6 +189,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
     )
 try:
     from api.routers import battery as battery_router
+    from api.routers import grid as grid_router
     from api.routers import health as health_router
     from api.routers import settings as settings_router
     from api.routers.battery import (
@@ -204,8 +203,8 @@ try:
         battery_status,
         current_battery_override,
         household_status_payload,
-        store_power_curve_point,
     )
+    from api.routers.grid import grid_status
     from api.routers.health import (
         SystemSettingsUpdate,
         get_system_settings,
@@ -242,15 +241,22 @@ try:
     )
 except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker image layout
     from routers import battery as battery_router
+    from routers import grid as grid_router
     from routers import health as health_router
     from routers import settings as settings_router
     from routers.battery import (
+        BATTERY_KEYS,
+        AgentBatteryControlRequest,
+        BatteryOverrideRequest,
+        BatterySettingsUpdate,
+        api_control_battery,
         battery_lp_meta,
         battery_settings,
         battery_status,
+        current_battery_override,
         household_status_payload,
-        store_power_curve_point,
     )
+    from routers.grid import grid_status
     from routers.health import (
         SystemSettingsUpdate,
         get_system_settings,
@@ -290,6 +296,7 @@ from shared.db import AsyncSessionLocal
 app.include_router(settings_router.router)
 app.include_router(health_router.router)
 app.include_router(battery_router.router)
+app.include_router(grid_router.router)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -432,62 +439,6 @@ async def startup() -> None:
         await publish_battery_mqtt_settings(await battery_settings(session))
         await publish_trade_mqtt_settings(await trade_settings(session))
     _debug_refresh_task = asyncio.create_task(_refresh_debug_setting())
-
-
-@app.get("/grid/status")
-async def grid_status(session: SessionDep) -> dict[str, Any]:
-    grid_payload = grid_status_payload(latest_mqtt_status())
-    if not grid_payload:
-        try:
-            grid_payload.update(grid_status_payload(collect_retained_mqtt_status()))
-        except OSError:
-            LOGGER.exception("Unable to fetch retained MQTT grid snapshot")
-    coerced = coerce_grid_status(grid_payload)
-    stored_curve_point = False
-    if isinstance(coerced.get("solar_power_w"), int):
-        await store_power_curve_point(
-            session,
-            "solar",
-            int(coerced["solar_power_w"]),
-            timestamp=parse_status_timestamp(coerced.get("solar_updated_at")),
-            metadata={"updated_at": coerced.get("solar_updated_at")},
-        )
-        stored_curve_point = True
-    if isinstance(coerced.get("grid_net_power_w"), int):
-        await store_power_curve_point(
-            session,
-            "grid",
-            int(coerced["grid_net_power_w"]),
-            net_w=int(coerced["grid_net_power_w"]),
-            delivered_w=coerced.get("grid_delivered_w"),
-            returned_w=coerced.get("grid_returned_w"),
-            metadata={k: v for k, v in coerced.items() if k.startswith("grid_phase_")},
-        )
-        stored_curve_point = True
-    if stored_curve_point:
-        await session.commit()
-    return coerced
-
-
-@app.get("/dsmr/status")
-async def dsmr_status(session: SessionDep) -> dict[str, Any]:
-    return await grid_status(session)
-
-
-@app.get("/solar/status")
-async def solar_status() -> dict[str, Any]:
-    payload = latest_mqtt_status()
-    if not any(key.startswith("solar_") for key in payload):
-        try:
-            payload.update(collect_retained_mqtt_status())
-        except OSError:
-            LOGGER.exception("Unable to fetch retained MQTT solar snapshot")
-    return solar_status_payload(payload)
-
-
-@app.get("/household/status")
-async def household_status(session: SessionDep) -> dict[str, Any]:
-    return await household_status_payload(session)
 
 
 WINDOWS = {
