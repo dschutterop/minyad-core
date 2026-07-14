@@ -94,7 +94,7 @@ async def persist_forecast(points: list[dict]) -> None:
                       (timestamp, bucket_start, granularity_seconds, power_w, forecast_ghi, provider,
                        fetched_at, forecast_time, direct_w_m2, diffuse_w_m2, estimated_w, source)
                     values
-                      (:forecast_time, date_trunc('minute', :forecast_time), 900, :estimated_w, null, 'open-meteo',
+                      (:forecast_time, date_trunc('minute', :forecast_time::timestamptz), 900, :estimated_w, null, 'open-meteo',
                        :fetched_at, :forecast_time, :direct_w_m2, :diffuse_w_m2, :estimated_w, 'open-meteo')
                     on conflict (forecast_time) do update set
                       timestamp = excluded.timestamp,
