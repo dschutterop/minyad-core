@@ -310,8 +310,6 @@ jobs:
           - frontend
           - mobile-frontend
           - forecast
-          - agent
-          - trade
           - reporting
           - monitoring
     steps:
