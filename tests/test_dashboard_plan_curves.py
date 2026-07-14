@@ -9,6 +9,7 @@ import pytest
 
 from api import main as api_main
 from api.main import _classify_cloud_cover, build_plan_curves
+from api.routers import dashboard as dashboard_router
 
 UTC = UTC
 
@@ -110,10 +111,10 @@ def test_api_forecast_uses_recent_real_plan_when_latest_plan_is_fallback(monkeyp
         await asyncio.sleep(0)
         return {}
 
-    monkeypatch.setattr(api_main, "latest_slot_plan", fake_latest_slot_plan)
-    monkeypatch.setattr(api_main, "battery_settings", fake_battery_settings)
-    monkeypatch.setattr(api_main, "latest_pv_uncertainty_bands", fake_uncertainty_bands)
-    monkeypatch.setattr(api_main, "latest_mqtt_status", lambda: {"soc": 50})
+    monkeypatch.setattr(dashboard_router, "latest_slot_plan", fake_latest_slot_plan)
+    monkeypatch.setattr(dashboard_router, "battery_settings", fake_battery_settings)
+    monkeypatch.setattr(dashboard_router, "latest_pv_uncertainty_bands", fake_uncertainty_bands)
+    monkeypatch.setattr(dashboard_router, "latest_mqtt_status", lambda: {"soc": 50})
 
     payload = asyncio.run(api_main.api_forecast(session=object()))
 
