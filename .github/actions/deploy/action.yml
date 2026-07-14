@@ -1,0 +1,56 @@
+name: Deploy to self-hosted host
+description: >-
+  Logs into GHCR and pulls/restarts the production docker-compose stack plus
+  host-side systemd services. Shared by deploy.yml and quick-release.yml,
+  which previously copy-pasted this job body verbatim.
+runs:
+  using: composite
+  steps:
+    - name: Log in to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Pull images and restart services
+      shell: bash
+      env:
+        DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        HOST_SERVICE_UNITS: ${{ vars.HOST_SERVICE_UNITS || 'dsmr_bridge.service goodwe_bridge.service enphase_bridge.service enphase_token_refresh.timer' }}
+        MINYAD_IMAGE_TAG: ${{ github.sha }}
+        MINYAD_METRICS_BIND_IP: ${{ vars.MINYAD_METRICS_BIND_IP }}
+        MINYAD_PROMETHEUS_SOURCE: ${{ vars.MINYAD_PROMETHEUS_SOURCE }}
+      run: |
+        test -n "${DEPLOY_PATH}"
+        git config --global --add safe.directory "${DEPLOY_PATH}"
+        cd "${DEPLOY_PATH}"
+
+        # Keep the application checkout current for host-side systemd services.
+        git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+        git -c "url.https://x-access-token:${GITHUB_TOKEN}@github.com/.insteadOf=https://github.com/" fetch --prune origin
+        git checkout main
+        git merge --ff-only origin/main
+
+        python3.12 -m venv host-services/venv
+        host-services/venv/bin/python -m pip install --upgrade pip
+        host-services/venv/bin/python -m pip install -r host-services/requirements.txt
+
+        sudo env MINYAD_PROMETHEUS_SOURCE="${MINYAD_PROMETHEUS_SOURCE}" scripts/configure_metrics_firewalld.sh
+        sudo env MINYAD_METRICS_BIND_IP="${MINYAD_METRICS_BIND_IP}" scripts/configure_host_metrics_systemd.sh ${HOST_SERVICE_UNITS}
+
+        sudo systemctl daemon-reload
+        for unit in ${HOST_SERVICE_UNITS}; do
+          if sudo systemctl list-unit-files "${unit}" --no-legend | grep -q "^${unit}"; then
+            sudo systemctl restart "${unit}"
+          else
+            echo "Skipping missing host service unit: ${unit}"
+          fi
+        done
+
+        MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" MINYAD_METRICS_BIND_IP="${MINYAD_METRICS_BIND_IP}" docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml pull
+        MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" MINYAD_METRICS_BIND_IP="${MINYAD_METRICS_BIND_IP}" docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml up -d --remove-orphans
+        sudo ss -ltnp | grep -E ':(9101|9102|9103|9104|9105|9106|9107|9108|9109|9110|9111)\b'
+        sudo firewall-cmd --list-all
+        docker image prune -f
