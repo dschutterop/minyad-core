@@ -84,7 +84,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: public-release-gate
     env:
-      PYTHONPATH: ${{ github.workspace }}
       MQTT_HOST: ${{ vars.CI_MQTT_HOST || 'localhost' }}
       MQTT_PORT: 1883
     steps:
@@ -202,7 +201,7 @@ jobs:
           printf '{ "issues": [] }\n' > sonar-trivy-issues.json
 
       - name: Run linters
-        run: ${PYTHON_BIN} -m ruff check --preview --select FAST002,RUF029,F841,SIM102 --fix --unsafe-fixes .
+        run: ${PYTHON_BIN} -m ruff check --fix --unsafe-fixes .
 
       - name: Load SonarQube environment
         env:

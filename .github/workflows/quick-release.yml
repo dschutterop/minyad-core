@@ -73,7 +73,6 @@ jobs:
     needs: public-release-gate
     if: github.ref == 'refs/heads/main'
     env:
-      PYTHONPATH: ${{ github.workspace }}
       MQTT_HOST: ${{ vars.CI_MQTT_HOST || 'localhost' }}
       MQTT_PORT: 1883
     steps:
