@@ -33,9 +33,9 @@ from the actual control implementation (`control/main.py`,
 Dryad can poll the existing Minyad API service without any extra systemd unit:
 
 ```bash
-curl --cacert /run/minyad/tls/internal.crt https://pknpapp001:8081/api/v1/dryad
-curl --cacert /run/minyad/tls/internal.crt "https://pknpapp001:8081/api/v1/dryad/history?days=30"
-MINYAD_API_URL=https://pknpapp001:8081 MINYAD_INTERNAL_CA_FILE=/run/minyad/tls/internal.crt ./scripts/fetch_dryad.py --history-days 30
+curl --cacert /run/minyad/tls/internal.crt https://minyad-host.example:8081/api/v1/dryad
+curl --cacert /run/minyad/tls/internal.crt "https://minyad-host.example:8081/api/v1/dryad/history?days=30"
+MINYAD_API_URL=https://minyad-host.example:8081 MINYAD_INTERNAL_CA_FILE=/run/minyad/tls/internal.crt ./scripts/fetch_dryad.py --history-days 30
 ```
 
 `GET /api/v1/dryad` returns one JSON object with:
@@ -43,7 +43,7 @@ MINYAD_API_URL=https://pknpapp001:8081 MINYAD_INTERNAL_CA_FILE=/run/minyad/tls/i
 * `ts` - ISO8601 timestamp for the aggregation run.
 * `autarky` - rolling 60 minute self-sufficiency, `1 - P1 import / total consumption`.
 * `trajectory_deviation` - absolute current SoC versus LP planned SoC, normalized by `strategy3.traj_band_pct`.
-* `dispatch_hitrate` - acknowledged versus planned Strategy/Kairos/Vesper dispatches over the last 24 hours; no planned dispatches returns `1.0`.
+* `dispatch_hitrate` - acknowledged versus planned strategy dispatches over the last 24 hours; no planned dispatches returns `1.0`.
 * `import_price_penalty` - weighted penalty for import during hours at least `dryad.import_price_penalty_pct` percent above the cheapest coming six-hour price; default threshold is 30 percent.
 * `soc` - current GoodWe/Dyness SoC as a 0.0-1.0 fraction.
 * `sources` - per field source name, data age in seconds, and stale flag. Stale inputs make only the affected field `null`.
@@ -75,7 +75,7 @@ Key environment variables:
 ```text
 GOODWE_API_ENABLED=true
 GOODWE_MODBUS_LIMITS_ENABLED=true
-GOODWE_MODBUS_HOST=192.168.1.201
+GOODWE_MODBUS_HOST=192.0.2.20
 GOODWE_MODBUS_PORT=502
 GOODWE_MODBUS_DEVICE_ID=247
 GOODWE_DRY_RUN=false

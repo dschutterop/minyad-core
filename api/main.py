@@ -215,7 +215,7 @@ TRADE_DEFAULTS = {
     "retry_interval_minutes": "15",
     "entsoe_api_url": "https://web-api.tp.entsoe.eu/api",
 }
-ALLOWED_ENTSOE_HOST = "web-api.tp.entsoe.eu"
+ALLOWED_TRADE_PRICE_HOST = "web-api.tp.entsoe.eu"
 TRADE_NUMERIC_LIMITS = {
     "retry_attempts": (1, 24),
     "retry_interval_minutes": (1, 240),
@@ -290,10 +290,10 @@ def handle_trade_price_mqtt(topic: str, payload: bytes) -> None:
     try:
         prices = json.loads(payload.decode())
     except json.JSONDecodeError:
-        LOGGER.warning("Ignoring invalid ENTSO-E price payload on %s", topic)
+        LOGGER.warning("Ignoring invalid day-ahead price payload on %s", topic)
         return
     if not isinstance(prices, list):
-        LOGGER.warning("Ignoring non-list ENTSO-E price payload on %s", topic)
+        LOGGER.warning("Ignoring non-list day-ahead price payload on %s", topic)
         return
     normalized = []
     for point in prices:
@@ -313,7 +313,7 @@ def handle_trade_price_mqtt(topic: str, payload: bytes) -> None:
     normalized.sort(key=lambda item: item["starts_at"])
     with TRADE_PRICE_CACHE_LOCK:
         TRADE_PRICE_CACHE[day] = normalized
-    LOGGER.info("Cached %d ENTSO-E day-ahead price points for %s", len(normalized), day)
+    LOGGER.info("Cached %d day-ahead price points for %s", len(normalized), day)
 
 
 def latest_trade_prices() -> list[dict[str, Any]]:
@@ -805,8 +805,8 @@ class TradeSettingsUpdate(BaseModel):
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("entsoe_api_url must be an absolute HTTP(S) URL")
-        if parsed.hostname != ALLOWED_ENTSOE_HOST or parsed.username or parsed.password or parsed.port is not None:
-            raise ValueError(f"entsoe_api_url must point to {ALLOWED_ENTSOE_HOST}")
+        if parsed.hostname != ALLOWED_TRADE_PRICE_HOST or parsed.username or parsed.password or parsed.port is not None:
+            raise ValueError(f"entsoe_api_url must point to {ALLOWED_TRADE_PRICE_HOST}")
         return url
 
 
@@ -1182,7 +1182,7 @@ async def trade_settings(session: AsyncSession) -> dict[str, Any]:
 async def get_trade_prices() -> dict[str, Any]:
     prices = latest_trade_prices()
     return {
-        "source": "ENTSO-E",
+        "source": "day-ahead",
         "unit": "EUR/kWh",
         "date": prices[0]["date"] if prices else None,
         "prices": prices,
@@ -1592,8 +1592,8 @@ def build_surplus_payload(
 
     if forecast_outcome is not None:
         payload["minyad_forecast"] = forecast_outcome.forecast
-        # Compatibility period (see docs/minyad_forecast_contract.md): Vesper currently reads
-        # battery.soc_trajectory_pct for slot-level SoC; populate it alongside
+        # Compatibility period (see docs/minyad_forecast_contract.md): downstream consumers
+        # currently read battery.soc_trajectory_pct for slot-level SoC; populate it alongside
         # minyad_forecast.soc_pct rather than only in the new block. Omitted entirely (not a
         # copied current SoC) when the forecast itself is unavailable.
         if forecast_outcome.soc_trajectory_pct is not None:

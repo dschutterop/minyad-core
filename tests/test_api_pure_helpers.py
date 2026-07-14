@@ -212,14 +212,14 @@ def test_trade_settings_rejects_invalid_poll_time(value):
 # BatterySettingsUpdate.validate_ip
 # --------------------------------------------------------------------------- #
 def test_battery_settings_accepts_valid_ipv4():
-    assert BatterySettingsUpdate(inverter_ip="192.168.1.20").inverter_ip == "192.168.1.20"
+    assert BatterySettingsUpdate(inverter_ip="192.0.2.20").inverter_ip == "192.0.2.20"
 
 
 def test_battery_settings_allows_missing_ip():
     assert BatterySettingsUpdate().inverter_ip is None
 
 
-@pytest.mark.parametrize("value", ["192.168.1", "10.0.0.256", "not.an.ip.addr", "1.2.3.4.5", ""])
+@pytest.mark.parametrize("value", ["192.0.2", "203.0.113.256", "not.an.ip.addr", "1.2.3.4.5", ""])
 def test_battery_settings_rejects_invalid_ipv4(value):
     with pytest.raises(ValidationError):
         BatterySettingsUpdate(inverter_ip=value)

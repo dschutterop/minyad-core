@@ -51,7 +51,7 @@ def test_connection_failure_log_omits_traceback_at_warning(caplog):
 
 
 def test_publish_forwards_topic_payload_qos_and_retain():
-    client = MinyadMqttClient("minyad-trade", MqttConfig(host="broker", port=1883, keepalive=30))
+    client = MinyadMqttClient("minyad-test-client", MqttConfig(host="broker", port=1883, keepalive=30))
     calls = []
 
     class Result:

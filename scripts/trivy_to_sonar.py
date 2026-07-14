@@ -21,8 +21,6 @@ DOCKERFILES = {
     "frontend": "frontend/Dockerfile",
     "mobile-frontend": "mobile-frontend/Dockerfile",
     "forecast": "forecast/Dockerfile",
-    "agent": "minyad-agent/Dockerfile",
-    "trade": "minyad-trade/Dockerfile",
     "reporting": "reporting/Dockerfile",
     "monitoring": "monitoring/Dockerfile",
 }

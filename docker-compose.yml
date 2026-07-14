@@ -69,13 +69,10 @@ services:
         [alt_names]
         DNS.1 = minyad-api
         DNS.2 = minyad-strategy
-        DNS.3 = minyad-strategy-v3
-        DNS.4 = minyad
-        DNS.5 = dryad
-        DNS.6 = vesper
-        DNS.7 = localhost
-        DNS.8 = pknpapp001
-        DNS.9 = $${MINYAD_HOST_DNS:-minyad-host.example}
+        DNS.3 = minyad
+        DNS.4 = dryad
+        DNS.5 = localhost
+        DNS.6 = $${MINYAD_HOST_DNS:-minyad-host.example}
         $${ip_san_lines}
         EOF
           openssl req -x509 -newkey rsa:4096 -sha256 -days 36500 -nodes \
@@ -199,51 +196,6 @@ services:
       STRATEGY_VERSION: v2
       MINYAD_TLS_CERT_FILE: /run/minyad/tls/internal.crt
       MINYAD_TLS_KEY_FILE: /run/minyad/tls/internal.key
-    depends_on:
-      minyad-migrate:
-        condition: service_completed_successfully
-      minyad-tls-init:
-        condition: service_completed_successfully
-      minyad-mqtt:
-        condition: service_healthy
-    networks: [minyad-internal, minyad-public]
-    volumes:
-      - minyad-internal-tls:/run/minyad/tls:ro
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          python -c "import ssl, urllib.request;
-          ctx = ssl.create_default_context(cafile='/run/minyad/tls/internal.crt');
-          urllib.request.urlopen('https://localhost:8080/health', timeout=2, context=ctx).read()"
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 5s
-
-  minyad-strategy-v3:
-    build:
-      context: .
-      dockerfile: minyad-strategy/Dockerfile
-    container_name: minyad-strategy-v3
-    command: ["python", "-m", "minyad.strategy.v3.service"]
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      DB_URL: ${DB_URL}
-      MQTT_HOST: minyad-mqtt
-      MQTT_PORT: 1883
-      TZ: Europe/Amsterdam
-      STRATEGY_VERSION: v3
-      SHADOW_MODE: ${STRATEGY3_SHADOW_MODE:-false}
-      MQTT_CLIENT_ID: minyad-strategy-v3
-      METRICS_PORT: 9104
-      METRICS_ADDR: 0.0.0.0
-      MINYAD_HEALTH_BIND_ADDR: 0.0.0.0
-      MINYAD_TLS_CERT_FILE: /run/minyad/tls/internal.crt
-      MINYAD_TLS_KEY_FILE: /run/minyad/tls/internal.key
-    ports:
-      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9104:9104"
     depends_on:
       minyad-migrate:
         condition: service_completed_successfully
@@ -394,46 +346,6 @@ services:
       minyad-migrate:
         condition: service_completed_successfully
       minyad-mqtt:
-        condition: service_healthy
-    networks: [minyad-internal, minyad-public]
-
-  minyad-agent:
-    build:
-      context: .
-      dockerfile: minyad-agent/Dockerfile
-    container_name: minyad-agent
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      MINYAD_API_URL: https://minyad-api:8000
-      MINYAD_INTERNAL_CA_FILE: /run/minyad/tls/internal.crt
-      DRY_RUN: "true"
-      CYCLE_MINUTES: 15
-    depends_on:
-      minyad-api:
-        condition: service_healthy
-    networks: [minyad-internal, minyad-public]
-    volumes:
-      - minyad-internal-tls:/run/minyad/tls:ro
-
-  minyad-trade:
-    build:
-      context: .
-      dockerfile: minyad-trade/Dockerfile
-    container_name: minyad-trade
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      MQTT_HOST: minyad-mqtt
-      MQTT_PORT: 1883
-      METRICS_PORT: 9105
-      METRICS_ADDR: 0.0.0.0
-    ports:
-      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9105:9105"
-    depends_on:
-      minyad-mqtt:
-        condition: service_healthy
-      minyad-api:
         condition: service_healthy
     networks: [minyad-internal, minyad-public]
 

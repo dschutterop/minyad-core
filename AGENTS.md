@@ -5,9 +5,9 @@ Projectcontext voor Codex en andere agents die in deze repository werken.
 ## Projectprofiel
 
 - Python 3.12 project met Docker Compose services voor Minyad.
-- Applicatiecode staat onder `api/`, `control/`, `ingestion/`, `minyad/`, `minyad-agent/`, `minyad-trade/`, `frontend/`, `mobile-frontend/`, `monitoring/` en `host-services/`.
+- Applicatiecode staat onder `api/`, `control/`, `ingestion/`, `minyad/`, `frontend/`, `mobile-frontend/`, `monitoring/` en `host-services/`.
 - Tests staan in `tests/` en gebruiken `pytest`.
-- CI gebruikt `requirements.txt`, `minyad-trade/requirements.txt` en `host-services/requirements.txt`.
+- CI gebruikt `requirements.txt` en `host-services/requirements.txt`.
 
 ## Installatie voor lokale tests
 
@@ -15,7 +15,7 @@ Gebruik een virtualenv buiten de repo of de bestaande `.venv` als die al door de
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt -r minyad-trade/requirements.txt -r host-services/requirements.txt pytest pytest-asyncio pytest-cov ruff
+python -m pip install -r requirements.txt -r host-services/requirements.txt pytest pytest-asyncio pytest-cov ruff
 ```
 
 ## Testcommando's
@@ -36,7 +36,7 @@ Gerichte tests tijdens ontwikkeling:
 
 ```bash
 PYTHONPATH=. pytest tests/test_file.py
-PYTHONPATH=. pytest tests/strategy/v3/test_planner.py
+PYTHONPATH=. pytest tests/test_api_status_payloads.py
 PYTHONPATH=. pytest tests/test_file.py::test_name
 ```
 
@@ -72,8 +72,6 @@ Docker images worden in CI gebouwd per service met de Dockerfiles in:
 - `frontend/Dockerfile`
 - `mobile-frontend/Dockerfile`
 - `forecast/Dockerfile`
-- `minyad-agent/Dockerfile`
-- `minyad-trade/Dockerfile`
 - `reporting/Dockerfile`
 - `monitoring/Dockerfile`
 

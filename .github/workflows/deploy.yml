@@ -98,7 +98,6 @@ jobs:
           cache: pip
           cache-dependency-path: |
             requirements.txt
-            minyad-trade/requirements.txt
             host-services/requirements.txt
 
       - name: Configure test secrets
@@ -119,7 +118,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r minyad-trade/requirements.txt -r host-services/requirements.txt pytest pytest-asyncio pytest-cov
+          python -m pip install -r requirements.txt -r host-services/requirements.txt pytest pytest-asyncio pytest-cov
 
       - name: Validate production compose config
         run: |
@@ -258,10 +257,6 @@ jobs:
             dockerfile: mobile-frontend/Dockerfile
           - service: forecast
             dockerfile: forecast/Dockerfile
-          - service: agent
-            dockerfile: minyad-agent/Dockerfile
-          - service: trade
-            dockerfile: minyad-trade/Dockerfile
           - service: reporting
             dockerfile: reporting/Dockerfile
           - service: monitoring

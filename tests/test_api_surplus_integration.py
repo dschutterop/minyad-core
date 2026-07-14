@@ -1,6 +1,6 @@
 """Integration tests for the authenticated GET /api/v1/surplus response: the whole route
 handler (DB access glue + build_surplus_payload) exercised together, including over real HTTP
-via TestClient, matching how Vesper polls this endpoint."""
+via TestClient, matching how a downstream consumer polls this endpoint."""
 
 from __future__ import annotations
 
@@ -212,7 +212,7 @@ def test_api_v1_surplus_route_omits_forecast_when_no_plan_exists(monkeypatch):
 
 
 def test_api_v1_surplus_over_http_returns_forecast_and_legacy_fields(monkeypatch):
-    """Full HTTP round trip through FastAPI's own routing/serialization, as Vesper would call it."""
+    """Full HTTP round trip through FastAPI's own routing/serialization, as a downstream consumer would call it."""
     now = _aligned_now()
     monkeypatch.setattr(api_main, "latest_mqtt_status", lambda: _mqtt_status(now))
     monkeypatch.setattr(api_main, "store_power_curve_point", _noop)

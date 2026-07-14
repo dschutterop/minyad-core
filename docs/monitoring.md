@@ -9,8 +9,6 @@ Prometheus instrumentation is implemented service-by-service. Production deploym
 | 9101 | minyad-api | implemented | HTTPS FastAPI `/metrics`; host port maps to the API container port. |
 | 9102 | minyad-ingestion | implemented | `prometheus_client.start_http_server`; published with `MINYAD_METRICS_BIND_IP`. |
 | 9103 | minyad-control | implemented | Plain Python metrics endpoint; published with `MINYAD_METRICS_BIND_IP`. |
-| 9104 | minyad-strategy-v3 | implemented | HTTPS strategy v3 metrics endpoint; published with `MINYAD_METRICS_BIND_IP`. |
-| 9105 | minyad-trade | implemented | Plain Python metrics endpoint; published with `MINYAD_METRICS_BIND_IP`. |
 | 9106 | minyad-mqtt-observer | implemented | Sidecar observer for the Mosquitto container; published with `MINYAD_METRICS_BIND_IP`. |
 | 9107 | goodwe_bridge | implemented | Host systemd service metrics endpoint; bind with `METRICS_ADDR`. |
 | 9108 | dsmr_bridge | implemented | Host systemd service metrics endpoint; bind with `METRICS_ADDR`. |
@@ -42,18 +40,6 @@ Battery power follows the existing Minyad convention: positive `battery_power_w`
 | `minyad_bridge_goodwe_read_duration_seconds` | Histogram | none | Duration of GoodWe read calls. |
 | `minyad_bridge_goodwe_read_failures_total` | Counter | none | GoodWe read failures. |
 | `minyad_bridge_goodwe_last_success_timestamp_seconds` | Gauge | none | Unix timestamp for the most recent successful GoodWe read. |
-| `minyad_strategy_build_info` | Gauge | `version` | Build/version marker; always `1` for the running strategy v3 build. |
-| `minyad_strategy_errors_total` | Counter | `type` | Strategy v3 errors by low-cardinality error type. |
-| `minyad_strategy_solve_duration_seconds` | Histogram | none | Duration of strategy v3 plan recalculations. |
-| `minyad_strategy_solve_status_total` | Counter | `status` | Strategy v3 solve outcomes: `optimal`, `infeasible`, `timeout`, or `error`. |
-| `minyad_strategy_plan_horizon_hours` | Gauge | none | Current plan horizon in hours. |
-| `minyad_strategy_last_plan_timestamp_seconds` | Gauge | none | Unix timestamp for the most recent generated plan. |
-| `minyad_strategy_planned_battery_power_watts` | Gauge | none | Planned battery power for the next interval; positive discharge, negative charge. |
-| `minyad_trade_build_info` | Gauge | `version` | Build/version marker; always `1` for the running trade build. |
-| `minyad_trade_errors_total` | Counter | `type` | Trade errors by low-cardinality error type. |
-| `minyad_trade_last_fetch_success_timestamp_seconds` | Gauge | none | Unix timestamp for the most recent successful price fetch. |
-| `minyad_trade_fetch_failures_total` | Counter | none | Day-ahead price fetch failures. |
-| `minyad_trade_prices_available_hours` | Gauge | none | Hours of future prices available from the latest successful fetch. |
 | `minyad_bridge_dsmr_build_info` | Gauge | `version` | Build/version marker; always `1` for the running DSMR bridge. |
 | `minyad_bridge_dsmr_errors_total` | Counter | `type` | DSMR bridge errors by low-cardinality error type. |
 | `minyad_bridge_dsmr_last_success_timestamp_seconds` | Gauge | none | Unix timestamp for the most recent successful DSMR bridge publish. |
@@ -68,26 +54,22 @@ Battery power follows the existing Minyad convention: positive `battery_power_w`
 | `minyad_mqtt_messages_total` | Counter | `topic_group` | Observed MQTT messages grouped into a fixed topic set. |
 | `minyad_mqtt_connected` | Gauge | none | MQTT observer connection state, `1` connected and `0` disconnected. |
 
-## Alert Constants
-
-Strategy v3 defaults to `strategy3.plan_interval_min = 15`, so the strategy staleness alert uses a 30 minute threshold.
-
 ## Scrape Config
 
 See `prometheus/minyad-scrape.yml`.
 
-The API and strategy v3 targets share the internal self-signed certificate from the
-`minyad-internal-tls` Compose volume. Copy `internal.crt` to the Prometheus host as
-`/etc/prometheus/certs/minyad-internal.crt` before enabling those HTTPS scrape jobs.
+The API target shares the internal self-signed certificate from the `minyad-internal-tls`
+Compose volume. Copy `internal.crt` to the Prometheus host as
+`/etc/prometheus/certs/minyad-internal.crt` before enabling that HTTPS scrape job.
 
 For the monitoring-host copy/include steps, see `docs/prometheus-handoff.md`.
 
 ## Minyad Host Exposure
 
-Production defaults bind metrics to `192.168.110.2`:
+Production defaults bind metrics to `192.0.2.10`:
 
-- Docker-published metrics use `MINYAD_METRICS_BIND_IP=192.168.110.2`.
-- Host systemd bridge metrics use `METRICS_ADDR=192.168.110.2`; deployment writes systemd drop-ins with `scripts/configure_host_metrics_systemd.sh` so existing live units receive the value even when unit files were installed earlier.
+- Docker-published metrics use `MINYAD_METRICS_BIND_IP=192.0.2.10`.
+- Host systemd bridge metrics use `METRICS_ADDR=192.0.2.10`; deployment writes systemd drop-ins with `scripts/configure_host_metrics_systemd.sh` so existing live units receive the value even when unit files were installed earlier.
 - The deploy workflow runs `scripts/configure_metrics_firewalld.sh` to allow `9101-9111/tcp` in firewalld.
 
 Set the GitHub environment variable `MINYAD_PROMETHEUS_SOURCE` to a Prometheus host IP or source CIDR to install a source-limited firewalld rich rule. If it is unset, deployment opens `9101-9111/tcp` in the configured zone, defaulting to `public`.
@@ -102,7 +84,7 @@ See `prometheus/minyad-recording.yml`.
 
 ## Findings
 
-- `vesper` and `kairos` are listed in the monitoring brief but are not present in this repository or Docker Compose file.
+- The private strategy planner and day-ahead price collector are not present in this repository or Docker Compose file; their metrics (ports 9104/9105) and alerts are documented and monitored only in a deployment that runs them alongside Minyad Core.
 - `dryad` is implemented as API functionality in `api/dryad.py`, not as a separate service.
 - `minyad-mqtt` is an Eclipse Mosquitto container, so MQTT metrics are implemented through the `minyad-mqtt-observer` sidecar rather than by modifying Mosquitto itself.
 - This repository's `minyad-ingestion` service currently ingests DSMR only. GoodWe and Enphase freshness are therefore represented by bridge metrics rather than `minyad_ingestion_last_sample_timestamp_seconds{source="goodwe|enphase"}`.

@@ -315,7 +315,7 @@ def build_dryad_payload(
         else source_info("setpoint_log", inputs.get("latest_setpoint_ts"), now, 86400)
     )
     price_info = {
-        "source": "minyad-trade MQTT day-ahead cache",
+        "source": "trade price collector MQTT day-ahead cache",
         "age_seconds": None,
         "stale": not bool(prices),
     }
@@ -340,7 +340,7 @@ def build_dryad_payload(
             },
             "dispatch_hitrate": dispatch_info,
             "import_price_penalty": {
-                "source": "power_curve_rollups grid import + minyad-trade prices",
+                "source": "power_curve_rollups grid import + day-ahead trade prices",
                 "age_seconds": curve_info["age_seconds"],
                 "stale": curve_info["stale"] or price_info["stale"],
             },

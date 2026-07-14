@@ -55,7 +55,7 @@ const data={
     forecastRemaining:null // TODO: bind data.solar.forecastRemaining
   },
   price:{
-    hourly:PRICE_FALLBACK, // TODO: bind data.price.hourly to ENTSO-E feed
+    hourly:PRICE_FALLBACK, // TODO: bind data.price.hourly to the day-ahead price feed
     nextCheapWindow:'03:00-06:00' // TODO: bind data.price.nextCheapWindow
   }
 };

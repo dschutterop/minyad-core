@@ -386,7 +386,7 @@ def test_surplus_payload_forecast_timestamps_are_explicit_utc_regardless_of_proc
 
 
 def test_surplus_payload_never_includes_reservation_or_device_keys():
-    """Minyad does not implement Vesper device reservations/switching (see
+    """Minyad does not implement downstream device reservations/switching (see
     docs/minyad_forecast_contract.md); nothing reservation-shaped should ever appear here."""
     plan_payload = _forecast_plan_payload(ALIGNED_NOW)
     payload = build_surplus_payload(

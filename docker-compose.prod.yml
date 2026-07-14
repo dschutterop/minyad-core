@@ -15,10 +15,6 @@ services:
     image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/strategy:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
-  minyad-strategy-v3:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/strategy:${MINYAD_IMAGE_TAG:-latest}
-    build: !reset null
-
   minyad-deadman:
     image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/deadman:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
@@ -37,14 +33,6 @@ services:
 
   minyad-forecast:
     image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/forecast:${MINYAD_IMAGE_TAG:-latest}
-    build: !reset null
-
-  minyad-agent:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/agent:${MINYAD_IMAGE_TAG:-latest}
-    build: !reset null
-
-  minyad-trade:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/trade:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-reporting:

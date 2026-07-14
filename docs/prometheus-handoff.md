@@ -20,7 +20,7 @@ Example:
 
 ```yaml
 targets:
-  - 192.168.110.2:9102
+  - 192.0.2.10:9102
 ```
 
 Keep the `stack: minyad` label. Alerts rely on it, especially `up{stack="minyad"} == 0`.
@@ -47,14 +47,16 @@ If your Prometheus version or packaging does not support `scrape_config_files`, 
 | `minyad-api` | 9101 | FastAPI `/metrics`. |
 | `minyad-ingestion` | 9102 | DSMR ingestion metrics. |
 | `minyad-control` | 9103 | Battery/grid/PV control gauges. |
-| `minyad-strategy-v3` | 9104 | Solver and plan freshness metrics. |
-| `minyad-trade` | 9105 | ENTSO-E fetch freshness and price horizon. |
 | `minyad-mqtt` | 9106 | MQTT observer sidecar. |
 | `minyad-bridge-goodwe` | 9107 | Host GoodWe bridge. |
 | `minyad-bridge-dsmr` | 9108 | Host DSMR bridge. |
 | `minyad-bridge-enphase` | 9109 | Host Enphase bridge. |
 | `minyad-node-exporter` | 9110 | Host metrics. |
 | `minyad-cadvisor` | 9111 | Container metrics. |
+
+Ports 9104 and 9105 are reserved for a private strategy planner and day-ahead price collector
+that are not part of this repository — only relevant if your deployment runs them alongside
+Minyad Core.
 
 ## Validation On The Prometheus Host
 
@@ -68,15 +70,13 @@ promtool check rules /etc/prometheus/rules/minyad-alerts.yml /etc/prometheus/rul
 Optional quick scrapes:
 
 ```bash
-curl -fsS --cacert /etc/prometheus/certs/minyad-internal.crt https://192.168.110.2:9101/metrics | grep minyad_api_build_info
-curl -fsS http://192.168.110.2:9102/metrics | grep minyad_ingestion_build_info
-curl -fsS http://192.168.110.2:9103/metrics | grep minyad_control_build_info
-curl -fsS --cacert /etc/prometheus/certs/minyad-internal.crt https://192.168.110.2:9104/metrics | grep minyad_strategy_build_info
-curl -fsS http://192.168.110.2:9105/metrics | grep minyad_trade_build_info
-curl -fsS http://192.168.110.2:9106/metrics | grep minyad_mqtt_build_info
-curl -fsS http://192.168.110.2:9107/metrics | grep minyad_bridge_goodwe_build_info
-curl -fsS http://192.168.110.2:9108/metrics | grep minyad_bridge_dsmr_build_info
-curl -fsS http://192.168.110.2:9109/metrics | grep minyad_bridge_enphase_build_info
+curl -fsS --cacert /etc/prometheus/certs/minyad-internal.crt https://192.0.2.10:9101/metrics | grep minyad_api_build_info
+curl -fsS http://192.0.2.10:9102/metrics | grep minyad_ingestion_build_info
+curl -fsS http://192.0.2.10:9103/metrics | grep minyad_control_build_info
+curl -fsS http://192.0.2.10:9106/metrics | grep minyad_mqtt_build_info
+curl -fsS http://192.0.2.10:9107/metrics | grep minyad_bridge_goodwe_build_info
+curl -fsS http://192.0.2.10:9108/metrics | grep minyad_bridge_dsmr_build_info
+curl -fsS http://192.0.2.10:9109/metrics | grep minyad_bridge_enphase_build_info
 ```
 
 Then reload Prometheus:
@@ -94,28 +94,27 @@ systemctl reload prometheus
 ## Troubleshooting Connection Refused
 
 If Prometheus reports `connect: connection refused` for the Docker-published targets
-`192.168.110.2:9101` through `192.168.110.2:9106`, the host is reachable but no
+`192.0.2.10:9101` through `192.0.2.10:9106`, the host is reachable but no
 process is listening on those ports. On the Minyad host, first verify the compose
 services are running and the ports are bound to the VPN/internal address:
 
 ```bash
 cd /path/to/minyad
 docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
-sudo ss -ltnp | grep -E '192\.168\.110\.2:(9101|9102|9103|9104|9105|9106)\b'
+sudo ss -ltnp | grep -E '192\.0\.2\.10:(9101|9102|9103|9106)\b'
 ```
 
 If the ports are missing or bound only to `127.0.0.1`, recreate the compose
 services with the production metrics bind address:
 
 ```bash
-MINYAD_METRICS_BIND_IP=192.168.110.2 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
+MINYAD_METRICS_BIND_IP=192.0.2.10 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
 ```
 
 Then retry a direct scrape from the Prometheus host:
 
 ```bash
-curl -fsS http://192.168.110.2:9102/metrics | grep minyad_ingestion_build_info
-curl -fsS --cacert /etc/prometheus/certs/minyad-internal.crt https://192.168.110.2:9104/metrics | grep minyad_strategy_build_info
+curl -fsS http://192.0.2.10:9102/metrics | grep minyad_ingestion_build_info
 ```
 
 ## First PromQL Checks
@@ -125,8 +124,6 @@ Use these in the Prometheus UI after reload:
 ```promql
 up{stack="minyad"}
 minyad:ingestion_sample_age_seconds
-minyad:strategy_plan_age_seconds
-minyad_trade_prices_available_hours
 minyad_control_battery_soc_ratio
 rate(minyad_mqtt_messages_total[5m])
 ```
@@ -145,6 +142,5 @@ Route on `stack="minyad"` or the existing `severity` labels in Alertmanager. No 
 
 ## Notes
 
-- Strategy v3 defaults to a 15 minute plan interval; the stale-plan alert fires after 30 minutes.
 - `minyad-ingestion` currently exposes DSMR sample freshness. GoodWe and Enphase freshness come from bridge metrics.
 - MQTT metrics use fixed `topic_group` labels only; raw topics are intentionally not labels.
