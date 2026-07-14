@@ -1,9 +1,11 @@
 name: Full release
 
 on:
-  push:
-    branches:
-      - main
+  # Disabled temporarily to conserve runner-minutes. Re-enable by restoring
+  # the push trigger below.
+  # push:
+  #   branches:
+  #     - main
   workflow_dispatch:
     inputs:
       run_trivy:
