@@ -44,7 +44,7 @@ Compose-config validatie:
 
 ```bash
 cp .env.example .env
-docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/dev/null
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml config >/dev/null
 ```
 
 Let op: overschrijf geen bestaande `.env`. Als `.env` al bestaat, gebruik die of maak tijdelijk een aparte kopie.
@@ -78,7 +78,7 @@ Docker images worden in CI gebouwd per service met de Dockerfiles in:
 Lokale compose-start voor bestaande deployments:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml up -d --remove-orphans
 ```
 
 ## Harde regels

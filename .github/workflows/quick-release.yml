@@ -111,7 +111,7 @@ jobs:
       - name: Validate production compose config
         run: |
           cp .env.example .env
-          docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/dev/null
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml config >/dev/null
 
       - name: Run tests
         run: pytest
@@ -233,8 +233,8 @@ jobs:
             fi
           done
 
-          MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" MINYAD_METRICS_BIND_IP="${MINYAD_METRICS_BIND_IP}" docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-          MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" MINYAD_METRICS_BIND_IP="${MINYAD_METRICS_BIND_IP}" docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
+          MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" MINYAD_METRICS_BIND_IP="${MINYAD_METRICS_BIND_IP}" docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml pull
+          MINYAD_IMAGE_TAG="${MINYAD_IMAGE_TAG}" MINYAD_METRICS_BIND_IP="${MINYAD_METRICS_BIND_IP}" docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.monitoring.yml up -d --remove-orphans
           sudo ss -ltnp | grep -E ':(9101|9102|9103|9104|9105|9106|9107|9108|9109|9110|9111)\b'
           sudo firewall-cmd --list-all
           docker image prune -f
