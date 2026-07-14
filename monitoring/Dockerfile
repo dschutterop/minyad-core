@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app
 
 WORKDIR /app
-COPY requirements.txt /app/requirements.txt
+COPY monitoring/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY monitoring /app/module
 RUN groupadd --gid 1000 minyad \
