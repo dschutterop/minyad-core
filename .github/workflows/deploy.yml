@@ -349,7 +349,6 @@ jobs:
       packages: read
     env:
       HOME: /home/actions-runner
-      HOST_SERVICE_UNITS: dsmr_bridge.service goodwe_bridge.service enphase_bridge.service enphase_token_refresh.timer
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -358,6 +357,10 @@ jobs:
         uses: ./.github/actions/deploy
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          deploy-path: ${{ vars.DEPLOY_PATH }}
+          host-service-units: ${{ vars.HOST_SERVICE_UNITS || 'dsmr_bridge.service goodwe_bridge.service enphase_bridge.service enphase_token_refresh.timer' }}
+          metrics-bind-ip: ${{ vars.MINYAD_METRICS_BIND_IP }}
+          prometheus-source: ${{ vars.MINYAD_PROMETHEUS_SOURCE }}
 
       - name: Notify minyad-deploy of new release
         env:
