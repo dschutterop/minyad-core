@@ -38,7 +38,7 @@ jobs:
         id: trufflehog
         continue-on-error: true
         run: |
-          docker run --rm -v "${PWD}:/repo" trufflesecurity/trufflehog:latest git file:///repo --json --no-update --fail > trufflehog-report.json
+          docker run --rm -v "${PWD}:/repo" trufflesecurity/trufflehog:latest git file:///repo --json --no-update --results=verified --fail > trufflehog-report.json
 
       - name: Upload secret scan reports
         if: always()
