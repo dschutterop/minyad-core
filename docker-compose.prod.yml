@@ -1,44 +1,44 @@
 services:
   minyad-migrate:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/migrate:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/migrate:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-ingestion:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/ingestion:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/ingestion:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-control:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/control:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/control:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-strategy:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/strategy:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/strategy:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-deadman:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/deadman:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/deadman:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-api:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/api:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/api:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-frontend:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/frontend:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/frontend:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-mobile-frontend:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/mobile-frontend:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/mobile-frontend:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-forecast:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/forecast:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/forecast:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-reporting:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/reporting:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/reporting:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
 
   minyad-mqtt-observer:
-    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad}/monitoring:${MINYAD_IMAGE_TAG:-latest}
+    image: ${MINYAD_IMAGE_PREFIX:-ghcr.io/dschutterop/minyad-core}/monitoring:${MINYAD_IMAGE_TAG:-latest}
     build: !reset null
