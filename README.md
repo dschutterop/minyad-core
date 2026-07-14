@@ -1,3 +1,5 @@
+[![Full release](https://github.com/dschutterop/minyad-core/actions/workflows/deploy.yml/badge.svg)](https://github.com/dschutterop/minyad-core/actions/workflows/deploy.yml)
+
 # Minyad Core
 
 Minyad Core is open-source home energy plumbing for post-net-metering prosumers who want reliable battery, PV, grid-meter, MQTT, and Prometheus integration before adding their own control logic.
