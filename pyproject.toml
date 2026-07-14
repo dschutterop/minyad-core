@@ -1,0 +1,16 @@
+[project]
+name = "minyad-core"
+version = "0.1.0"
+description = "Home energy plumbing: battery/PV/grid-meter/MQTT/Prometheus integration."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+preview = true
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["FAST002", "RUF029", "F841", "SIM102"]

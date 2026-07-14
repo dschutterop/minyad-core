@@ -23,21 +23,21 @@ python -m pip install -r requirements.txt -r host-services/requirements.txt pyte
 Volledige test suite:
 
 ```bash
-PYTHONPATH=. pytest
+pytest
 ```
 
 CI-equivalent met coverage:
 
 ```bash
-PYTHONPATH=. pytest --cov=. --cov-report=xml
+pytest --cov=. --cov-report=xml
 ```
 
 Gerichte tests tijdens ontwikkeling:
 
 ```bash
-PYTHONPATH=. pytest tests/test_file.py
-PYTHONPATH=. pytest tests/test_api_status_payloads.py
-PYTHONPATH=. pytest tests/test_file.py::test_name
+pytest tests/test_file.py
+pytest tests/test_api_status_payloads.py
+pytest tests/test_file.py::test_name
 ```
 
 Compose-config validatie:
@@ -51,10 +51,10 @@ Let op: overschrijf geen bestaande `.env`. Als `.env` al bestaat, gebruik die of
 
 ## Lint
 
-CI gebruikt Ruff met een kleine geselecteerde regelset:
+De regelset staat in `pyproject.toml` (`[tool.ruff]`/`[tool.ruff.lint]`), momenteel een kleine geselecteerde set:
 
 ```bash
-python -m ruff check --preview --select FAST002,RUF029,F841,SIM102 .
+python -m ruff check .
 ```
 
 De CI-job voert dit uit met `--fix --unsafe-fixes`. Gebruik automatische fixes alleen wanneer de wijziging expliciet bedoeld is en controleer de diff daarna zorgvuldig.
