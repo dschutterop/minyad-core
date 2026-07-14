@@ -1,15 +1,19 @@
-alembic==1.18.4
-asyncpg==0.31.0
+# Aggregate of every service's own requirements.txt, for local dev/test where
+# all services run in one virtualenv (PYTHONPATH=. pytest). Each Docker image
+# installs only its own <service>/requirements.txt -- see that file for what
+# a given service actually needs.
+-r api/requirements.txt
+-r control/requirements.txt
+-r ingestion/requirements.txt
+-r deadman/requirements.txt
+-r forecast/requirements.txt
+-r reporting/requirements.txt
+-r frontend/requirements.txt
+-r mobile-frontend/requirements.txt
+-r monitoring/requirements.txt
+-r migrate/requirements.txt
+-r minyad-strategy/requirements.txt
+
+# Only used by scripts/dump_agent_decisions.py, a local/manual maintenance
+# script -- not part of any service image.
 psycopg[binary]==3.3.4
-cryptography==49.0.0
-fastapi==0.138.0
-starlette==1.3.1
-paho-mqtt==2.1.0
-prometheus-client==0.23.1
-prometheus-fastapi-instrumentator==8.0.2
-sqlalchemy==2.0.51
-uvicorn[standard]==0.49.0
-jinja2==3.1.6
-httpx==0.28.1
-apscheduler==3.11.1
-pulp==2.9.0

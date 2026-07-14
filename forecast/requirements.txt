@@ -1,0 +1,5 @@
+sqlalchemy==2.0.51
+asyncpg==0.31.0
+cryptography==49.0.0
+paho-mqtt==2.1.0
+httpx==0.28.1

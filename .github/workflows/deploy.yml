@@ -98,6 +98,17 @@ jobs:
           cache: pip
           cache-dependency-path: |
             requirements.txt
+            api/requirements.txt
+            control/requirements.txt
+            ingestion/requirements.txt
+            deadman/requirements.txt
+            forecast/requirements.txt
+            reporting/requirements.txt
+            frontend/requirements.txt
+            mobile-frontend/requirements.txt
+            monitoring/requirements.txt
+            migrate/requirements.txt
+            minyad-strategy/requirements.txt
             host-services/requirements.txt
 
       - name: Configure test secrets
