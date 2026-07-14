@@ -92,7 +92,9 @@ def run(coro):
 # health
 # --------------------------------------------------------------------------- #
 def test_health_returns_ok():
-    assert run(api_main.health()) == {"status": "ok"}
+    result = run(api_main.health())
+    assert result["status"] == "ok"
+    assert result["private_modules"] is api_main.PRIVATE_MODULES_AVAILABLE
 
 
 # --------------------------------------------------------------------------- #

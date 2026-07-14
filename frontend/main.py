@@ -63,6 +63,20 @@ def _api_verify() -> str | bool:
     return str(ca_file) if ca_file.is_file() else True
 
 
+async def _brand_name() -> str:
+    """"Minyad Core" standalone, "Minyad Plus" when the private strategy/agent/trade
+    modules are deployed alongside it -- see PRIVATE_MODULES_AVAILABLE in api/payload_helpers.py.
+    Defaults to the conservative "Minyad Core" label if the API can't be reached."""
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=3.0, verify=_api_verify()) as client:
+            response = await client.get("/health")
+            if response.status_code == 200 and response.json().get("private_modules"):
+                return "Minyad Plus"
+    except httpx.RequestError:
+        pass
+    return "Minyad Core"
+
+
 @app.get("/frontend-version")
 async def frontend_version() -> JSONResponse:
     return JSONResponse(
@@ -125,12 +139,12 @@ async def api_proxy(path: str, request: Request) -> Response:
 
 @app.get("/")
 async def dashboard() -> HTMLResponse:
-    return html_response(render_dashboard_page())
+    return html_response(render_dashboard_page(await _brand_name()))
 
 
 @app.get("/reporting")
 async def reporting() -> HTMLResponse:
-    return html_response(render_page("Reporting", reporting_body()))
+    return html_response(render_page("Reporting", reporting_body(), await _brand_name()))
 
 
 @app.get("/{section}")
@@ -138,25 +152,26 @@ async def section(section: str) -> HTMLResponse:
     title = "DSMR" if section.lower() == "dsmr" else section.replace("-", " ").title()
     if title not in MENU:
         title = "Dashboard"
+    brand_name = await _brand_name()
     if title == "Settings":
-        return html_response(render_page(title, battery_settings_body()))
+        return html_response(render_page(title, battery_settings_body(), brand_name))
     if title == "Agent":
-        return html_response(render_page(title, agent_body()))
+        return html_response(render_page(title, agent_body(), brand_name))
     if title == "Health":
-        return html_response(render_page(title, health_body()))
+        return html_response(render_page(title, health_body(), brand_name))
     if title == "Battery":
-        return html_response(render_page(title, battery_control_body()))
+        return html_response(render_page(title, battery_control_body(), brand_name))
     if title == "Asset Steering":
-        return html_response(render_page(title, asset_steering_body()))
+        return html_response(render_page(title, asset_steering_body(), brand_name))
     if title == "DSMR":
-        return html_response(render_page(title, dsmr_body()))
+        return html_response(render_page(title, dsmr_body(), brand_name))
     if title == "History":
-        return html_response(render_page(title, history_body()))
+        return html_response(render_page(title, history_body(), brand_name))
     if title == "Trade":
-        return html_response(render_page(title, trade_body()))
+        return html_response(render_page(title, trade_body(), brand_name))
     if title == "Solar":
-        return html_response(render_page(title, solar_body()))
+        return html_response(render_page(title, solar_body(), brand_name))
     if title == "Reporting":
-        return html_response(render_page(title, reporting_body()))
+        return html_response(render_page(title, reporting_body(), brand_name))
     content = f"{title} module scaffold."
-    return html_response(render_page(title, f"<div class='card'><h2>{title}</h2><p>{content}</p></div>"))
+    return html_response(render_page(title, f"<div class='card'><h2>{title}</h2><p>{content}</p></div>", brand_name))

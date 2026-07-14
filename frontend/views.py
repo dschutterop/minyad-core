@@ -50,7 +50,7 @@ def html_response(content: str) -> HTMLResponse:
     )
 
 
-def render_page(active: str, body: str) -> str:
+def render_page(active: str, body: str, brand_name: str = "Minyad Core") -> str:
     links = render_nav(active)
     return f"""
     <!doctype html>
@@ -70,7 +70,7 @@ def render_page(active: str, body: str) -> str:
           <header class="brand-header">
             <a class="brand-lockup" href="/" aria-label="Minyad dashboard">
               {brand_mark()}
-              <span class="wordmark"><strong>Minyad</strong><span>Virtual Power Plant</span></span>
+              <span class="wordmark"><strong>{brand_name}</strong><span>Virtual Power Plant</span></span>
             </a>
             <nav class="brand-nav" aria-label="Primary navigation">{links}</nav>
           </header>
@@ -81,7 +81,7 @@ def render_page(active: str, body: str) -> str:
     """
 
 
-def render_dashboard_page() -> str:
+def render_dashboard_page(brand_name: str = "Minyad Core") -> str:
     return f"""
     <!doctype html>
     <html lang="en">
@@ -96,7 +96,7 @@ def render_dashboard_page() -> str:
         {AUTO_REFRESH_SCRIPT}
       </head>
       <body class="dashboard-page">
-        {energy_dashboard_body()}
+        {energy_dashboard_body(brand_name)}
       </body>
     </html>
     """
@@ -841,7 +841,7 @@ def kpi_tile(value_id: str, label: str, *, value: str = "--", accent_class: str 
     return f'<div class="kpi-tile"><b id="{value_id}"{value_classes}>{value}</b><span>{label}</span></div>'
 
 
-def energy_dashboard_body() -> str:
+def energy_dashboard_body(brand_name: str = "Minyad Core") -> str:
     unit_toggle = segmented_control(
         "Power unit",
         [
@@ -940,7 +940,7 @@ def energy_dashboard_body() -> str:
     )
     return """
     <section class="instrument dashboard-full" aria-label="Minyad live dashboard">
-      <div class="dashboard-nav"><a class="brand-lockup" href="/" aria-label="Minyad dashboard">__MARK__<span class="wordmark"><strong>Minyad</strong><span>Virtual Power Plant</span></span></a><nav class="brand-nav" aria-label="Primary navigation">__NAV__</nav></div>
+      <div class="dashboard-nav"><a class="brand-lockup" href="/" aria-label="Minyad dashboard">__MARK__<span class="wordmark"><strong>__BRAND__</strong><span>Virtual Power Plant</span></span></a><nav class="brand-nav" aria-label="Primary navigation">__NAV__</nav></div>
       <div class="window-bar">
         <div class="window-actions">
           __UNIT_TOGGLE__
@@ -1078,7 +1078,7 @@ def energy_dashboard_body() -> str:
         await Promise.all([loadCurves(),loadTradePrices()]); renderForecastQuality(await loadForecastQuality()); appendCurrentChartPoints(); const hItems=curves?.series?.household||[], sItems=curves?.series?.solar||[], gItems=curves?.series?.grid||[]; const produced=solarDayKwh(sItems), imported=gridDayKwh(gItems,'import'), exported=gridDayKwh(gItems,'export'), householdKwh=householdDayKwh(hItems), used=Math.max(0,produced-exported), cycles=nominalKwh?dayKwh(curves?.series?.battery||[],p=>Math.abs(p.power_w||0))/nominalKwh:0, co2=produced*.39; $('solar-kwh').textContent=produced.toFixed(1); $('grid-import-kwh').textContent=imported.toFixed(1); $('grid-export-kwh').textContent=exported.toFixed(1); $('kwh-produced').textContent=produced.toFixed(1); $('kwh-exported').textContent=exported.toFixed(1); $('kwh-imported').textContent=imported.toFixed(1); $('summary-consumed').textContent=householdKwh.toFixed(1); $('summary-cycles').textContent=cycles.toFixed(2); $('summary-co2').textContent=co2.toFixed(1)+' kg'; const self=Math.round(100*Math.max(0,used)/(used+imported||1)); $('self-top').textContent=self+'%'; $('summary-self').textContent=self+'%'; $('m-self').textContent=self+'%'; drawSparkline('solar-spark',sItems); drawSparkline('grid-spark',normalizeChartItems(gItems,'grid'),{signed:true}); drawHouseholdSpark(hItems); $('household-kwh').textContent=householdKwh.toFixed(1); drawChart(); }
       initChartLegend(); initChartRange(); refreshMailboxCount(); setInterval(refreshMailboxCount,45000); loadBatteryLimits(); loadBatteryVisualConfig(); setInterval(loadBatteryLimits,60000); setInterval(loadBatteryVisualConfig,60000); update(); setInterval(update,4000);
     </script>
-    """.replace("__MARK__", brand_mark()).replace("__NAV__", render_nav("Dashboard")).replace("__UNIT_TOGGLE__", unit_toggle).replace("__LAYOUT_TOGGLE__", layout_toggle).replace("__METRIC_CARDS__", solar_card + battery_card + grid_card + household_card).replace("__KPI_STRIP__", kpi_strip)
+    """.replace("__MARK__", brand_mark()).replace("__BRAND__", brand_name).replace("__NAV__", render_nav("Dashboard")).replace("__UNIT_TOGGLE__", unit_toggle).replace("__LAYOUT_TOGGLE__", layout_toggle).replace("__METRIC_CARDS__", solar_card + battery_card + grid_card + household_card).replace("__KPI_STRIP__", kpi_strip)
 
 
 def history_body() -> str:

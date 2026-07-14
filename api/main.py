@@ -37,6 +37,7 @@ try:
         MINYAD_FORECAST_SCENARIO_COUNT,
         MQTT_STATUS_KEYS,
         PLAN_STALE_MINUTES,
+        PRIVATE_MODULES_AVAILABLE,
         SOLAR_STATUS_KEYS,
         SURPLUS_API_VERSION,
         UTC_OFFSET_SUFFIX,
@@ -91,6 +92,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
         MINYAD_FORECAST_SCENARIO_COUNT,
         MQTT_STATUS_KEYS,
         PLAN_STALE_MINUTES,
+        PRIVATE_MODULES_AVAILABLE,
         SOLAR_STATUS_KEYS,
         SURPLUS_API_VERSION,
         UTC_OFFSET_SUFFIX,
@@ -150,6 +152,7 @@ __all__ = [
     "MINYAD_FORECAST_SCENARIO_COUNT",
     "MQTT_STATUS_KEYS",
     "PLAN_STALE_MINUTES",
+    "PRIVATE_MODULES_AVAILABLE",
     "SOLAR_STATUS_KEYS",
     "SURPLUS_API_VERSION",
     "UTC_OFFSET_SUFFIX",
@@ -741,8 +744,8 @@ async def startup() -> None:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, Any]:
+    return {"status": "ok", "private_modules": PRIVATE_MODULES_AVAILABLE}
 
 
 @app.get("/health/status")

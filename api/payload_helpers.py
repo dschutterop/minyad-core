@@ -30,6 +30,11 @@ LOGGER = logging.getLogger(__name__)
 
 UTC_OFFSET_SUFFIX = "+00:00"
 
+# Whether the private strategy-v3 package (and therefore the rest of the private deployment --
+# minyad-agent, minyad-trade) is present alongside this public repo. Exposed via /health so the
+# frontend can label itself "Minyad Core" vs "Minyad Plus" without importing strategy internals.
+PRIVATE_MODULES_AVAILABLE = forecast_contract is not None
+
 MQTT_STATUS_KEYS = {
     "minyad/battery/soc": "soc",
     "minyad/battery/soh": "soh",
