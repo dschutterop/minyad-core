@@ -3,6 +3,10 @@ description: >-
   Logs into GHCR and pulls/restarts the production docker-compose stack plus
   host-side systemd services. Shared by deploy.yml and quick-release.yml,
   which previously copy-pasted this job body verbatim.
+inputs:
+  github-token:
+    description: Token used to authenticate to GHCR and to the git remote (composite actions can't read `secrets` directly).
+    required: true
 runs:
   using: composite
   steps:
@@ -11,13 +15,13 @@ runs:
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+        password: ${{ inputs.github-token }}
 
     - name: Pull images and restart services
       shell: bash
       env:
         DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
         HOST_SERVICE_UNITS: ${{ vars.HOST_SERVICE_UNITS || 'dsmr_bridge.service goodwe_bridge.service enphase_bridge.service enphase_token_refresh.timer' }}
         MINYAD_IMAGE_TAG: ${{ github.sha }}
         MINYAD_METRICS_BIND_IP: ${{ vars.MINYAD_METRICS_BIND_IP }}

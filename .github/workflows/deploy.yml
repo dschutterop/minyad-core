@@ -242,6 +242,8 @@ jobs:
 
       - name: Build and push image
         uses: ./.github/actions/build-image
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   trivy:
     name: Trivy ${{ matrix.service }}
@@ -354,6 +356,8 @@ jobs:
 
       - name: Deploy to self-hosted host
         uses: ./.github/actions/deploy
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify minyad-deploy of new release
         env:
