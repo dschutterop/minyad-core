@@ -31,12 +31,22 @@ def test_api_key_uses_constant_time_secret_comparison(monkeypatch: pytest.Monkey
     assert exc.value.status_code == 401
 
 
+def _iter_api_routes(routes):
+    """Flatten app.routes, descending into include_router()-composed sub-routers
+    (represented as an opaque wrapper exposing `.original_router`, not a plain APIRoute)."""
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route
+        elif hasattr(route, "original_router"):
+            yield from _iter_api_routes(route.original_router.routes)
+
+
 def test_all_mutating_routes_require_api_key() -> None:
     unsafe_methods = {"POST", "PUT", "PATCH", "DELETE"}
     unprotected: list[str] = []
 
-    for route in app.routes:
-        if not isinstance(route, APIRoute) or not unsafe_methods.intersection(route.methods):
+    for route in _iter_api_routes(app.routes):
+        if not unsafe_methods.intersection(route.methods):
             continue
         dependencies = {
             dependency.call

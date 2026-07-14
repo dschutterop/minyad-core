@@ -237,8 +237,18 @@ def test_surplus_payload_marks_idle_with_remaining_export():
     assert payload["battery"]["is_idle"] is True
 
 
+def _iter_api_routes(routes):
+    """Flatten app.routes, descending into include_router()-composed sub-routers
+    (represented as an opaque wrapper exposing `.original_router`, not a plain APIRoute)."""
+    for route in routes:
+        if hasattr(route, "path"):
+            yield route
+        elif hasattr(route, "original_router"):
+            yield from _iter_api_routes(route.original_router.routes)
+
+
 def test_surplus_api_exposes_versioned_route_and_legacy_alias():
-    route_paths = {route.path for route in app.routes}
+    route_paths = {route.path for route in _iter_api_routes(app.routes)}
 
     assert "/api/v1/surplus" in route_paths
     assert "/api/surplus" in route_paths
