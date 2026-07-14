@@ -6,21 +6,12 @@ import asyncio
 import json
 import logging
 import os
-import secrets
-from collections import deque
 from datetime import UTC, datetime, timedelta
-from threading import Event, Lock
 from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
-from uuid import uuid4
 
-import paho.mqtt.client as paho_mqtt
-from fastapi import Depends, FastAPI, HTTPException, Query, Security
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from fastapi.security import APIKeyHeader
-from prometheus_client import CollectorRegistry, Counter, Gauge
-from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -149,11 +140,78 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
         solar_status_payload,
         value_is_fresh_iso,
     )
-from shared.db import AsyncSessionLocal, get_session
-from shared.mqtt_client import MinyadMqttClient
+try:
+    from api.mqtt_handlers import (
+        build_health_status,
+        collect_retained_mqtt_status,
+        handle_status_mqtt,
+        handle_trade_price_mqtt,
+        latest_mqtt_status,
+        latest_trade_prices,
+        publish_battery_mqtt_settings,
+        publish_trade_mqtt_settings,
+    )
+except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker image layout
+    from mqtt_handlers import (
+        build_health_status,
+        collect_retained_mqtt_status,
+        handle_status_mqtt,
+        handle_trade_price_mqtt,
+        latest_mqtt_status,
+        latest_trade_prices,
+        publish_battery_mqtt_settings,
+        publish_trade_mqtt_settings,
+    )
+try:
+    from api.state import (
+        DEBUG_LOGGING_SETTING_QUERY,
+        DRYAD_CACHE,
+        DRYAD_CACHE_LOCK,
+        LAST_RETAINED_FETCH,
+        MESSAGE_NOT_FOUND_DETAIL,
+        MQTT_EVENTS,
+        MQTT_STATUS,
+        MQTT_STATUS_LOCK,
+        MUTATION_AUTH,
+        SETTING_UPSERT_QUERY,
+        STARTUP_AT,
+        TOPIC_CONTROL_OVERRIDE,
+        TRADE_PRICE_CACHE,
+        SessionDep,
+        _apply_log_level,
+        _refresh_debug_setting,
+        app,
+        mqtt,
+        require_api_key,
+    )
+except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker image layout
+    from state import (
+        DEBUG_LOGGING_SETTING_QUERY,
+        DRYAD_CACHE,
+        DRYAD_CACHE_LOCK,
+        LAST_RETAINED_FETCH,
+        MESSAGE_NOT_FOUND_DETAIL,
+        MQTT_EVENTS,
+        MQTT_STATUS,
+        MQTT_STATUS_LOCK,
+        MUTATION_AUTH,
+        SETTING_UPSERT_QUERY,
+        STARTUP_AT,
+        TOPIC_CONTROL_OVERRIDE,
+        TRADE_PRICE_CACHE,
+        SessionDep,
+        _apply_log_level,
+        _refresh_debug_setting,
+        app,
+        mqtt,
+        require_api_key,
+    )
+from shared.db import AsyncSessionLocal
 
-# Re-exported from api.payload_helpers for backward compatibility: several tests import these
-# names directly via `from api.main import ...` rather than from payload_helpers itself.
+LOGGER = logging.getLogger(__name__)
+
+# Re-exported from api.payload_helpers/api.state for backward compatibility: several tests
+# import these names directly via `from api.main import ...` rather than from their new homes.
 __all__ = [
     "BATTERY_DEFAULTS",
     "GRID_STATUS_KEYS",
@@ -164,6 +222,7 @@ __all__ = [
     "PRIVATE_MODULES_AVAILABLE",
     "SOLAR_STATUS_KEYS",
     "SURPLUS_API_VERSION",
+    "TRADE_PRICE_CACHE",
     "UTC_OFFSET_SUFFIX",
     "_add_months",
     "_battery_phase",
@@ -209,89 +268,6 @@ __all__ = [
     "solar_status_payload",
     "value_is_fresh_iso",
 ]
-
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-app = FastAPI(title="Minyad API")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        origin.strip()
-        for origin in os.getenv(
-            "MINYAD_CORS_ORIGINS",
-            "http://localhost:8084,http://localhost:8085",
-        ).split(",")
-        if origin.strip()
-    ],
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["X-API-Key", "Content-Type"],
-)
-VERSION = os.getenv("MINYAD_VERSION", os.getenv("MINYAD_IMAGE_TAG", "unknown"))
-PROMETHEUS_REGISTRY = CollectorRegistry()
-API_BUILD_INFO = Gauge(
-    "minyad_api_build_info",
-    "Build and version information for minyad-api.",
-    ["version"],
-    registry=PROMETHEUS_REGISTRY,
-)
-API_ERRORS_TOTAL = Counter(
-    "minyad_api_errors_total",
-    "Errors observed by minyad-api.",
-    ["type"],
-    registry=PROMETHEUS_REGISTRY,
-)
-API_BUILD_INFO.labels(version=VERSION).set(1)
-Instrumentator(registry=PROMETHEUS_REGISTRY).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
-mqtt = MinyadMqttClient("minyad-api")
-LOGGER = logging.getLogger(__name__)
-API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-def require_api_key(key: str | None = Security(API_KEY_HEADER)) -> None:
-    expected = os.getenv("MINYAD_API_SECRET", "")
-    if not expected or not key or not secrets.compare_digest(key, expected):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-
-MUTATION_AUTH = [Depends(require_api_key)]
-DEBUG_LOGGING_SETTING_QUERY = "select value from settings where key = 'system.debug_logging'"
-SETTING_UPSERT_QUERY = """
-                insert into settings (key, value, encrypted, updated_at) values (:key, :value, false, now())
-                on conflict (key) do update set value=:value, encrypted=false, updated_at=now()
-            """
-MESSAGE_NOT_FOUND_DETAIL = "message not found"
-TOPIC_CONTROL_OVERRIDE = "minyad/control/override"
-
-STARTUP_AT = datetime.now(UTC)
-MQTT_EVENTS: deque[dict[str, str]] = deque(maxlen=100)
-LAST_RETAINED_FETCH: dict[str, Any] = {}
-TRADE_PRICE_CACHE_LOCK = Lock()
-TRADE_PRICE_CACHE: dict[str, list[dict[str, Any]]] = {}
-DRYAD_CACHE_LOCK = Lock()
-DRYAD_CACHE: dict[str, Any] = {"computed_at": None, "payload": None}
-_debug_enabled = False
-_debug_refresh_task: asyncio.Task[None] | None = None
-
-
-MQTT_STATUS_KEYS.update(GRID_STATUS_KEYS)
-MQTT_STATUS_KEYS.update(SOLAR_STATUS_KEYS)
-MQTT_STATUS_LOCK = Lock()
-MQTT_STATUS: dict[str, str] = {}
-RETAINED_STATUS_TIMEOUT_SECONDS = 1.0
-MQTT_BATTERY_SETTINGS_PREFIX = "minyad/settings/battery"
-MQTT_BATTERY_SETTING_TOPICS = {
-    "inverter_poll_interval_s": f"{MQTT_BATTERY_SETTINGS_PREFIX}/inverter_poll_interval_s",
-    "soc_floor": f"{MQTT_BATTERY_SETTINGS_PREFIX}/soc_floor",
-    "soc_ceiling": f"{MQTT_BATTERY_SETTINGS_PREFIX}/soc_ceiling",
-}
-MQTT_TRADE_SETTINGS_PREFIX = "minyad/settings/trade"
-MQTT_TRADE_SETTING_TOPICS = {
-    "bidding_zone": f"{MQTT_TRADE_SETTINGS_PREFIX}/bidding_zone",
-    "poll_time_local": f"{MQTT_TRADE_SETTINGS_PREFIX}/poll_time_local",
-    "retry_attempts": f"{MQTT_TRADE_SETTINGS_PREFIX}/retry_attempts",
-    "retry_interval_minutes": f"{MQTT_TRADE_SETTINGS_PREFIX}/retry_interval_minutes",
-    "entsoe_api_url": f"{MQTT_TRADE_SETTINGS_PREFIX}/entsoe_api_url",
-}
 
 BATTERY_KEYS = {
     "start_w": (100, 5000),
@@ -362,220 +338,6 @@ BATTERY_LP_META_DEFAULTS = {
     "battery.nominal_v": 48.0,
     "battery.max_discharge_w": 5000.0,
 }
-
-
-def _apply_log_level(debug: bool) -> None:
-    global _debug_enabled
-    _debug_enabled = debug
-    level = logging.DEBUG if debug else logging.INFO
-    logging.getLogger().setLevel(level)
-    logging.getLogger("paho").setLevel(level)
-    LOGGER.info("Log level set to %s (debug_logging=%s)", logging.getLevelName(level), debug)
-
-
-async def _refresh_debug_setting() -> None:
-    while True:
-        await asyncio.sleep(30)
-        try:
-            async with AsyncSessionLocal() as session:
-                result = await session.execute(text(DEBUG_LOGGING_SETTING_QUERY))
-                val = result.scalar_one_or_none() or "false"
-                new_debug = val == "true"
-                if new_debug != _debug_enabled:
-                    _apply_log_level(new_debug)
-        except Exception:
-            LOGGER.debug("Could not refresh debug setting from DB")
-
-
-def handle_trade_price_mqtt(topic: str, payload: bytes) -> None:
-    parts = topic.split("/")
-    if len(parts) != 6 or parts[:4] != ["minyad", "trade", "prices", "da"] or parts[5] != "full":
-        return
-    day = parts[4]
-    try:
-        prices = json.loads(payload.decode())
-    except json.JSONDecodeError:
-        LOGGER.warning("Ignoring invalid day-ahead price payload on %s", topic)
-        return
-    if not isinstance(prices, list):
-        LOGGER.warning("Ignoring non-list day-ahead price payload on %s", topic)
-        return
-    normalized = []
-    for point in prices:
-        if not isinstance(point, dict):
-            continue
-        try:
-            price = float(point["price_eur_kwh"])
-            starts_at = str(point["starts_at"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        normalized.append({
-            "date": str(point.get("date") or day),
-            "hour": str(point.get("hour") or starts_at[11:13]),
-            "starts_at": starts_at,
-            "price_eur_kwh": price,
-        })
-    normalized.sort(key=lambda item: item["starts_at"])
-    with TRADE_PRICE_CACHE_LOCK:
-        TRADE_PRICE_CACHE[day] = normalized
-    LOGGER.info("Cached %d day-ahead price points for %s", len(normalized), day)
-
-
-def latest_trade_prices() -> list[dict[str, Any]]:
-    with TRADE_PRICE_CACHE_LOCK:
-        if not TRADE_PRICE_CACHE:
-            return []
-        day = max(TRADE_PRICE_CACHE)
-        return list(TRADE_PRICE_CACHE[day])
-
-
-def handle_status_mqtt(topic: str, payload: bytes) -> None:
-    key = mqtt_status_key(topic)
-    decoded = payload.decode()
-    if key is None:
-        LOGGER.debug("Ignoring unsupported status MQTT topic %s", topic)
-        return
-    LOGGER.debug("MQTT status update: topic=%s key=%s value=%r", topic, key, decoded)
-    with MQTT_STATUS_LOCK:
-        MQTT_STATUS[key] = decoded
-    MQTT_EVENTS.append({
-        "ts": datetime.now(UTC).isoformat(),
-        "topic": topic,
-        "payload": decoded[:200],
-    })
-
-
-def latest_mqtt_status() -> dict[str, str]:
-    with MQTT_STATUS_LOCK:
-        return dict(MQTT_STATUS)
-
-
-def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOUT_SECONDS) -> dict[str, str]:
-    """Fetch retained status topics directly from MQTT as a startup/cache fallback."""
-    global LAST_RETAINED_FETCH
-    attempt_ts = datetime.now(UTC).isoformat()
-    LOGGER.debug(
-        "collect_retained_mqtt_status: connecting to %s:%s timeout=%.1fs",
-        mqtt.config.host, mqtt.config.port, timeout_seconds,
-    )
-    retained_status: dict[str, str] = {}
-    received = Event()
-    expected_keys = set(MQTT_STATUS_KEYS.values())
-
-    def on_message(_client: paho_mqtt.Client, _userdata: object, message: paho_mqtt.MQTTMessage) -> None:
-        key = mqtt_status_key(message.topic)
-        if key is None:
-            return
-        decoded = message.payload.decode()
-        LOGGER.debug(
-            "collect_retained_mqtt_status: rx topic=%s key=%s value=%r retain=%d",
-            message.topic, key, decoded, message.retain,
-        )
-        retained_status[key] = decoded
-        if expected_keys.issubset(retained_status):
-            received.set()
-
-    client = paho_mqtt.Client(
-        paho_mqtt.CallbackAPIVersion.VERSION2,
-        client_id=f"minyad-api-retained-{uuid4()}",
-    )
-    if mqtt.config.username:
-        client.username_pw_set(mqtt.config.username, mqtt.config.password)
-    client.on_message = on_message
-    try:
-        client.connect(mqtt.config.host, mqtt.config.port, mqtt.config.keepalive)
-        LOGGER.debug("collect_retained_mqtt_status: connected, subscribing")
-        client.loop_start()
-        try:
-            for topic in (
-                "minyad/battery/+",
-                "minyad/bridge/+",
-                "minyad/control/+",
-                "minyad/grid/+",
-                "minyad/inverter/+",
-                "minyad/solar/#",
-            ):
-                client.subscribe(topic)
-                LOGGER.debug("collect_retained_mqtt_status: subscribed %s", topic)
-            completed = received.wait(timeout_seconds)
-            LOGGER.debug(
-                "collect_retained_mqtt_status: done completed=%s keys=%d/%d received=%s",
-                completed, len(retained_status), len(expected_keys), sorted(retained_status.keys()),
-            )
-        finally:
-            client.loop_stop()
-            client.disconnect()
-    except OSError as exc:
-        LOGGER.exception(
-            "collect_retained_mqtt_status: connection failed host=%s port=%s: %s",
-            mqtt.config.host, mqtt.config.port, exc,
-        )
-        LAST_RETAINED_FETCH = {"ts": attempt_ts, "success": False, "error": str(exc), "result": {}}
-        raise
-
-    if retained_status:
-        with MQTT_STATUS_LOCK:
-            MQTT_STATUS.update(retained_status)
-    LAST_RETAINED_FETCH = {
-        "ts": attempt_ts,
-        "success": True,
-        "all_keys_received": received.is_set(),
-        "keys_received": sorted(retained_status.keys()),
-        "result": retained_status,
-    }
-    return retained_status
-
-
-def _mqtt_health_component() -> dict[str, Any]:
-    mqtt_info = mqtt.connection_info()
-    mqtt_ok = bool(mqtt_info.get("connected"))
-    return component_status(
-        "MQTT broker",
-        "ok" if mqtt_ok else "error",
-        "API MQTT client is connected" if mqtt_ok else "API MQTT client is not connected",
-        endpoint=f"{mqtt_info.get('host')}:{mqtt_info.get('port')}",
-        **mqtt_info,
-    )
-
-
-def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None = None) -> dict[str, Any]:
-    api_status = component_status("API", "ok", "Minyad API process is serving requests", endpoint="/health")
-    db_status = component_status(
-        "PostgreSQL",
-        "ok" if db_ok else "error",
-        "Database query succeeded" if db_ok else f"Database query failed: {db_error or 'unknown error'}",
-        endpoint="DB_URL",
-    )
-    mqtt_status = _mqtt_health_component()
-    battery = battery_health_component(cache)
-    grid = grid_health_component(cache)
-    solar = solar_health_component(cache)
-
-    endpoint_items = [
-        component_status("Dashboard state", "ok", "Energy dashboard API endpoint is registered", endpoint="/api/state"),
-        component_status("Forecast", "ok", "Forecast API endpoint is registered", endpoint="/api/forecast"),
-        component_status("History curves", "ok", "Dashboard curves API endpoint is registered", endpoint="/dashboard/curves"),
-        component_status(
-            "Trade prices",
-            "ok" if latest_trade_prices() else "warning",
-            "Latest cached day-ahead prices available" if latest_trade_prices() else "No day-ahead prices cached yet",
-            endpoint="/trade/prices",
-        ),
-        component_status("Agent messages", "ok", "Agent mailbox API endpoint is registered", endpoint="/api/messages"),
-    ]
-    components = [api_status, db_status, mqtt_status, battery, grid, solar, *endpoint_items]
-    if any(item["status"] == "error" for item in components):
-        overall = "error"
-    elif any(item["status"] == "warning" for item in components):
-        overall = "warning"
-    else:
-        overall = "ok"
-    return {
-        "status": overall,
-        "generated_at": datetime.now(UTC).isoformat(),
-        "startup_at": STARTUP_AT.isoformat(),
-        "components": components,
-    }
 
 
 class ApiKeyCreate(BaseModel):
@@ -716,22 +478,7 @@ class BatterySettingsUpdate(BaseModel):
         return value
 
 
-async def publish_trade_mqtt_settings(settings: dict[str, Any] | None = None) -> None:
-    if settings is None:
-        async with AsyncSessionLocal() as session:
-            settings = await trade_settings(session)
-    for key, topic in MQTT_TRADE_SETTING_TOPICS.items():
-        if key in settings:
-            mqtt.client.publish(topic, str(settings[key]), qos=0, retain=True)
-
-
-async def publish_battery_mqtt_settings(settings: dict[str, Any] | None = None) -> None:
-    if settings is None:
-        async with AsyncSessionLocal() as session:
-            settings = await battery_settings(session)
-    for key, topic in MQTT_BATTERY_SETTING_TOPICS.items():
-        if key in settings:
-            mqtt.client.publish(topic, str(settings[key]), qos=0, retain=True)
+_debug_refresh_task: asyncio.Task[None] | None = None
 
 
 @app.on_event("startup")
@@ -749,8 +496,9 @@ async def startup() -> None:
     mqtt.subscribe("minyad/inverter/+", handle_status_mqtt)
     mqtt.subscribe("minyad/solar/#", handle_status_mqtt)
     mqtt.subscribe("minyad/trade/prices/da/+/full", handle_trade_price_mqtt)
-    await publish_battery_mqtt_settings()
-    await publish_trade_mqtt_settings()
+    async with AsyncSessionLocal() as session:
+        await publish_battery_mqtt_settings(await battery_settings(session))
+        await publish_trade_mqtt_settings(await trade_settings(session))
     _debug_refresh_task = asyncio.create_task(_refresh_debug_setting())
 
 

@@ -25,6 +25,19 @@ ignore = [
 "frontend/*.py" = [
     "RUF001", # deliberate typography (en-dash, multiplication sign, angle quotes) in user-facing UI copy
 ]
+"api/main.py" = [
+    "RUF029", # ruff's FastAPI-route exemption only fires when `app = FastAPI()` is local to the
+              # file; api/state.py owns that now, so route handlers that don't happen to await
+              # anything get flagged even though `async def` is the correct, consistent signature
+              # for a route handler.
+]
+"api/mqtt_handlers.py" = [
+    "RUF029", # publish_*_mqtt_settings are awaited from async route handlers/startup() for a
+              # uniform call site even though they don't currently await anything themselves.
+]
+"api/routers/*.py" = [
+    "RUF029", # same as api/main.py above, but for `router = APIRouter()` instances.
+]
 
 [tool.pyright]
 include = ["api", "control", "host-services", "ingestion", "forecast", "reporting", "shared", "scripts", "migrate"]
