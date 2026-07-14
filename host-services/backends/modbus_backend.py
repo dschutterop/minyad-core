@@ -49,9 +49,9 @@ class ModbusMetrics:
         self.modbus_write_skipped_total += 1
         self.skipped_by_reason[reason] = self.skipped_by_reason.get(reason, 0) + 1
 
+
 def _u16(value: int) -> int:
     return value & 0xFFFF
-
 
 
 class ModbusBackend:
@@ -167,6 +167,9 @@ class ModbusBackend:
 
     async def set_discharge(self, watts: int) -> None:
         await self.set_battery_limits(0, watts)
+
+    async def stop_forced_mode(self) -> None:
+        """No-op: Modbus limits are ceilings, never an active force-charge/discharge setpoint."""
 
     async def read_state(self) -> InverterState:
         raise RuntimeError("Modbus telemetry disabled: use GoodWe API for inverter telemetry")

@@ -8,14 +8,14 @@ and the various row serializers used by the agent/message/decision endpoints.
 import asyncio
 import json
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from api import main as api_main  # noqa: E402
-from tests.test_api_settings_endpoints import FakeResult, FakeSession  # noqa: E402
+from api import main as api_main
+from tests.test_api_settings_endpoints import FakeResult, FakeSession
 
 
 def run(coro):
@@ -91,7 +91,7 @@ def test_classify_cloud_cover(pct, expected):
 # dashboard_window_bounds — period_offset branches
 # --------------------------------------------------------------------------- #
 def test_dashboard_window_bounds_day_offset():
-    now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
     start, end, query_until = api_main.dashboard_window_bounds("day", timedelta(days=1), now=now, period_offset=-1)
     assert start < end
     assert query_until == min(now, end)
@@ -105,14 +105,14 @@ def test_dashboard_window_bounds_naive_now_is_treated_as_utc():
 
 @pytest.mark.parametrize("window", ["week", "month", "year"])
 def test_dashboard_window_bounds_offset_windows(window):
-    now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
     start, end, query_until = api_main.dashboard_window_bounds(window, timedelta(days=1), now=now, period_offset=-1)
     assert start < end
     assert query_until <= now
 
 
 def test_dashboard_window_bounds_non_day_without_offset_uses_duration():
-    now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
     start, end, query_until = api_main.dashboard_window_bounds("hour", timedelta(hours=6), now=now)
     assert end == now
     assert start == now - timedelta(hours=6)
@@ -143,8 +143,8 @@ def test_parse_log_datetime_none():
 
 
 def test_parse_log_datetime_zulu_and_naive():
-    assert api_main._parse_log_datetime("2026-06-01T08:00:00Z") == datetime(2026, 6, 1, 8, 0, tzinfo=timezone.utc)
-    assert api_main._parse_log_datetime("2026-06-01T08:00:00").tzinfo == timezone.utc
+    assert api_main._parse_log_datetime("2026-06-01T08:00:00Z") == datetime(2026, 6, 1, 8, 0, tzinfo=UTC)
+    assert api_main._parse_log_datetime("2026-06-01T08:00:00").tzinfo == UTC
 
 
 # --------------------------------------------------------------------------- #
@@ -197,14 +197,14 @@ def test_current_battery_override_none_when_mode_none():
 
 
 def test_current_battery_override_none_when_expired():
-    expired = datetime.now(timezone.utc) - timedelta(minutes=1)
+    expired = datetime.now(UTC) - timedelta(minutes=1)
     row = {"mode": "force_charge", "watts": 700, "duration_seconds": 900, "expires_at": expired, "override_soc_limits": False}
     session = FakeSession([("from battery_override", FakeResult(rows=[row]))])
     assert run(api_main.current_battery_override(session)) is None
 
 
 def test_current_battery_override_active():
-    future = datetime.now(timezone.utc) + timedelta(minutes=10)
+    future = datetime.now(UTC) + timedelta(minutes=10)
     row = {"mode": "force_discharge", "watts": 900, "duration_seconds": 900, "expires_at": future, "override_soc_limits": True}
     session = FakeSession([("from battery_override", FakeResult(rows=[row]))])
     result = run(api_main.current_battery_override(session))

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from .constants import Settings
 from .models import DayPlan, ExecutorState, StrategyDecision
@@ -14,7 +14,7 @@ class StrategyExecutor:
         self.settings = settings
         self.plan = plan
         self._clock = clock or __import__("time").monotonic
-        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._now = now or (lambda: datetime.now(UTC))
         self.current_setpoint_w = 0
         self._direction: int | None = None
         self._first_seen: float | None = None

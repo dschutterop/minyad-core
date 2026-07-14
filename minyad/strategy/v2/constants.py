@@ -7,7 +7,6 @@ from typing import Any
 
 from sqlalchemy import text
 
-
 DEFAULTS: dict[str, str] = {
     "battery.soc_floor": "20",
     "battery.soc_ceiling": "90",

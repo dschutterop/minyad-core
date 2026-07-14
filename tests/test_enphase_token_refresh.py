@@ -2,7 +2,7 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
-
+from typing import ClassVar
 
 if "requests" not in sys.modules:
     requests = types.ModuleType("requests")
@@ -48,7 +48,7 @@ def test_write_token_file_allows_configured_group_read(monkeypatch, tmp_path):
 def test_login_entrez_extracts_session_id():
     class Response:
         url = "https://enlighten.enphaseenergy.com/login/login.json"
-        headers = {"content-type": "text/html"}
+        headers: ClassVar[dict] = {"content-type": "text/html"}
         text = '<input type="hidden" name="session_id" value="abc123">'
         status_code = 200
 
@@ -68,7 +68,7 @@ def test_login_entrez_extracts_session_id():
 def test_fetch_token_rejects_short_response():
     class Response:
         url = "https://entrez.enphaseenergy.com/tokens"
-        headers = {"content-type": "text/plain"}
+        headers: ClassVar[dict] = {"content-type": "text/plain"}
         text = "too-short"
         status_code = 200
 
@@ -99,7 +99,7 @@ def test_extract_session_id_handles_json_response():
 def test_debug_recorder_writes_sanitized_response_body(tmp_path):
     class Response:
         url = "https://example.invalid"
-        headers = {"content-type": "text/html"}
+        headers: ClassVar[dict] = {"content-type": "text/html"}
         text = 'password=secret session_id="abc123" access_token=tokenvalue'
         status_code = 200
 

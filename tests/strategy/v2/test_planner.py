@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 from minyad.strategy.v2 import Settings, StrategyPlanner
 from minyad.strategy.v2.planner import default_day_plan
 
-
 TZ = ZoneInfo("Europe/Amsterdam")
 
 

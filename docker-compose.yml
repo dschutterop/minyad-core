@@ -326,35 +326,6 @@ services:
         condition: service_healthy
     networks: [minyad-internal]
 
-  minyad-node-exporter:
-    image: prom/node-exporter:v1.9.1
-    container_name: minyad-node-exporter
-    restart: unless-stopped
-    command:
-      - --path.rootfs=/host
-    pid: host
-    volumes:
-      - /:/host:ro,rslave
-    ports:
-      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9110:9100"
-    networks: [minyad-public]
-
-  minyad-cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.1
-    container_name: minyad-cadvisor
-    restart: unless-stopped
-    privileged: true
-    devices:
-      - /dev/kmsg
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-    ports:
-      - "${MINYAD_METRICS_BIND_IP:?MINYAD_METRICS_BIND_IP must be set}:9111:8080"
-    networks: [minyad-public]
-
 networks:
   minyad-internal:
     internal: true

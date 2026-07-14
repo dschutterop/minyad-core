@@ -7,13 +7,15 @@ maps SQL fragments to canned results, exercising the DB-backed code paths
 
 import asyncio
 import os
+from typing import Literal
 
 import pytest
 from fastapi import HTTPException
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from api import main as api_main  # noqa: E402
+from api import main as api_main
+from api.routers import health as health_router
 
 
 class FakeRow(dict):
@@ -119,8 +121,8 @@ def test_get_system_settings_reads_stored_rows():
 
 def test_update_system_settings_upserts_and_commits(monkeypatch):
     applied = {}
-    monkeypatch.setattr(api_main, "_apply_log_level", lambda debug: applied.setdefault("debug", debug))
-    api_main.SystemSettingsUpdate.model_rebuild(_types_namespace={"Literal": api_main.Literal})
+    monkeypatch.setattr(health_router, "_apply_log_level", lambda debug: applied.setdefault("debug", debug))
+    api_main.SystemSettingsUpdate.model_rebuild(_types_namespace={"Literal": Literal})
     update = api_main.SystemSettingsUpdate(debug_logging=True, theme="light", language="en")
 
     stored_rows = [
@@ -139,7 +141,7 @@ def test_update_system_settings_upserts_and_commits(monkeypatch):
 
 
 def test_update_system_settings_noop_when_all_none():
-    api_main.SystemSettingsUpdate.model_rebuild(_types_namespace={"Literal": api_main.Literal})
+    api_main.SystemSettingsUpdate.model_rebuild(_types_namespace={"Literal": Literal})
     update = api_main.SystemSettingsUpdate()
     session = FakeSession([("select key, value from settings", FakeResult(rows=[]))])
     run(api_main.update_system_settings(update, session))

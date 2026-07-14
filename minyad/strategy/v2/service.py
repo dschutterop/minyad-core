@@ -8,7 +8,7 @@ import logging
 import os
 import signal
 from dataclasses import asdict
-from datetime import datetime, time, timezone
+from datetime import UTC, datetime, time
 from typing import Any
 
 import uvicorn
@@ -271,7 +271,7 @@ class StrategyService:
                 lookback_days=self.settings.int("strategy.consumption_lookback_days"),
                 fallback_w=self.settings.float("strategy.consumption_fallback_w"),
             )
-        except Exception:  # noqa: BLE001 - profile is advisory; never break the loop
+        except Exception:
             LOGGER.exception("Unable to load household consumption profile; keeping previous")
 
     def _household_load_w(self) -> float:
@@ -353,7 +353,7 @@ def _replace(state: ExecutorState, **changes: Any) -> ExecutorState:
 
 def _parse_dt(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _parse_local_time(value: str) -> time:

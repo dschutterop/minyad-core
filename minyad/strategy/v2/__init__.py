@@ -3,7 +3,12 @@
 from .constants import Settings
 from .consumption_profile import ConsumptionProfile, load_consumption_profile
 from .executor import StrategyExecutor
-from .floor_schedule import FloorScheduleState, build_floor_schedule, night_horizon, recompute_floor
+from .floor_schedule import (
+    FloorScheduleState,
+    build_floor_schedule,
+    night_horizon,
+    recompute_floor,
+)
 from .models import DayPlan, ExecutorState, StrategyDecision
 from .override import OverrideManager
 from .planner import StrategyPlanner

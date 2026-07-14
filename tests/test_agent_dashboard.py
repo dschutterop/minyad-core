@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import os
+from datetime import UTC, datetime
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from api.main import serialize_agent_decision, serialize_control_decision, setpoint_log_select_list
+from api.main import (
+    serialize_agent_decision,
+    serialize_control_decision,
+    setpoint_log_select_list,
+)
 
 
 def test_serialize_agent_decision_formats_timestamp_and_json_snapshot() -> None:
-    created_at = datetime(2026, 6, 24, 12, 30, tzinfo=timezone.utc)
+    created_at = datetime(2026, 6, 24, 12, 30, tzinfo=UTC)
 
     result = serialize_agent_decision(
         {
@@ -32,7 +36,7 @@ def test_serialize_agent_decision_formats_timestamp_and_json_snapshot() -> None:
 def test_serialize_control_decision_labels_strategy_v2_signs() -> None:
     result = serialize_control_decision(
         {
-            "timestamp": datetime(2026, 6, 27, 12, 30, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 6, 27, 12, 30, tzinfo=UTC),
             "source": "strategy_v2",
             "setpoint_w": -560,
             "discharge_allowed": True,
@@ -46,7 +50,7 @@ def test_serialize_control_decision_labels_strategy_v2_signs() -> None:
 def test_serialize_control_decision_labels_strategy_v3_signs() -> None:
     result = serialize_control_decision(
         {
-            "timestamp": datetime(2026, 7, 1, 21, 35, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 7, 1, 21, 35, tzinfo=UTC),
             "source": "strategy_v3",
             "setpoint_w": -560,
             "discharge_allowed": True,
@@ -59,7 +63,7 @@ def test_serialize_control_decision_labels_strategy_v3_signs() -> None:
 def test_serialize_control_decision_labels_goodwe_bridge_signs() -> None:
     result = serialize_control_decision(
         {
-            "timestamp": datetime(2026, 6, 27, 12, 30, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 6, 27, 12, 30, tzinfo=UTC),
             "source": "goodwe_bridge",
             "setpoint_w": 2880,
             "discharge_allowed": False,
@@ -72,7 +76,7 @@ def test_serialize_control_decision_labels_goodwe_bridge_signs() -> None:
 def test_serialize_control_decision_labels_legacy_signs() -> None:
     result = serialize_control_decision(
         {
-            "timestamp": datetime(2026, 6, 27, 12, 30, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 6, 27, 12, 30, tzinfo=UTC),
             "source": "strategy",
             "setpoint_w": -560,
             "discharge_allowed": False,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import paho.mqtt.client as mqtt
 
@@ -24,9 +24,13 @@ PHASE_RETURNED_TOPICS = {
     "L3": "dsmr/reading/phase_currently_returned_l3",
 }
 REQUIRED_TOPICS = frozenset(
-    [DELIVERED_TOPIC, RETURNED_TOPIC, TIMESTAMP_TOPIC]
-    + list(PHASE_DELIVERED_TOPICS.values())
-    + list(PHASE_RETURNED_TOPICS.values())
+    [
+        DELIVERED_TOPIC,
+        RETURNED_TOPIC,
+        TIMESTAMP_TOPIC,
+        *PHASE_DELIVERED_TOPICS.values(),
+        *PHASE_RETURNED_TOPICS.values(),
+    ]
 )
 
 
@@ -96,7 +100,7 @@ class P1Reader:
         }
         timestamp = self._values[TIMESTAMP_TOPIC]
         if not isinstance(timestamp, datetime):
-            timestamp = datetime.now(timezone.utc)
+            timestamp = datetime.now(UTC)
         self.on_update(net_power_w, per_phase_w, timestamp, round(delivered * 1000), round(returned * 1000))
 
 
@@ -105,7 +109,7 @@ def _parse_timestamp(payload: str) -> datetime:
         parsed = datetime.fromisoformat(payload.replace("Z", "+00:00"))
     except ValueError:
         LOGGER.warning("Discarding malformed DSMR timestamp; using current UTC time")
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)

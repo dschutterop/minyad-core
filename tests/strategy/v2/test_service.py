@@ -1,15 +1,19 @@
 import asyncio
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
+from typing import ClassVar
 
 import pytest
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/db")
 
-from minyad.strategy.v2.reasons import adjusted_decision_log_due, adjustment_reason_suffix
-from minyad.strategy.v2.setpoint_log import build_setpoint_log_insert
 from minyad.strategy.v2 import service as service_module
 from minyad.strategy.v2.models import DayPlan, ExecutorState, StrategyDecision
+from minyad.strategy.v2.reasons import (
+    adjusted_decision_log_due,
+    adjustment_reason_suffix,
+)
+from minyad.strategy.v2.setpoint_log import build_setpoint_log_insert
 
 
 def test_setpoint_log_insert_includes_battery_power_when_column_exists():
@@ -59,7 +63,7 @@ def test_adjustment_reason_suffix_keeps_legacy_fallback():
 
 
 def test_adjusted_decision_log_due_when_unchanged_suppression_persists():
-    now = datetime(2026, 6, 27, 23, 54, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 23, 54, tzinfo=UTC)
     last = now - timedelta(seconds=300)
     assert adjusted_decision_log_due(
         adjusted=True,
@@ -71,7 +75,7 @@ def test_adjusted_decision_log_due_when_unchanged_suppression_persists():
 
 
 def test_adjusted_decision_log_not_due_before_interval():
-    now = datetime(2026, 6, 27, 23, 54, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 23, 54, tzinfo=UTC)
     last = now - timedelta(seconds=299)
     assert not adjusted_decision_log_due(
         adjusted=True,
@@ -150,18 +154,18 @@ def make_plan() -> DayPlan:
         effective_soc_ceiling=90,
         grid_charge_windows=[
             (
-                datetime(2026, 7, 3, 2, 0, tzinfo=timezone.utc),
-                datetime(2026, 7, 3, 3, 0, tzinfo=timezone.utc),
+                datetime(2026, 7, 3, 2, 0, tzinfo=UTC),
+                datetime(2026, 7, 3, 3, 0, tzinfo=UTC),
             )
         ],
         price_discharge_windows=[
             (
-                datetime(2026, 7, 3, 19, 0, tzinfo=timezone.utc),
-                datetime(2026, 7, 3, 20, 0, tzinfo=timezone.utc),
+                datetime(2026, 7, 3, 19, 0, tzinfo=UTC),
+                datetime(2026, 7, 3, 20, 0, tzinfo=UTC),
             )
         ],
         planned_soc_at_sunset=70,
-        valid_until=datetime(2026, 7, 4, 0, 0, tzinfo=timezone.utc),
+        valid_until=datetime(2026, 7, 4, 0, 0, tzinfo=UTC),
         reason="test plan",
     )
 
@@ -194,7 +198,7 @@ def test_publish_active_plan_decision_and_floor_telemetry():
         {"current_floor": 31.25, "drift_factor": 1.23456, "remaining_expected_adjusted_wh": 987.65},
     )()
     decision = StrategyDecision(
-        datetime(2026, 7, 3, 10, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 3, 10, 0, tzinfo=UTC),
         250,
         61.0,
         100,
@@ -259,7 +263,7 @@ def test_handle_message_updates_state_and_dispatches_callbacks():
         ("tick", None),
     ]
     assert svc.state.solar_forecast_w == 123
-    assert svc.state.bridge_last_seen == datetime(2026, 7, 3, 10, 0, tzinfo=timezone.utc)
+    assert svc.state.bridge_last_seen == datetime(2026, 7, 3, 10, 0, tzinfo=UTC)
     assert svc.state.battery_soc == 62.5
     assert svc.state.battery_power_w == 150
     assert svc.state.battery_voltage == 52.1
@@ -276,7 +280,7 @@ def test_tick_applies_adjustments_logs_and_updates_state():
     svc = make_service()
     plan = make_plan()
     decision = StrategyDecision(
-        datetime(2026, 7, 3, 10, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 3, 10, 0, tzinfo=UTC),
         100,
         55.0,
         20,
@@ -364,11 +368,11 @@ def test_household_load_and_parse_helpers():
     svc.state = ExecutorState(net_grid_w=300, battery_power_w=25)
     assert svc._household_load_w() == 325.0
     assert service_module._parse_local_time("06:30").hour == 6
-    assert service_module._parse_dt("2026-07-03T10:00:00").tzinfo == timezone.utc
+    assert service_module._parse_dt("2026-07-03T10:00:00").tzinfo == UTC
 
 
 class FakeScheduler:
-    instances = []
+    instances: ClassVar[list] = []
 
     def __init__(self, *, timezone):
         self.timezone = timezone

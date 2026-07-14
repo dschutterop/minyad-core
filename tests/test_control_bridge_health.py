@@ -1,10 +1,9 @@
 import asyncio
 import importlib.util
 import logging
-import os
 import sys
 import types
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 shared_db = types.ModuleType("shared.db")
@@ -33,12 +32,12 @@ def test_bridge_requires_fresh_last_seen(monkeypatch):
 
     assert app.bridge_is_available is True
 
-    app.bridge_last_seen = datetime.now(timezone.utc) - timedelta(
+    app.bridge_last_seen = datetime.now(UTC) - timedelta(
         seconds=control_main.BRIDGE_LAST_SEEN_STALE_SECONDS + 5
     )
     assert app.bridge_is_available is False
 
-    app.bridge_last_seen = datetime.now(timezone.utc)
+    app.bridge_last_seen = datetime.now(UTC)
     assert app.bridge_is_available is True
 
 
@@ -46,7 +45,7 @@ def test_parse_bridge_last_seen_accepts_zulu_timestamp():
     app = control_main.ControlApp()
     parsed = app.parse_bridge_last_seen("2026-06-18T09:24:03Z")
 
-    assert parsed == datetime(2026, 6, 18, 9, 24, 3, tzinfo=timezone.utc)
+    assert parsed == datetime(2026, 6, 18, 9, 24, 3, tzinfo=UTC)
 
 
 def test_parse_bridge_last_seen_rejects_invalid_timestamp():
@@ -67,7 +66,7 @@ def make_available_app():
     app = control_main.ControlApp()
     app.mqtt = FakeMqtt()
     app.bridge_status = "online"
-    app.bridge_last_seen = datetime.now(timezone.utc)
+    app.bridge_last_seen = datetime.now(UTC)
     return app
 
 
@@ -116,7 +115,7 @@ def test_live_battery_telemetry_refreshes_stale_bridge_heartbeat(monkeypatch):
     monkeypatch.setattr(control_main, "store_status", noop_store_status)
     app = control_main.ControlApp()
     app.bridge_status = "online"
-    app.bridge_last_seen = datetime.now(timezone.utc) - timedelta(
+    app.bridge_last_seen = datetime.now(UTC) - timedelta(
         seconds=control_main.BRIDGE_LAST_SEEN_STALE_SECONDS + 5
     )
     app.bridge_last_seen_raw = app.bridge_last_seen.isoformat()
@@ -132,7 +131,7 @@ def test_offline_bridge_does_not_refresh_from_battery_telemetry(monkeypatch):
     monkeypatch.setattr(control_main, "store_status", noop_store_status)
     app = control_main.ControlApp()
     app.bridge_status = "offline"
-    stale_last_seen = datetime.now(timezone.utc) - timedelta(
+    stale_last_seen = datetime.now(UTC) - timedelta(
         seconds=control_main.BRIDGE_LAST_SEEN_STALE_SECONDS + 5
     )
     app.bridge_last_seen = stale_last_seen
@@ -144,6 +143,7 @@ def test_offline_bridge_does_not_refresh_from_battery_telemetry(monkeypatch):
     assert app.bridge_is_available is False
     assert app.bridge_last_seen == stale_last_seen
     assert app.bridge_last_seen_error == "bridge last_seen is stale"
+
 
 def test_battery_mode_accepts_goodwe_text_payload(monkeypatch):
     stored = {}
@@ -212,7 +212,6 @@ def test_grid_net_power_import_is_converted_to_negative_surplus(monkeypatch):
     assert stored["state"] == "DISCHARGING"
 
 
-
 def test_below_floor_export_charges_instead_of_adopting_idle_discharge(monkeypatch):
     stored = {}
 
@@ -248,6 +247,7 @@ def test_below_floor_observed_idle_discharge_is_not_rebalanced(monkeypatch):
     assert rebalanced is False
     assert app.controller.state is control_main.ControlState.IDLE
     assert ("control", "discharge_w", 0) not in app.mqtt.published
+
 
 def test_start_charging_tracks_current_grid_export(monkeypatch):
     monkeypatch.setattr(control_main, "store_status", noop_store_status)
@@ -363,7 +363,7 @@ def test_soc_guard_masks_charge_trigger_at_ceiling(monkeypatch):
 def test_friday_cycle_ceiling_is_100_percent():
     app = make_available_app()
     app.settings = {"soc_ceiling": 90}
-    friday = datetime(2026, 7, 3, 12, tzinfo=timezone.utc)
+    friday = datetime(2026, 7, 3, 12, tzinfo=UTC)
 
     assert app.effective_soc_ceiling(friday) == 100
 

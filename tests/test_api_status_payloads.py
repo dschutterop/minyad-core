@@ -3,12 +3,22 @@ import os
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 import api.main as api_main
-from api.main import SURPLUS_API_VERSION, app, battery_curve_power_w, battery_status_payload, build_surplus_payload, compute_household_load, derive_battery_state, grid_status_payload
+from api.main import (
+    SURPLUS_API_VERSION,
+    app,
+    battery_curve_power_w,
+    battery_status_payload,
+    build_surplus_payload,
+    compute_household_load,
+    derive_battery_state,
+    grid_status_payload,
+)
+from api.routers import battery as battery_router
 
 
 def test_battery_status_payload_excludes_grid_keys():
@@ -52,7 +62,7 @@ def test_battery_status_includes_soc_limit_override_flag(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        api_main,
+        battery_router,
         "latest_mqtt_status",
         lambda: {
             "soc": "91",
@@ -61,14 +71,15 @@ def test_battery_status_includes_soc_limit_override_flag(monkeypatch):
             "voltage": "52.1",
             "mode": "charge",
             "bridge_status": "online",
-            "bridge_last_seen": datetime.now(timezone.utc).isoformat(),
+            "bridge_last_seen": datetime.now(UTC).isoformat(),
         },
     )
+
     async def skip_curve_store(*_args, **_kwargs):
         await asyncio.sleep(0)
         return None
 
-    monkeypatch.setattr(api_main, "store_power_curve_point", skip_curve_store)
+    monkeypatch.setattr(battery_router, "store_power_curve_point", skip_curve_store)
 
     payload = asyncio.run(api_main.battery_status(Session()))
 
@@ -188,7 +199,7 @@ def test_surplus_payload_reports_remaining_and_gross_surplus_while_battery_charg
         {"grid_net_power_w": "-300", "solar_power_w": "2500"},
         {"state": "CHARGING", "control_state": "CHARGING", "power_w": "-1200", "soc": 62},
         {"soc_floor": 20, "soc_ceiling": 90, "cooldown": 180, "start_w": 500, "stop_w": 150},
-        now=datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 6, 28, 10, 0, tzinfo=UTC),
     )
 
     assert payload["api_version"] == SURPLUS_API_VERSION
@@ -204,7 +215,7 @@ def test_surplus_payload_marks_cooldown_even_when_export_remains():
         {"grid_net_power_w": "-700"},
         {"state": "IDLE", "control_state": "COOLDOWN", "power_w": "0"},
         {"cooldown": 180},
-        now=datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 6, 28, 10, 0, tzinfo=UTC),
     )
 
     assert payload["surplus_w"] == 700
@@ -219,7 +230,7 @@ def test_surplus_payload_marks_idle_with_remaining_export():
         {"grid_net_power_w": "-450"},
         {"state": "IDLE", "control_state": "IDLE", "power_w": "0"},
         {},
-        now=datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 6, 28, 10, 0, tzinfo=UTC),
     )
 
     assert payload["has_surplus"] is True
@@ -227,14 +238,24 @@ def test_surplus_payload_marks_idle_with_remaining_export():
     assert payload["battery"]["is_idle"] is True
 
 
+def _iter_api_routes(routes):
+    """Flatten app.routes, descending into include_router()-composed sub-routers
+    (represented as an opaque wrapper exposing `.original_router`, not a plain APIRoute)."""
+    for route in routes:
+        if hasattr(route, "path"):
+            yield route
+        elif hasattr(route, "original_router"):
+            yield from _iter_api_routes(route.original_router.routes)
+
+
 def test_surplus_api_exposes_versioned_route_and_legacy_alias():
-    route_paths = {route.path for route in app.routes}
+    route_paths = {route.path for route in _iter_api_routes(app.routes)}
 
     assert "/api/v1/surplus" in route_paths
     assert "/api/surplus" in route_paths
 
 
-ALIGNED_NOW = datetime(2026, 7, 14, 10, 0, 0, tzinfo=timezone.utc)
+ALIGNED_NOW = datetime(2026, 7, 14, 10, 0, 0, tzinfo=UTC)
 
 
 def _forecast_plan_payload(now, *, slot_count=96, solar_w=1500.0, load_w=400.0, charge_w=300.0, soc_start=68.0, solver_status="Optimal"):
@@ -408,10 +429,11 @@ def test_surplus_payload_never_includes_reservation_or_device_keys():
 
 
 def test_build_health_status_reports_core_components(monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from api.main import build_health_status, mqtt
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     monkeypatch.setattr(mqtt, "connection_info", lambda: {"host": "mqtt", "port": 1883, "connected": True})
     payload = build_health_status(
         {

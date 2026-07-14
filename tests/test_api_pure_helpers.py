@@ -7,18 +7,18 @@ previously unexercised.
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from api.main import (  # noqa: E402
+from api.main import (
     AssetSteeringSettingsUpdate,
     BatteryOverrideRequest,
     BatterySettingsUpdate,
-    Literal,
     TradeSettingsUpdate,
     _numeric_w,
     _status_text,
@@ -31,7 +31,7 @@ from api.main import (  # noqa: E402
 
 
 def _iso(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).isoformat()
+    return dt.astimezone(UTC).isoformat()
 
 
 # --------------------------------------------------------------------------- #
@@ -48,18 +48,18 @@ def test_parse_bridge_last_seen_rejects_garbage():
 
 def test_parse_bridge_last_seen_accepts_zulu_and_normalizes_to_utc():
     parsed = parse_bridge_last_seen("2026-06-18T09:24:03Z")
-    assert parsed == datetime(2026, 6, 18, 9, 24, 3, tzinfo=timezone.utc)
+    assert parsed == datetime(2026, 6, 18, 9, 24, 3, tzinfo=UTC)
 
 
 def test_parse_bridge_last_seen_assumes_utc_for_naive_timestamps():
     parsed = parse_bridge_last_seen("2026-06-18T09:24:03")
     assert parsed is not None
-    assert parsed.tzinfo == timezone.utc
+    assert parsed.tzinfo == UTC
 
 
 def test_parse_bridge_last_seen_converts_offset_to_utc():
     parsed = parse_bridge_last_seen("2026-06-18T11:24:03+02:00")
-    assert parsed == datetime(2026, 6, 18, 9, 24, 3, tzinfo=timezone.utc)
+    assert parsed == datetime(2026, 6, 18, 9, 24, 3, tzinfo=UTC)
 
 
 # --------------------------------------------------------------------------- #
@@ -76,14 +76,14 @@ def test_value_is_fresh_iso_rejects_unparseable():
 
 
 def test_value_is_fresh_iso_reports_fresh_recent_timestamp():
-    recent = _iso(datetime.now(timezone.utc) - timedelta(seconds=10))
+    recent = _iso(datetime.now(UTC) - timedelta(seconds=10))
     fresh, age = value_is_fresh_iso(recent, max_age_seconds=120)
     assert fresh is True
     assert 0 <= age <= 15
 
 
 def test_value_is_fresh_iso_reports_stale_old_timestamp():
-    old = _iso(datetime.now(timezone.utc) - timedelta(seconds=600))
+    old = _iso(datetime.now(UTC) - timedelta(seconds=600))
     fresh, age = value_is_fresh_iso(old, max_age_seconds=120)
     assert fresh is False
     assert age >= 590
@@ -110,7 +110,7 @@ def test_enrich_bridge_health_missing_last_seen_leaves_offline_available_untouch
 def test_enrich_bridge_health_marks_recent_last_seen_valid():
     payload = {
         "bridge_status": "online",
-        "bridge_last_seen": _iso(datetime.now(timezone.utc) - timedelta(seconds=5)),
+        "bridge_last_seen": _iso(datetime.now(UTC) - timedelta(seconds=5)),
     }
     enrich_bridge_health(payload)
     assert payload["bridge_last_seen_valid"] is True
@@ -121,7 +121,7 @@ def test_enrich_bridge_health_marks_recent_last_seen_valid():
 def test_enrich_bridge_health_marks_stale_last_seen_unavailable():
     payload = {
         "bridge_status": "online",
-        "bridge_last_seen": _iso(datetime.now(timezone.utc) - timedelta(seconds=120)),
+        "bridge_last_seen": _iso(datetime.now(UTC) - timedelta(seconds=120)),
     }
     enrich_bridge_health(payload)
     assert payload["bridge_last_seen_valid"] is False

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .constants import Settings
 from .floor_schedule import FloorScheduleState
@@ -45,7 +45,7 @@ class SoCGuard:
         *,
         skip_soc_limits: bool = False,
     ) -> tuple[int, str | None]:
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         stale_reason = self._bridge_stale_reason(state, now)
         if stale_reason is not None:
             return 0, stale_reason
@@ -60,8 +60,8 @@ class SoCGuard:
             return None
         last_seen = state.bridge_last_seen
         if last_seen.tzinfo is None:
-            last_seen = last_seen.replace(tzinfo=timezone.utc)
-        age_seconds = (now - last_seen.astimezone(timezone.utc)).total_seconds()
+            last_seen = last_seen.replace(tzinfo=UTC)
+        age_seconds = (now - last_seen.astimezone(UTC)).total_seconds()
         if age_seconds > self.settings.bridge_stale_seconds:
             return f"guard: bridge stale ({age_seconds:.0f}s > {self.settings.bridge_stale_seconds}s)"
         return None

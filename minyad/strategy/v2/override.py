@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -25,7 +25,7 @@ class OverrideManager:
     def __init__(self, settings: Settings, db_session_factory: Any | None = None, *, now: Any | None = None) -> None:
         self.settings = settings
         self.db_session_factory = db_session_factory
-        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._now = now or (lambda: datetime.now(UTC))
         self.current = Override()
         self._cycle_started = False
 
@@ -175,4 +175,4 @@ def _parse_dt(value: str | datetime | None) -> datetime | None:
     if value is None or isinstance(value, datetime):
         return value
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)

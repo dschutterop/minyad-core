@@ -6,6 +6,7 @@ updates, override application and strategy-v2 setpoint forwarding.
 """
 
 import asyncio
+from datetime import UTC
 
 import pytest
 
@@ -108,10 +109,10 @@ def test_handle_bridge_status_offline_marks_unavailable():
 # handle_bridge_last_seen
 # --------------------------------------------------------------------------- #
 def test_handle_bridge_last_seen_fresh_is_valid():
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     app = make_available_app()
-    fresh = datetime.now(timezone.utc).isoformat()
+    fresh = datetime.now(UTC).isoformat()
     run(app.handle_bridge_last_seen(fresh))
     assert app.bridge_last_seen_error is None
 
@@ -124,11 +125,11 @@ def test_handle_bridge_last_seen_invalid_records_error():
 
 
 def test_handle_bridge_last_seen_stale_marks_unavailable():
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     app = make_available_app()
     app.setpoint_w = 300
-    stale = (datetime.now(timezone.utc) - timedelta(seconds=control_main.BRIDGE_LAST_SEEN_STALE_SECONDS + 30)).isoformat()
+    stale = (datetime.now(UTC) - timedelta(seconds=control_main.BRIDGE_LAST_SEEN_STALE_SECONDS + 30)).isoformat()
     run(app.handle_bridge_last_seen(stale))
     assert app.bridge_last_seen_error == "bridge last_seen is stale"
     assert app.setpoint_w == 0

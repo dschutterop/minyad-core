@@ -1,8 +1,10 @@
+from typing import ClassVar
+
 from shared.mqtt_client import MinyadMqttClient, MqttConfig
 
 
 class FakeThread:
-    created = []
+    created: ClassVar[list] = []
 
     def __init__(self, *, target, name, daemon):
         self.target = target

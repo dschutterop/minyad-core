@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 HOST_SERVICES = Path(__file__).resolve().parents[1] / "host-services"
 BRIDGES = {
     "dsmr_bridge.py": {
