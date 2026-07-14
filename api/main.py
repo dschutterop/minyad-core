@@ -261,7 +261,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
         update_claude_agent_settings,
         update_trade_settings,
     )
-from shared.db import AsyncSessionLocal
+from shared.db import AsyncSessionLocal, get_session
 
 app.include_router(settings_router.router)
 app.include_router(health_router.router)
@@ -342,6 +342,7 @@ __all__ = [
     "enrich_bridge_health",
     "get_asset_steering_settings",
     "get_claude_agent_settings",
+    "get_session",
     "get_system_settings",
     "get_trade_prices",
     "get_trade_settings",
