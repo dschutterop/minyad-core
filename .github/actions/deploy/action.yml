@@ -7,6 +7,19 @@ inputs:
   github-token:
     description: Token used to authenticate to GHCR and to the git remote (composite actions can't read `secrets` directly).
     required: true
+  deploy-path:
+    description: Host path of the deploy checkout (composite actions can't read `vars` directly).
+    required: true
+  host-service-units:
+    description: Space-separated systemd units to restart.
+    required: false
+    default: dsmr_bridge.service goodwe_bridge.service enphase_bridge.service enphase_token_refresh.timer
+  metrics-bind-ip:
+    description: IP to bind the host metrics exporters to.
+    required: true
+  prometheus-source:
+    description: Source label used by the firewalld metrics config script.
+    required: true
 runs:
   using: composite
   steps:
@@ -20,12 +33,12 @@ runs:
     - name: Pull images and restart services
       shell: bash
       env:
-        DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        DEPLOY_PATH: ${{ inputs.deploy-path }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
-        HOST_SERVICE_UNITS: ${{ vars.HOST_SERVICE_UNITS || 'dsmr_bridge.service goodwe_bridge.service enphase_bridge.service enphase_token_refresh.timer' }}
+        HOST_SERVICE_UNITS: ${{ inputs.host-service-units }}
         MINYAD_IMAGE_TAG: ${{ github.sha }}
-        MINYAD_METRICS_BIND_IP: ${{ vars.MINYAD_METRICS_BIND_IP }}
-        MINYAD_PROMETHEUS_SOURCE: ${{ vars.MINYAD_PROMETHEUS_SOURCE }}
+        MINYAD_METRICS_BIND_IP: ${{ inputs.metrics-bind-ip }}
+        MINYAD_PROMETHEUS_SOURCE: ${{ inputs.prometheus-source }}
       run: |
         test -n "${DEPLOY_PATH}"
         git config --global --add safe.directory "${DEPLOY_PATH}"
