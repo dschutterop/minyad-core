@@ -4,22 +4,35 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
 from concurrent.futures import Future
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from time import monotonic, time
 from typing import Any
 
 import paho.mqtt.client as mqtt
 import psycopg2
-from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, start_http_server
+from backends import (
+    BatteryTelemetry,
+    GoodWeBackend,
+    GoodWeCompositeBackend,
+    InverterBackend,
+    InverterState,
+    ModbusBackend,
+)
 from dotenv import load_dotenv
-
-from backends import BatteryTelemetry, GoodWeBackend, GoodWeCompositeBackend, InverterBackend, ModbusBackend
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    start_http_server,
+)
 
 load_dotenv()
 
@@ -137,7 +150,7 @@ class Config:
     conservative_discharge_limit_w: int
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         mqtt_host = os.getenv("MQTT_BROKER") or os.getenv("MQTT_HOST")
         if not mqtt_host:
             raise ValueError("MQTT_BROKER is required")
@@ -206,7 +219,7 @@ def configure_logging(level: str) -> None:
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def psycopg2_database_url(url: str) -> str:
@@ -302,13 +315,12 @@ class GoodWeBridge:
         if not self.config.database_url:
             return configured
         try:
-            with closing(psycopg2.connect(psycopg2_database_url(self.config.database_url))) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "select value from settings where key = %s and encrypted = false",
-                        (BATTERY_POLL_INTERVAL_SETTING,),
-                    )
-                    row = cur.fetchone()
+            with closing(psycopg2.connect(psycopg2_database_url(self.config.database_url))) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "select value from settings where key = %s and encrypted = false",
+                    (BATTERY_POLL_INTERVAL_SETTING,),
+                )
+                row = cur.fetchone()
         except Exception as exc:
             logger.warning("Could not load %s; using %ss: %s", BATTERY_POLL_INTERVAL_SETTING, configured, exc)
             return configured
@@ -765,10 +777,8 @@ class GoodWeBridge:
                 self.publish(MQTT_TOPIC_INVERTER_STATUS, STATUS_ERROR, retain=True)
                 logger.warning("[modbus|api] Polling failed: %s", exc, exc_info=True)
 
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.shutdown_event.wait(), timeout=self.load_poll_interval())
-            except asyncio.TimeoutError:
-                pass
 
     async def run(self) -> None:
         self.loop = asyncio.get_running_loop()

@@ -58,7 +58,7 @@ if str(HOST_SERVICES) not in sys.path:
     sys.path.insert(0, str(HOST_SERVICES))
 MODULE_PATH = HOST_SERVICES / "goodwe_bridge.py"
 spec = importlib.util.spec_from_file_location("goodwe_bridge", MODULE_PATH)
-from backends import InverterState
+from backends import InverterState  # noqa: E402 - must follow sys.path setup above
 
 goodwe_bridge = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
@@ -379,6 +379,7 @@ def test_warns_when_charge_limit_does_not_force_charging(monkeypatch, caplog):
 
     assert "charge limit applied but inverter did not start charging; limit registers are not force setpoints" in caplog.text
 
+
 class CommandBackend(Backend):
     def __init__(self):
         super().__init__()
@@ -403,9 +404,7 @@ class CommandBackend(Backend):
 
     async def set_battery_limits(self, charge_limit_w, discharge_limit_w, *, state_changed=False):
         self.battery_limits.append((charge_limit_w, discharge_limit_w))
-        if self.skip_modbus:
-            return False
-        return True
+        return not self.skip_modbus
 
 
 def test_export_charging_sends_api_charge_command_and_modbus_charge_limit_while_control_state_is_idle(monkeypatch):

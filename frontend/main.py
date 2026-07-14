@@ -55,7 +55,7 @@ MINYAD_API_SECRET = os.getenv("MINYAD_API_SECRET", "")
 
 # Re-exported for backward compatibility: tests/test_frontend_api_proxy.py accesses these
 # via `frontend_main.FRONTEND_VERSION` / `frontend_main.FRONTEND_BUILD_ID`.
-__all__ = ["app", "FRONTEND_BUILD_ID", "FRONTEND_VERSION"]
+__all__ = ["FRONTEND_BUILD_ID", "FRONTEND_VERSION", "app"]
 
 
 def _api_verify() -> str | bool:

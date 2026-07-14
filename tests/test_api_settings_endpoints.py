@@ -13,7 +13,7 @@ from fastapi import HTTPException
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from api import main as api_main  # noqa: E402
+from api import main as api_main
 
 
 class FakeRow(dict):

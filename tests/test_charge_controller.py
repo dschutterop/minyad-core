@@ -1,6 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from minyad.strategy.charge_controller import ChargeController, MODE_NORMAL, MODE_SOLAR_POOR, MODE_SOLAR_RICH
+from minyad.strategy.charge_controller import (
+    MODE_NORMAL,
+    MODE_SOLAR_POOR,
+    MODE_SOLAR_RICH,
+    ChargeController,
+)
 
 
 class FakeMqtt:
@@ -16,7 +21,7 @@ class FakeMqtt:
 
 
 def fixed_now():
-    return datetime(2026, 6, 18, 20, 0, tzinfo=timezone.utc)
+    return datetime(2026, 6, 18, 20, 0, tzinfo=UTC)
 
 
 def controller(settings=None, now=fixed_now):

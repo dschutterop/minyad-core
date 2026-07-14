@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from ingestion.sensors.dsmr import (
     DELIVERED_TOPIC,
     PHASE_DELIVERED_TOPICS,
     PHASE_RETURNED_TOPICS,
-    P1Reader,
     RETURNED_TOPIC,
     TIMESTAMP_TOPIC,
+    P1Reader,
 )
 
 
@@ -42,7 +42,7 @@ def test_p1_reader_reports_positive_net_power_for_grid_import() -> None:
     net_power_w, per_phase_w, timestamp, delivered_w, returned_w = updates[-1]
     assert net_power_w == 1400
     assert per_phase_w["L1"] == 1400
-    assert timestamp == datetime(2026, 6, 24, 20, 15, tzinfo=timezone.utc)
+    assert timestamp == datetime(2026, 6, 24, 20, 15, tzinfo=UTC)
     assert delivered_w == 1400
     assert returned_w == 0
 

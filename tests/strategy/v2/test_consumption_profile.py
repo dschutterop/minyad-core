@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from minyad.strategy.v2 import ConsumptionProfile
@@ -9,7 +9,7 @@ TZ = ZoneInfo("Europe/Amsterdam")
 
 def test_slot_of_uses_local_time():
     # 23:00 UTC in summer is 01:00 Amsterdam (CEST, +2) -> slot 4 (01:00-01:15).
-    moment = datetime(2026, 6, 29, 23, 0, tzinfo=timezone.utc)
+    moment = datetime(2026, 6, 29, 23, 0, tzinfo=UTC)
     assert slot_of(moment, TZ) == 4
 
 

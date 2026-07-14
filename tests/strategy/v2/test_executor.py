@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from minyad.strategy.v2 import DayPlan, ExecutorState, Settings, StrategyExecutor
 
@@ -6,7 +6,7 @@ from minyad.strategy.v2 import DayPlan, ExecutorState, Settings, StrategyExecuto
 class Clock:
     def __init__(self):
         self.t = 0.0
-        self.now = datetime(2026, 6, 27, 12, tzinfo=timezone.utc)
+        self.now = datetime(2026, 6, 27, 12, tzinfo=UTC)
 
     def monotonic(self):
         return self.t
@@ -39,7 +39,7 @@ def test_steady_import_discharges_after_hold():
 
 
 def test_active_discharge_trims_during_export():
-    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0"})
+    executor, _clock = make_executor({"strategy.ramp_hold_seconds": "0"})
     executor.current_setpoint_w = -500
     decision = executor.tick(ExecutorState(-200, battery_soc=50, current_setpoint_w=-500))
     assert decision.setpoint_w == -380
@@ -47,7 +47,7 @@ def test_active_discharge_trims_during_export():
 
 
 def test_active_discharge_export_trim_waits_for_fresh_telemetry():
-    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0"})
+    executor, _clock = make_executor({"strategy.ramp_hold_seconds": "0"})
     first = executor.tick(ExecutorState(-381, battery_soc=50, battery_power_w=1524, current_setpoint_w=-1438))
     assert first.setpoint_w == -1210
 
@@ -57,14 +57,14 @@ def test_active_discharge_export_trim_waits_for_fresh_telemetry():
 
 
 def test_active_discharge_export_trim_does_not_cross_into_charge():
-    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0"})
+    executor, _clock = make_executor({"strategy.ramp_hold_seconds": "0"})
     decision = executor.tick(ExecutorState(-381, battery_soc=50, battery_power_w=1524, current_setpoint_w=-70))
     assert decision.setpoint_w == 0
     assert "trimming discharge during export" in decision.reason
 
 
 def test_discharge_still_blocked_during_export_without_active_discharge():
-    now = datetime(2026, 6, 27, 18, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 18, tzinfo=UTC)
     plan = DayPlan(now.date(), "NORMAL", 2.0, 20, 90, price_discharge_windows=[(now - timedelta(minutes=1), now + timedelta(hours=1))])
     executor, clock = make_executor({"strategy.ramp_hold_seconds": "0"}, plan)
     clock.now = now
@@ -74,14 +74,14 @@ def test_discharge_still_blocked_during_export_without_active_discharge():
 
 
 def test_jitter_suppression_keeps_current_setpoint():
-    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.jitter_w": "50"})
+    executor, _clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.jitter_w": "50"})
     decision = executor.tick(ExecutorState(-30, battery_soc=50, current_setpoint_w=300))
     assert decision.setpoint_w == 300
     assert "jitter suppressed" in decision.reason
 
 
 def test_price_discharge_window_adds_bias():
-    now = datetime(2026, 6, 27, 18, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 18, tzinfo=UTC)
     plan = DayPlan(now.date(), "NORMAL", 2.0, 20, 90, price_discharge_windows=[(now - timedelta(minutes=1), now + timedelta(hours=1))])
     executor, clock = make_executor({"strategy.ramp_hold_seconds": "0"}, plan)
     clock.now = now
@@ -91,7 +91,7 @@ def test_price_discharge_window_adds_bias():
 
 
 def test_grid_charge_window_forces_max_charge():
-    now = datetime(2026, 6, 27, 2, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 2, tzinfo=UTC)
     plan = DayPlan(now.date(), "NORMAL", 2.0, 20, 90, grid_charge_windows=[(now - timedelta(minutes=1), now + timedelta(hours=1))])
     executor, clock = make_executor({"battery.max_charge_w": "1440"}, plan)
     clock.now = now
@@ -112,7 +112,7 @@ def test_ramp_hold_resets_after_each_fire():
 
 
 def test_soc_floor_hysteresis_keeps_discharge_blocked_above_floor():
-    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.soc_hysteresis_pct": "2"})
+    executor, _clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.soc_hysteresis_pct": "2"})
     # Touch the floor to engage the block
     executor.tick(ExecutorState(-600, battery_soc=20))
     # SoC recovers to 21% — still inside the 2% band, discharge must stay blocked
@@ -121,7 +121,7 @@ def test_soc_floor_hysteresis_keeps_discharge_blocked_above_floor():
 
 
 def test_soc_floor_hysteresis_releases_above_band():
-    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.soc_hysteresis_pct": "2"})
+    executor, _clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.soc_hysteresis_pct": "2"})
     executor.tick(ExecutorState(-600, battery_soc=20))
     # SoC climbs past floor + band (22%) — discharge may resume
     decision = executor.tick(ExecutorState(600, battery_soc=23))
@@ -129,7 +129,7 @@ def test_soc_floor_hysteresis_releases_above_band():
 
 
 def test_soc_ceiling_hysteresis_keeps_charge_blocked_below_ceiling():
-    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.soc_hysteresis_pct": "2"})
+    executor, _clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.soc_hysteresis_pct": "2"})
     executor.tick(ExecutorState(-600, battery_soc=90))
     # SoC dips to 89% — still inside the 2% band, charge must stay blocked
     decision = executor.tick(ExecutorState(-600, battery_soc=89))
@@ -137,7 +137,7 @@ def test_soc_ceiling_hysteresis_keeps_charge_blocked_below_ceiling():
 
 
 def test_export_block_hysteresis_stays_blocked_within_band():
-    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.export_block_threshold_w": "100", "strategy.export_block_hysteresis_w": "50"})
+    executor, _clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.export_block_threshold_w": "100", "strategy.export_block_hysteresis_w": "50"})
     executor.current_setpoint_w = -400
     # Trigger the export block
     executor.tick(ExecutorState(-150, battery_soc=50, current_setpoint_w=-400))
@@ -148,7 +148,7 @@ def test_export_block_hysteresis_stays_blocked_within_band():
 
 
 def test_export_block_hysteresis_releases_past_clearance():
-    executor, clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.export_block_threshold_w": "100", "strategy.export_block_hysteresis_w": "50"})
+    executor, _clock = make_executor({"strategy.ramp_hold_seconds": "0", "strategy.export_block_threshold_w": "100", "strategy.export_block_hysteresis_w": "50"})
     executor.current_setpoint_w = -400
     executor.tick(ExecutorState(-150, battery_soc=50, current_setpoint_w=-400))
     # Grid swings to import — export block should clear
@@ -157,7 +157,7 @@ def test_export_block_hysteresis_releases_past_clearance():
 
 
 def test_grid_charge_ceiling_hysteresis_stops_at_ceiling():
-    now = datetime(2026, 6, 27, 2, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 2, tzinfo=UTC)
     plan = DayPlan(now.date(), "NORMAL", 2.0, 20, 90, grid_charge_windows=[(now - timedelta(minutes=1), now + timedelta(hours=1))])
     executor, clock = make_executor({"battery.max_charge_w": "1440", "strategy.soc_hysteresis_pct": "2"}, plan)
     clock.now = now

@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -80,7 +80,7 @@ def build_profile_from_rows(
         if power_w is None or bucket_start is None:
             continue
         if bucket_start.tzinfo is None:
-            bucket_start = bucket_start.replace(tzinfo=timezone.utc)
+            bucket_start = bucket_start.replace(tzinfo=UTC)
         slot = slot_of(bucket_start, tz)
         sums[slot] += max(0.0, float(power_w))
         counts[slot] += 1
@@ -102,7 +102,7 @@ async def load_consumption_profile(
     before the first night of operation), so the floor schedule degrades to a
     flat expectation rather than dividing by zero.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     start = now - timedelta(days=lookback_days)
     async with session_factory() as session:
         result = await session.execute(

@@ -3,14 +3,14 @@ import os
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from api import main as api_main
 from api.main import _classify_cloud_cover, build_plan_curves
 
-UTC = timezone.utc
+UTC = UTC
 
 
 def _payload(slots):

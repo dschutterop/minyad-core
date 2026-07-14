@@ -10,9 +10,19 @@ from __future__ import annotations
 from fastapi.responses import HTMLResponse
 
 try:
-    from frontend.assets import AUTO_REFRESH_SCRIPT, BRAND_CSS, LANGUAGE_BOOT_SCRIPT, THEME_BOOT_SCRIPT
+    from frontend.assets import (
+        AUTO_REFRESH_SCRIPT,
+        BRAND_CSS,
+        LANGUAGE_BOOT_SCRIPT,
+        THEME_BOOT_SCRIPT,
+    )
 except ModuleNotFoundError:  # pragma: no cover - exercised by the frontend Docker image layout
-    from assets import AUTO_REFRESH_SCRIPT, BRAND_CSS, LANGUAGE_BOOT_SCRIPT, THEME_BOOT_SCRIPT
+    from assets import (
+        AUTO_REFRESH_SCRIPT,
+        BRAND_CSS,
+        LANGUAGE_BOOT_SCRIPT,
+        THEME_BOOT_SCRIPT,
+    )
 
 
 MENU = ["Dashboard", "Agent", "Health", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]

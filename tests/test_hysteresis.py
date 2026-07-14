@@ -5,8 +5,8 @@ CONTROL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "con
 if CONTROL_DIR not in sys.path:
     sys.path.insert(0, CONTROL_DIR)
 
-from hysteresis import HysteresisController
-from state import ControlState
+from hysteresis import HysteresisController  # noqa: E402,I001 - must follow sys.path setup above
+from state import ControlState  # noqa: E402 - must follow sys.path setup above
 
 
 class FakeClock:

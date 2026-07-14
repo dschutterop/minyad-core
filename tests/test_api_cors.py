@@ -5,7 +5,6 @@ import os
 
 from fastapi.testclient import TestClient
 
-
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://minyad:minyad@localhost:5432/minyad")
 
 

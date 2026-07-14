@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 from types import SimpleNamespace
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -30,9 +31,9 @@ LOGGER = logging.getLogger(__name__)
 
 UTC_OFFSET_SUFFIX = "+00:00"
 
-# Whether the private strategy-v3 package (and therefore the rest of the private deployment --
-# minyad-agent, minyad-trade) is present alongside this public repo. Exposed via /health so the
-# frontend can label itself "Minyad Core" vs "Minyad Plus" without importing strategy internals.
+# Whether the private strategy-v3 package (and therefore the rest of the private deployment)
+# is present alongside this public repo. Exposed via /health so the frontend can label itself
+# "Minyad Core" vs "Minyad Plus" without importing strategy internals.
 PRIVATE_MODULES_AVAILABLE = forecast_contract is not None
 
 MQTT_STATUS_KEYS = {
@@ -253,8 +254,8 @@ def parse_bridge_last_seen(value: str | None) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def enrich_bridge_health(payload: dict[str, Any]) -> None:
@@ -267,7 +268,7 @@ def enrich_bridge_health(payload: dict[str, Any]) -> None:
             payload["available"] = False
         return
 
-    age_seconds = (datetime.now(timezone.utc) - last_seen).total_seconds()
+    age_seconds = (datetime.now(UTC) - last_seen).total_seconds()
     payload["bridge_last_seen_age_seconds"] = max(0, round(age_seconds))
     payload["bridge_last_seen_valid"] = age_seconds <= 60
     if age_seconds > 60:
@@ -287,7 +288,7 @@ def value_is_fresh_iso(value: Any, max_age_seconds: int = 120) -> tuple[bool, in
     parsed = parse_bridge_last_seen(value)
     if parsed is None:
         return False, None
-    age = max(0, round((datetime.now(timezone.utc) - parsed).total_seconds()))
+    age = max(0, round((datetime.now(UTC) - parsed).total_seconds()))
     return age <= max_age_seconds, age
 
 
@@ -345,7 +346,7 @@ def serialize_control_decision(row: Any) -> dict[str, Any]:
     data = dict(row)
     timestamp = data.get("timestamp")
     if timestamp is not None:
-        data["timestamp"] = timestamp.replace(tzinfo=timezone.utc).isoformat()
+        data["timestamp"] = timestamp.replace(tzinfo=UTC).isoformat()
     setpoint = data.get("setpoint_w") or 0
     source = data.get("source") or ""
     discharge_allowed = bool(data.get("discharge_allowed"))
@@ -404,8 +405,8 @@ def parse_status_timestamp(value: Any) -> datetime | None:
         LOGGER.warning("Ignoring invalid status timestamp: %r", value)
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def active_battery_setpoint_w(payload: dict[str, Any]) -> int | None:
@@ -552,7 +553,7 @@ def build_surplus_payload(
     minyad.strategy.v3.forecast_contract). It never fabricates a trajectory or quantiles.
     """
     settings = settings or {}
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or datetime.now(UTC)
     grid_net_w = _numeric_w(grid, "grid_net_power_w")
     grid_import_w = _numeric_w(grid, "grid_delivered_w")
     grid_export_w = _numeric_w(grid, "grid_returned_w")
@@ -589,12 +590,12 @@ def build_surplus_payload(
         if forecast_outcome.validation_status == "invalid":
             LOGGER.warning(
                 "minyad_forecast unavailable: reason=%s model_version=%s now=%s",
-                forecast_outcome.validation_reason, model_version, timestamp.astimezone(timezone.utc).isoformat(),
+                forecast_outcome.validation_reason, model_version, timestamp.astimezone(UTC).isoformat(),
             )
 
     payload = {
         "api_version": SURPLUS_API_VERSION,
-        "timestamp": timestamp.astimezone(timezone.utc).isoformat(),
+        "timestamp": timestamp.astimezone(UTC).isoformat(),
         "surplus_w": remaining_surplus_w,
         "gross_surplus_w": gross_surplus_w,
         "has_surplus": remaining_surplus_w > 0,
@@ -668,10 +669,10 @@ def dashboard_window_bounds(
     now: datetime | None = None,
     period_offset: int | None = None,
 ) -> tuple[datetime, datetime, datetime]:
-    now_ = now or datetime.now(timezone.utc)
+    now_ = now or datetime.now(UTC)
     if now_.tzinfo is None:
-        now_ = now_.replace(tzinfo=timezone.utc)
-    now_ = now_.astimezone(timezone.utc)
+        now_ = now_.replace(tzinfo=UTC)
+    now_ = now_.astimezone(UTC)
     dashboard_tz = ZoneInfo(os.getenv("MINYAD_TIMEZONE", "Europe/Amsterdam"))
     local_now = now_.astimezone(dashboard_tz)
 
@@ -692,8 +693,8 @@ def dashboard_window_bounds(
             local_start = _add_months(local_year, period_offset * 12)
             local_next = _add_months(local_start, 12)
         local_end = local_next - timedelta(seconds=1)
-        start = local_start.astimezone(timezone.utc)
-        end = local_end.astimezone(timezone.utc)
+        start = local_start.astimezone(UTC)
+        end = local_end.astimezone(UTC)
         query_until = min(now_, end)
         return start, end, query_until
 
@@ -702,7 +703,7 @@ def dashboard_window_bounds(
 
     local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     local_end = local_now.replace(hour=23, minute=59, second=59, microsecond=0)
-    return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc), now_
+    return local_start.astimezone(UTC), local_end.astimezone(UTC), now_
 
 
 def _bucket_expr(column: str, seconds: int) -> str:
@@ -714,7 +715,7 @@ def interpolate_points(points: list[dict[str, Any]], step_seconds: int) -> list[
         return points
     parsed = [(datetime.fromisoformat(p["timestamp"].replace("Z", UTC_OFFSET_SUFFIX)), p["power_w"]) for p in points]
     output = []
-    for (left_ts, left_w), (right_ts, right_w) in zip(parsed, parsed[1:]):
+    for (left_ts, left_w), (right_ts, right_w) in pairwise(parsed):
         span = max(1, (right_ts - left_ts).total_seconds())
         cursor = left_ts
         while cursor < right_ts:
@@ -825,7 +826,7 @@ def serialize_agent_message(row: Any) -> dict[str, Any]:
     for key in ("created_at", "read_at", "archived_at", "operator_ack_at", "agent_ack_at"):
         value = data.get(key)
         if value is not None:
-            data[key] = value.replace(tzinfo=timezone.utc).isoformat()
+            data[key] = value.replace(tzinfo=UTC).isoformat()
     return data
 
 
@@ -833,7 +834,7 @@ def serialize_agent_decision(row: Any) -> dict[str, Any]:
     data = dict(row)
     value = data.get("created_at")
     if value is not None:
-        data["created_at"] = value.replace(tzinfo=timezone.utc).isoformat()
+        data["created_at"] = value.replace(tzinfo=UTC).isoformat()
     snapshot = data.get("input_snapshot")
     if isinstance(snapshot, str):
         try:
@@ -849,15 +850,15 @@ def _parse_log_datetime(value: str | None) -> datetime | None:
     normalized = value.replace("Z", UTC_OFFSET_SUFFIX)
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _serialize_log_row(row: Any) -> dict[str, Any]:
     data = dict(row)
     for key, value in list(data.items()):
         if isinstance(value, datetime):
-            data[key] = value.replace(tzinfo=timezone.utc).isoformat()
+            data[key] = value.replace(tzinfo=UTC).isoformat()
         elif isinstance(value, date):
             data[key] = value.isoformat()
     return data

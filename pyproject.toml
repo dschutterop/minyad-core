@@ -13,4 +13,15 @@ preview = true
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["FAST002", "RUF029", "F841", "SIM102"]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "FAST002"]
+ignore = [
+    "E501", # line-too-long: dominated by inline HTML/CSS/JS strings in frontend/*, not a real readability issue
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "RUF069", # float equality assertions against deterministically-computed fixtures are the intended test pattern
+]
+"frontend/*.py" = [
+    "RUF001", # deliberate typography (en-dash, multiplication sign, angle quotes) in user-facing UI copy
+]

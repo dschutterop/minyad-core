@@ -1,11 +1,11 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from minyad.strategy.v2 import DayPlan, ExecutorState, OverrideManager, Settings
 
 
 def plan():
-    return DayPlan(datetime(2026, 6, 27, tzinfo=timezone.utc).date(), "NORMAL", 2.0, 20, 90)
+    return DayPlan(datetime(2026, 6, 27, tzinfo=UTC).date(), "NORMAL", 2.0, 20, 90)
 
 
 def test_force_idle_suppresses_all_setpoints():
@@ -19,7 +19,7 @@ def test_force_idle_suppresses_all_setpoints():
 
 
 def test_pause_auto_expires():
-    current = {"now": datetime(2026, 6, 27, 12, tzinfo=timezone.utc)}
+    current = {"now": datetime(2026, 6, 27, 12, tzinfo=UTC)}
     manager = OverrideManager(Settings(), now=lambda: current["now"])
     asyncio.run(manager.apply_payload({"mode": "pause", "duration_seconds": 10}))
     assert asyncio.run(manager.apply(700, ExecutorState(0, battery_soc=50), plan())) == 0

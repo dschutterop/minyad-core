@@ -8,17 +8,17 @@ import logging
 import os
 import secrets
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from threading import Event, Lock
 from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 from uuid import uuid4
 
+import paho.mqtt.client as paho_mqtt
 from fastapi import Depends, FastAPI, HTTPException, Query, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
-import paho.mqtt.client as paho_mqtt
 from prometheus_client import CollectorRegistry, Counter, Gauge
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -26,9 +26,19 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
-    from api.dryad import DRYAD_CACHE_SECONDS, build_dryad_payload, load_dryad_history, load_dryad_inputs
+    from api.dryad import (
+        DRYAD_CACHE_SECONDS,
+        build_dryad_payload,
+        load_dryad_history,
+        load_dryad_inputs,
+    )
 except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker image layout
-    from dryad import DRYAD_CACHE_SECONDS, build_dryad_payload, load_dryad_history, load_dryad_inputs
+    from dryad import (
+        DRYAD_CACHE_SECONDS,
+        build_dryad_payload,
+        load_dryad_history,
+        load_dryad_inputs,
+    )
 try:
     from api.payload_helpers import (
         BATTERY_DEFAULTS,
@@ -145,7 +155,6 @@ from shared.mqtt_client import MinyadMqttClient
 # Re-exported from api.payload_helpers for backward compatibility: several tests import these
 # names directly via `from api.main import ...` rather than from payload_helpers itself.
 __all__ = [
-    "app",
     "BATTERY_DEFAULTS",
     "GRID_STATUS_KEYS",
     "MINYAD_FORECAST_MODEL_VERSION",
@@ -169,6 +178,7 @@ __all__ = [
     "_strategy_module_unavailable_outcome",
     "_validate_battery_override_limits",
     "active_battery_setpoint_w",
+    "app",
     "battery_curve_power_w",
     "battery_health_component",
     "battery_status_payload",
@@ -252,7 +262,7 @@ SETTING_UPSERT_QUERY = """
 MESSAGE_NOT_FOUND_DETAIL = "message not found"
 TOPIC_CONTROL_OVERRIDE = "minyad/control/override"
 
-STARTUP_AT = datetime.now(timezone.utc)
+STARTUP_AT = datetime.now(UTC)
 MQTT_EVENTS: deque[dict[str, str]] = deque(maxlen=100)
 LAST_RETAINED_FETCH: dict[str, Any] = {}
 TRADE_PRICE_CACHE_LOCK = Lock()
@@ -429,7 +439,7 @@ def handle_status_mqtt(topic: str, payload: bytes) -> None:
     with MQTT_STATUS_LOCK:
         MQTT_STATUS[key] = decoded
     MQTT_EVENTS.append({
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "topic": topic,
         "payload": decoded[:200],
     })
@@ -443,7 +453,7 @@ def latest_mqtt_status() -> dict[str, str]:
 def collect_retained_mqtt_status(timeout_seconds: float = RETAINED_STATUS_TIMEOUT_SECONDS) -> dict[str, str]:
     """Fetch retained status topics directly from MQTT as a startup/cache fallback."""
     global LAST_RETAINED_FETCH
-    attempt_ts = datetime.now(timezone.utc).isoformat()
+    attempt_ts = datetime.now(UTC).isoformat()
     LOGGER.debug(
         "collect_retained_mqtt_status: connecting to %s:%s timeout=%.1fs",
         mqtt.config.host, mqtt.config.port, timeout_seconds,
@@ -562,7 +572,7 @@ def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None
         overall = "ok"
     return {
         "status": overall,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "startup_at": STARTUP_AT.isoformat(),
         "components": components,
     }
@@ -637,7 +647,7 @@ class BatteryOverrideRequest(BaseModel):
     override_soc_limits: bool = False
 
     @model_validator(mode="after")
-    def validate_required_fields(self) -> "BatteryOverrideRequest":
+    def validate_required_fields(self) -> BatteryOverrideRequest:
         if self.mode in {"force_on", "force_charge", "force_discharge"} and self.watts is None:
             raise ValueError("watts is required for force_charge and force_discharge")
         if self.mode == "pause" and self.duration_seconds is None:
@@ -722,6 +732,7 @@ async def publish_battery_mqtt_settings(settings: dict[str, Any] | None = None) 
     for key, topic in MQTT_BATTERY_SETTING_TOPICS.items():
         if key in settings:
             mqtt.client.publish(topic, str(settings[key]), qos=0, retain=True)
+
 
 @app.on_event("startup")
 async def startup() -> None:
@@ -1101,10 +1112,10 @@ async def store_power_curve_point(
     net_w: int | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    timestamp = timestamp or datetime.now(timezone.utc)
+    timestamp = timestamp or datetime.now(UTC)
     if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
-    timestamp = timestamp.astimezone(timezone.utc)
+        timestamp = timestamp.replace(tzinfo=UTC)
+    timestamp = timestamp.astimezone(UTC)
     net_w = power_w if net_w is None else net_w
     await session.execute(
         text("""
@@ -1330,9 +1341,9 @@ async def _dashboard_forecast_curves(
 
     generated_at = plan_row["generated_at"]
     if generated_at.tzinfo is None:
-        generated_at = generated_at.replace(tzinfo=timezone.utc)
+        generated_at = generated_at.replace(tzinfo=UTC)
     plan_generated_at = generated_at.isoformat()
-    is_fresh = generated_at > datetime.now(timezone.utc) - timedelta(minutes=PLAN_STALE_MINUTES)
+    is_fresh = generated_at > datetime.now(UTC) - timedelta(minutes=PLAN_STALE_MINUTES)
     # A FALLBACK plan (solver couldn't produce a real solution, e.g. Open-Meteo was
     # unreachable) is a flat pv_forecast_w=0/load_forecast_w=0 hold — persisted with a fresh
     # generated_at like any other plan, so freshness alone can't tell it apart from a real
@@ -1389,7 +1400,7 @@ async def dashboard_curves(
     series = {"solar": [], "battery": [], "grid": [], "household": []}
     for row in rows:
         series[row["source"]].append({
-            "timestamp": row["ts"].replace(tzinfo=timezone.utc).isoformat(),
+            "timestamp": row["ts"].replace(tzinfo=UTC).isoformat(),
             "power_w": round(float(row["power_w"] or 0)),
             "delivered_w": round(float(row["delivered_w"])) if row["delivered_w"] is not None else None,
             "returned_w": round(float(row["returned_w"])) if row["returned_w"] is not None else None,
@@ -1444,7 +1455,7 @@ async def api_state(session: SessionDep) -> dict[str, Any]:
     grid = await grid_status(session)
     household = await household_status_payload(session, store=False)
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "battery": battery,
         "grid": grid,
         "household": household,
@@ -1474,7 +1485,7 @@ async def api_v1_surplus(session: SessionDep) -> dict[str, Any]:
 
 @app.get("/api/v1/dryad")
 async def api_v1_dryad(session: SessionDep) -> dict[str, Any]:
-    now_ = datetime.now(timezone.utc)
+    now_ = datetime.now(UTC)
     with DRYAD_CACHE_LOCK:
         cached_at = DRYAD_CACHE.get("computed_at")
         cached_payload = DRYAD_CACHE.get("payload")
@@ -1519,7 +1530,7 @@ async def api_surplus(session: SessionDep) -> dict[str, Any]:
 @app.get("/api/forecast")
 async def api_forecast(session: SessionDep, hours_ahead: int = 12) -> dict[str, Any]:
     hours = max(1, min(48, hours_ahead))
-    now_ = datetime.now(timezone.utc)
+    now_ = datetime.now(UTC)
     end = now_ + timedelta(hours=hours)
     plan_row, latest_plan_status = await _current_forecast_plan(session)
     stale_status = _forecast_stale_status(plan_row, latest_plan_status, now_)
@@ -1552,7 +1563,7 @@ async def _current_forecast_plan(session: SessionDep) -> tuple[dict[str, Any] | 
 def _forecast_stale_status(plan_row: dict[str, Any] | None, latest_plan_status: str | None, now_: datetime) -> str | None:
     plan_generated_at = plan_row["generated_at"] if plan_row is not None else None
     if plan_generated_at is not None and plan_generated_at.tzinfo is None:
-        plan_generated_at = plan_generated_at.replace(tzinfo=timezone.utc)
+        plan_generated_at = plan_generated_at.replace(tzinfo=UTC)
     if plan_generated_at is None or plan_generated_at <= now_ - timedelta(minutes=PLAN_STALE_MINUTES):
         if plan_row is None and latest_plan_status == "FALLBACK":
             return "fallback"
@@ -1596,7 +1607,7 @@ async def create_agent_decision(request: AgentDecisionRequest, session: SessionD
         "model": request.model,
     })).mappings().one()
     await session.commit()
-    return {"status": "ok", "id": row["id"], "created_at": row["created_at"].replace(tzinfo=timezone.utc).isoformat()}
+    return {"status": "ok", "id": row["id"], "created_at": row["created_at"].replace(tzinfo=UTC).isoformat()}
 
 
 @app.get("/api/agent/decisions")
@@ -1656,7 +1667,7 @@ async def agent_operational_logs(
     since: Annotated[str | None, Query()] = None,
     until: Annotated[str | None, Query()] = None,
 ) -> dict[str, Any]:
-    until_dt = _parse_log_datetime(until) or datetime.now(timezone.utc)
+    until_dt = _parse_log_datetime(until) or datetime.now(UTC)
     since_dt = _parse_log_datetime(since) or (until_dt - timedelta(hours=hours_lookback))
     if since_dt > until_dt:
         raise HTTPException(status_code=400, detail="since must be before until")
@@ -1791,8 +1802,8 @@ async def current_battery_override(session: AsyncSession) -> dict[str, Any] | No
         return None
     expires_at = row["expires_at"]
     if expires_at is not None:
-        expires_at_utc = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) >= expires_at_utc:
+        expires_at_utc = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
+        if datetime.now(UTC) >= expires_at_utc:
             return None
     return {
         "status": "ok",
@@ -1882,7 +1893,7 @@ async def create_agent_message(request: AgentMessageCreate, session: SessionDep)
         returning id, created_at
     """), request.model_dump())).mappings().one()
     await session.commit()
-    return {"status": "ok", "id": row["id"], "created_at": row["created_at"].replace(tzinfo=timezone.utc).isoformat()}
+    return {"status": "ok", "id": row["id"], "created_at": row["created_at"].replace(tzinfo=UTC).isoformat()}
 
 
 @app.patch("/api/messages/{message_id}/read", dependencies=MUTATION_AUTH, responses={404: {"description": "Not found"}})
@@ -1897,7 +1908,7 @@ async def mark_agent_message_read(message_id: int, session: SessionDep) -> dict[
     if row is None:
         raise HTTPException(status_code=404, detail=MESSAGE_NOT_FOUND_DETAIL)
     await session.commit()
-    return {"status": "ok", "id": row["id"], "read_at": row["read_at"].replace(tzinfo=timezone.utc).isoformat()}
+    return {"status": "ok", "id": row["id"], "read_at": row["read_at"].replace(tzinfo=UTC).isoformat()}
 
 
 @app.patch("/api/messages/{message_id}/archive", dependencies=MUTATION_AUTH, responses={404: {"description": "Not found"}})
@@ -1911,7 +1922,7 @@ async def archive_agent_message(message_id: int, session: SessionDep) -> dict[st
     if row is None:
         raise HTTPException(status_code=404, detail=MESSAGE_NOT_FOUND_DETAIL)
     await session.commit()
-    return {"status": "ok", "id": row["id"], "archived_at": row["archived_at"].replace(tzinfo=timezone.utc).isoformat()}
+    return {"status": "ok", "id": row["id"], "archived_at": row["archived_at"].replace(tzinfo=UTC).isoformat()}
 
 
 @app.patch("/api/messages/{message_id}/ack", dependencies=MUTATION_AUTH, responses={404: {"description": "Not found"}})
@@ -1961,7 +1972,7 @@ async def set_battery_override(request: BatteryOverrideRequest, session: Session
     validation_error = _validate_battery_override_limits(request, mode, soc_value, soc_floor, soc_ceiling, max_allowed_w)
     if validation_error is not None:
         return JSONResponse(status_code=422, content={"detail": validation_error})
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=request.duration_seconds) if request.duration_seconds else None
+    expires_at = datetime.now(UTC) + timedelta(seconds=request.duration_seconds) if request.duration_seconds else None
     await session.execute(
         text("""
             insert into battery_override (id, mode, watts, duration_seconds, expires_at, override_soc_limits, updated_at)

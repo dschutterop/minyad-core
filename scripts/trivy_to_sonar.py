@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 DOCKERFILES = {
     "migrate": "migrate/Dockerfile",
     "ingestion": "ingestion/Dockerfile",

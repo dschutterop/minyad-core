@@ -49,9 +49,9 @@ class ModbusMetrics:
         self.modbus_write_skipped_total += 1
         self.skipped_by_reason[reason] = self.skipped_by_reason.get(reason, 0) + 1
 
+
 def _u16(value: int) -> int:
     return value & 0xFFFF
-
 
 
 class ModbusBackend:

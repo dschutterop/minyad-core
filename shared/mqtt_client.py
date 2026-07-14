@@ -7,7 +7,7 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock, Thread
 from typing import Any
 
@@ -71,7 +71,7 @@ class MinyadMqttClient:
     def _on_connect(self, client: mqtt.Client, _userdata: object, _flags: mqtt.ConnectFlags, reason_code: mqtt.ReasonCode, _properties: mqtt.Properties | None) -> None:
         self._connected = True
         self._connect_count += 1
-        self._last_connect_at = datetime.now(timezone.utc)
+        self._last_connect_at = datetime.now(UTC)
         LOGGER.info("MQTT connected: reason=%s host=%s port=%s connect_count=%d", reason_code, self.config.host, self.config.port, self._connect_count)
         with self._subscriptions_lock:
             subscriptions = list(self._subscriptions)
@@ -82,7 +82,7 @@ class MinyadMqttClient:
     def _on_disconnect(self, _client: mqtt.Client, _userdata: object, _flags: mqtt.DisconnectFlags, reason_code: mqtt.ReasonCode, _properties: mqtt.Properties | None) -> None:
         self._connected = False
         self._disconnect_count += 1
-        self._last_disconnect_at = datetime.now(timezone.utc)
+        self._last_disconnect_at = datetime.now(UTC)
         LOGGER.warning("MQTT disconnected: reason=%s disconnect_count=%d", reason_code, self._disconnect_count)
 
     def _on_message(self, _client: mqtt.Client, _userdata: object, message: mqtt.MQTTMessage) -> None:

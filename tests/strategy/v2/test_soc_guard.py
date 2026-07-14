@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from minyad.strategy.v2 import (
@@ -15,7 +15,7 @@ TZ = ZoneInfo("Europe/Amsterdam")
 
 
 def plan():
-    return DayPlan(datetime(2026, 6, 27, tzinfo=timezone.utc).date(), "NORMAL", 2.0, 20, 90)
+    return DayPlan(datetime(2026, 6, 27, tzinfo=UTC).date(), "NORMAL", 2.0, 20, 90)
 
 
 def test_discharge_blocked_at_floor():
@@ -30,7 +30,7 @@ def test_charge_blocked_at_ceiling():
 
 def test_soc_limit_bypass_keeps_non_soc_guards_active():
     guard = SoCGuard(Settings())
-    now = datetime(2026, 6, 27, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 12, tzinfo=UTC)
     stale = ExecutorState(0, battery_soc=90, bridge_last_seen=now - timedelta(seconds=181))
     assert guard.apply(500, stale, plan(), now, skip_soc_limits=True) == 0
     assert guard.apply(500, ExecutorState(0, battery_soc=90), plan(), now, skip_soc_limits=True) == 500
@@ -38,7 +38,7 @@ def test_soc_limit_bypass_keeps_non_soc_guards_active():
 
 def test_bridge_stale_suppresses_setpoint():
     guard = SoCGuard(Settings())
-    now = datetime(2026, 6, 27, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 12, tzinfo=UTC)
     state = ExecutorState(0, battery_soc=50, bridge_last_seen=now - timedelta(seconds=181))
     assert guard.apply(500, state, plan(), now) == 0
     adjusted, reason = guard.apply_with_reason(500, state, plan(), now)
@@ -48,14 +48,14 @@ def test_bridge_stale_suppresses_setpoint():
 
 def test_bridge_stale_guard_tolerates_goodwe_poll_interval():
     guard = SoCGuard(Settings())
-    now = datetime(2026, 6, 27, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 12, tzinfo=UTC)
     state = ExecutorState(0, battery_soc=50, bridge_last_seen=now - timedelta(seconds=120))
     assert guard.apply(500, state, plan(), now) == 500
 
 
 def test_bridge_stale_seconds_comes_from_poll_interval_plus_grace():
     guard = SoCGuard(Settings(initial={"battery.inverter_poll_interval_s": "90", "battery.goodwe_poll_interval_grace_s": "15"}))
-    now = datetime(2026, 6, 27, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 27, 12, tzinfo=UTC)
     fresh = ExecutorState(0, battery_soc=50, bridge_last_seen=now - timedelta(seconds=105))
     stale = ExecutorState(0, battery_soc=50, bridge_last_seen=now - timedelta(seconds=106))
     assert guard.apply(500, fresh, plan(), now) == 500

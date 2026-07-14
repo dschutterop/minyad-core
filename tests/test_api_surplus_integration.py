@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
@@ -25,7 +25,8 @@ def _require_forecast_contract():
         reason="private strategy package not present in a standalone Minyad Core checkout",
     )
 
-UTC = timezone.utc
+
+UTC = UTC
 
 
 def _aligned_now() -> datetime:

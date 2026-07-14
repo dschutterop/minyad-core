@@ -1,8 +1,8 @@
+import asyncio
 import importlib.util
 import os
 import sys
-import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -70,7 +70,7 @@ def test_agent_hold_preserves_active_manual_battery_override():
                 "mode": "force_discharge",
                 "watts": 900,
                 "duration_seconds": 900,
-                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+                "expires_at": datetime.now(UTC) + timedelta(minutes=10),
                 "override_soc_limits": True,
             }
 

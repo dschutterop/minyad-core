@@ -14,7 +14,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-
 EXPECTED_FIELDS = {
     "ts",
     "autarky",

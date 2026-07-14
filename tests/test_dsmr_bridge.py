@@ -1,8 +1,9 @@
-import importlib.util
 import asyncio
+import importlib.util
 import sys
 import types
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -30,7 +31,7 @@ class FakePublishResult:
 
 
 class FakeMqttClient:
-    instances = []
+    instances: ClassVar[list] = []
 
     def __init__(self, *args, **kwargs):
         self.args = args

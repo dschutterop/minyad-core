@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -64,15 +64,17 @@ async def fetch_solar_forecast() -> list[dict]:
                 await asyncio.sleep(delay)
     hourly = data["hourly"]
     points = []
+    # strict=False: a missing Open-Meteo field intentionally truncates rather than crashing
     for forecast_time, direct, diffuse, shortwave in zip(
         hourly["time"],
         hourly.get("direct_radiation", []),
         hourly.get("diffuse_radiation", []),
         hourly.get("shortwave_radiation", []),
+        strict=False,
     ):
         direct_value = float(direct or 0)
         diffuse_value = float(diffuse if diffuse is not None else max(0, float(shortwave or 0) - direct_value))
-        forecast_dt = datetime.fromisoformat(forecast_time).replace(tzinfo=ZoneInfo("Europe/Amsterdam")).astimezone(timezone.utc)
+        forecast_dt = datetime.fromisoformat(forecast_time).replace(tzinfo=ZoneInfo("Europe/Amsterdam")).astimezone(UTC)
         points.append({
             "forecast_time": forecast_dt,
             "direct_w_m2": direct_value,
@@ -83,7 +85,7 @@ async def fetch_solar_forecast() -> list[dict]:
 
 
 async def persist_forecast(points: list[dict]) -> None:
-    fetched_at = datetime.now(timezone.utc)
+    fetched_at = datetime.now(UTC)
     async with AsyncSessionLocal() as session:
         for point in points:
             await session.execute(

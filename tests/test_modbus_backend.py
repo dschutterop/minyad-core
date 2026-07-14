@@ -3,6 +3,7 @@ import importlib
 import sys
 import types
 from pathlib import Path
+from typing import ClassVar
 
 
 class Result:
@@ -15,7 +16,7 @@ class Result:
 
 
 class FakeModbusClient:
-    instances = []
+    instances: ClassVar[list] = []
 
     def __init__(self, *args, **kwargs):
         self.connected = False

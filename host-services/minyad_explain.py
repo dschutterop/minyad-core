@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import json
 import os
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -47,6 +48,7 @@ SETTING_KEYS = (
     "battery.soc_ceiling",
     "strategy.grid_target_w",
 )
+
 
 @dataclass(frozen=True)
 class Window:
@@ -111,10 +113,8 @@ def source_defaults() -> dict[str, Any]:
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                try:
+                with contextlib.suppress(Exception):
                     defaults[node.targets[0].id] = ast.literal_eval(node.value)
-                except Exception:
-                    pass
     return defaults
 
 
@@ -135,7 +135,7 @@ def load_decisions(cur, start: datetime, end: datetime) -> list[dict[str, Any]]:
           from setpoint_log
          where timestamp >= %s and timestamp < %s
          order by timestamp asc
-    """, (start.astimezone(timezone.utc), end.astimezone(timezone.utc)))
+    """, (start.astimezone(UTC), end.astimezone(UTC)))
     rows = cur.fetchall()
     prev = None
     out = []
@@ -165,7 +165,7 @@ def forecast_remaining_kwh(cur, ts: datetime) -> float | None:
     cols = get_columns(cur, "solar_forecast_points")
     tcol = "forecast_time" if "forecast_time" in cols else "timestamp"
     wcol = "estimated_w" if "estimated_w" in cols else "power_w"
-    local_end = ts.astimezone(LOCAL_TZ).replace(hour=23, minute=59, second=59, microsecond=0).astimezone(timezone.utc)
+    local_end = ts.astimezone(LOCAL_TZ).replace(hour=23, minute=59, second=59, microsecond=0).astimezone(UTC)
     cur.execute(f"select coalesce(sum({wcol}),0) as wh from solar_forecast_points where {tcol} >= %s and {tcol} <= %s", (ts, local_end))
     # Forecast points are hourly in current forecast service; convert W samples to rough kWh.
     val = cur.fetchone()["wh"]
@@ -187,18 +187,20 @@ def _resolve_grid_power(cur, row: dict[str, Any], ts: datetime) -> float | None:
     gp = nearest(cur, "power_curve_points", ts, "grid")
     return gp and (gp.get("net_w") if "net_w" in gp else gp.get("power_w"))
 
+
 def _explain_line_parts(row: dict[str, Any], remaining: float | None, grid: float | None) -> list[str]:
     parts = [f"SoC {row['battery_soc_at_time']:.0f}%" if row.get("battery_soc_at_time") is not None else "SoC unknown"]
     if remaining is not None:
         parts.append(f"solar forecast +{remaining:.1f}kWh remaining")
     if grid is not None:
         if grid < 0:
-            parts.append(f"grid export {abs(grid)/1000:.1f}kW idle")
+            parts.append(f"grid export {abs(grid) / 1000:.1f}kW idle")
         elif grid > 0:
-            parts.append(f"grid import {grid/1000:.1f}kW")
+            parts.append(f"grid import {grid / 1000:.1f}kW")
         else:
             parts.append("grid balanced")
     return parts
+
 
 def explain_line(cur, row: dict[str, Any], verbose: bool = False) -> dict[str, Any]:
     ts = row["timestamp"]
@@ -229,11 +231,12 @@ def summary(rows: list[dict[str, Any]], end: datetime) -> dict[str, Any]:
         seconds[mode] += dur
         if mode == "discharge":
             avoided_wh += int(r["setpoint_w"] or 0) * dur / 3600
-    return {"cycle_counts": cycles, "time_in_mode_seconds": seconds, "avg_soc_swing_pct": (max(socs)-min(socs) if socs else None), "estimated_grid_import_avoided_kwh": avoided_wh/1000}
+    return {"cycle_counts": cycles, "time_in_mode_seconds": seconds, "avg_soc_swing_pct": (max(socs) - min(socs) if socs else None), "estimated_grid_import_avoided_kwh": avoided_wh / 1000}
 
 
 def thresholds(settings: dict[str, str]) -> dict[str, Any]:
     d = source_defaults()
+
     def val(key: str, default_name: str, fallback: Any) -> Any:
         return settings.get(key, d.get(default_name, fallback))
     return {
@@ -265,6 +268,7 @@ def _parse_args() -> argparse.Namespace:
         p.error("--range is required unless --why is used")
     return args
 
+
 def _resolve_window(cur, args: argparse.Namespace) -> Window | None:
     if not args.why:
         return parse_window(args.range_)
@@ -274,12 +278,14 @@ def _resolve_window(cur, args: argparse.Namespace) -> Window | None:
         return None
     return Window(bounds["last"] - timedelta(seconds=1), bounds["last"] + timedelta(seconds=1), "most recent")
 
+
 def _build_payload(args: argparse.Namespace, rows: list[dict[str, Any]], explained: list[dict[str, Any]], win: Window, settings: dict[str, str]) -> Any:
     if args.summary:
-        return summary(rows, win.end.astimezone(timezone.utc))
+        return summary(rows, win.end.astimezone(UTC))
     if args.why:
         return explained[-1] | {"thresholds_and_weights": thresholds(settings)}
     return explained
+
 
 def _print_payload(args: argparse.Namespace, payload: Any, explained: list[dict[str, Any]]) -> None:
     if args.format == "json":
@@ -287,12 +293,13 @@ def _print_payload(args: argparse.Namespace, payload: Any, explained: list[dict[
     elif args.format == "table":
         print("TIME                 OLD→NEW W  MODE       SOC   GRID W  EXPLANATION")
         for e in explained:
-            print(f"{e['timestamp'][:19]:19} {str(e['old_setpoint_w']):>4}→{e['setpoint_w']:<5} {e['direction']:<10} {str(e['soc']):>5} {str(e['grid_power_w']):>7}  {e['text']}")
+            print(f"{e['timestamp'][:19]:19} {e['old_setpoint_w']!s:>4}→{e['setpoint_w']:<5} {e['direction']:<10} {e['soc']!s:>5} {e['grid_power_w']!s:>7}  {e['text']}")
     elif isinstance(payload, dict):
         print(json.dumps(payload, indent=2, default=str) if args.summary else payload["text"] + "\n" + json.dumps(payload["thresholds_and_weights"], indent=2))
     else:
         for e in explained:
             print(e["text"])
+
 
 def main() -> None:
     args = _parse_args()
@@ -309,6 +316,7 @@ def main() -> None:
         explained = [explain_line(cur, r, args.verbose or args.why) for r in rows]
         payload = _build_payload(args, rows, explained, win, settings)
         _print_payload(args, payload, explained)
+
 
 if __name__ == "__main__":
     main()

@@ -6,14 +6,21 @@ import asyncio
 import json
 import logging
 import os
-from datetime import timezone
+from datetime import UTC
 
-from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, start_http_server
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    start_http_server,
+)
 from sensors.dsmr import P1Reader
+from sqlalchemy import text
+
 from shared.db import AsyncSessionLocal
 from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
-from sqlalchemy import text
 
 configure_container_logging(logging.INFO)
 LOGGER = logging.getLogger(__name__)
@@ -81,8 +88,8 @@ async def main() -> None:
         with WRITE_DURATION_SECONDS.time():
             try:
                 if timestamp.tzinfo is None:
-                    timestamp = timestamp.replace(tzinfo=timezone.utc)
-                timestamp = timestamp.astimezone(timezone.utc)
+                    timestamp = timestamp.replace(tzinfo=UTC)
+                timestamp = timestamp.astimezone(UTC)
                 bucket_start = timestamp.replace(second=0, microsecond=0)
                 async with AsyncSessionLocal() as session:
                     await session.execute(
@@ -128,7 +135,7 @@ async def main() -> None:
     def publish_update(net_power_w: int, per_phase_w: dict, timestamp, delivered_w: int, returned_w: int) -> None:
         sample_timestamp = timestamp
         if sample_timestamp.tzinfo is None:
-            sample_timestamp = sample_timestamp.replace(tzinfo=timezone.utc)
+            sample_timestamp = sample_timestamp.replace(tzinfo=UTC)
         SAMPLES_TOTAL.labels(source="dsmr").inc()
         LAST_SAMPLE_TIMESTAMP_SECONDS.labels(source="dsmr").set(sample_timestamp.timestamp())
         mqtt.publish_measurement("dsmr", "net_power_w", net_power_w)

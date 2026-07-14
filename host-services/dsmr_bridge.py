@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import paho.mqtt.client as mqtt
-from prometheus_client import CollectorRegistry, Counter, Gauge, start_http_server
 from dotenv import load_dotenv
+from prometheus_client import CollectorRegistry, Counter, Gauge, start_http_server
 
 load_dotenv()
 
@@ -45,6 +45,7 @@ def start_metrics_server() -> None:
     BUILD_INFO.labels(version=VERSION).set(1)
     start_http_server(METRICS_PORT, addr=METRICS_ADDR, registry=PROMETHEUS_REGISTRY)
     logger.info("Prometheus metrics listening on %s:%s", METRICS_ADDR, METRICS_PORT)
+
 
 PRIMARY_DELIVERED = "electricity_currently_delivered"
 PRIMARY_RETURNED = "electricity_currently_returned"
@@ -106,7 +107,7 @@ class Config:
     log_level: str
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         dsmr_mqtt_host = os.getenv("DSMR_MQTT_BROKER") or os.getenv("DSMR_MQTT_HOST")
         if not dsmr_mqtt_host:
             raise ValueError("DSMR_MQTT_BROKER is required")

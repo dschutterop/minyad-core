@@ -4,20 +4,21 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import re
 import signal
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import paho.mqtt.client as mqtt
-from prometheus_client import CollectorRegistry, Counter, Gauge, start_http_server
 import requests
 import urllib3
 from dotenv import load_dotenv
+from prometheus_client import CollectorRegistry, Counter, Gauge, start_http_server
 
 load_dotenv()
 
@@ -111,7 +112,7 @@ class Config:
     log_level: str
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         mqtt_host = os.getenv("MQTT_BROKER") or os.getenv("MQTT_HOST")
         if not mqtt_host:
             raise ValueError("MQTT_BROKER is required")
@@ -144,7 +145,7 @@ def configure_logging(level: str) -> None:
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def unix_to_iso(value: object) -> str:
@@ -152,7 +153,7 @@ def unix_to_iso(value: object) -> str:
         timestamp = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return utc_now_iso()
-    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
+    return datetime.fromtimestamp(timestamp, UTC).isoformat()
 
 
 def slugify_array_name(name: object) -> str:
@@ -197,7 +198,6 @@ class EnvoyClient:
         return [item for item in data if isinstance(item, dict)]
 
 
-
 def production_w_from_payload(data: dict[str, Any], fallback: int | None = None) -> int | None:
     if "productionW" not in data or data.get("productionW") in (None, ""):
         return fallback
@@ -220,6 +220,7 @@ def summarize_inverter_production(inverters: list[dict[str, Any]]) -> tuple[dict
         )
         array_totals[array_name] = array_totals.get(array_name, 0) + watts
     return array_totals, sum(array_totals.values()), latest_report_at
+
 
 def set_production_limit(watts: int) -> None:
     """Future hook for Enphase production curtailment."""
@@ -305,7 +306,7 @@ class EnphaseBridge:
                     self.publish(MQTT_TOPIC_PRODUCTION_W, production_w)
                     self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, updated_at)
                 self.publish_bridge_alive()
-                LAST_SUCCESS_TIMESTAMP_SECONDS.set(datetime.now(timezone.utc).timestamp())
+                LAST_SUCCESS_TIMESTAMP_SECONDS.set(datetime.now(UTC).timestamp())
                 logger.info("Production poll production_w=%s updated_at=%s", production_w, updated_at)
                 backoff = 1
             except EnvoyAuthError as exc:
@@ -322,10 +323,8 @@ class EnphaseBridge:
                 logger.warning("Production poll failed; retrying in %ss: %s", interval, exc, exc_info=True)
                 self.publish_bridge_error()
 
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.shutdown_event.wait(), timeout=interval)
-            except asyncio.TimeoutError:
-                pass
 
     async def _poll_inverters_once(self) -> None:
         inverters = await self.envoy.read_inverters()
@@ -344,7 +343,7 @@ class EnphaseBridge:
         self.publish(MQTT_TOPIC_PRODUCTION_W, total_production_w)
         self.publish(MQTT_TOPIC_PRODUCTION_UPDATED_AT, unix_to_iso(latest_report_at))
         self.publish_bridge_alive()
-        LAST_SUCCESS_TIMESTAMP_SECONDS.set(datetime.now(timezone.utc).timestamp())
+        LAST_SUCCESS_TIMESTAMP_SECONDS.set(datetime.now(UTC).timestamp())
         logger.info(
             "Inverter poll inverter_count=%s arrays=%s total_production_w=%s",
             len(inverters),
@@ -373,10 +372,8 @@ class EnphaseBridge:
                 logger.warning("Inverter poll failed; retrying in %ss: %s", interval, exc, exc_info=True)
                 self.publish_bridge_error()
 
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.shutdown_event.wait(), timeout=interval)
-            except asyncio.TimeoutError:
-                pass
 
     async def run(self) -> None:
         self.mqtt_client.connect_async(self.config.mqtt_host, self.config.mqtt_port, keepalive=60)

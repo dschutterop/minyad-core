@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from api.dryad import (
     build_dryad_payload,
@@ -44,7 +44,7 @@ def test_autarky_prefers_existing_household_curve_when_available() -> None:
 
 
 def test_trajectory_deviation_interpolates_plan_and_clamps() -> None:
-    now = datetime(2026, 7, 7, 12, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 7, 12, 30, tzinfo=UTC)
     plan = {
         "valid_from": "2026-07-07T12:00:00+00:00",
         "slot_seconds": 3600,
@@ -90,7 +90,7 @@ def test_soc_fraction_clamps_full_battery() -> None:
 
 
 def test_build_dryad_payload_marks_stale_soc_as_null() -> None:
-    now = datetime(2026, 7, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 7, 12, 0, tzinfo=UTC)
     payload = build_dryad_payload(
         now=now,
         mqtt_status={"soc": 80, "bridge_last_seen": (now - timedelta(minutes=10)).isoformat()},
@@ -103,7 +103,7 @@ def test_build_dryad_payload_marks_stale_soc_as_null() -> None:
 
 
 def test_build_dryad_payload_keeps_empty_dispatch_queue_perfect() -> None:
-    now = datetime(2026, 7, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 7, 12, 0, tzinfo=UTC)
     payload = build_dryad_payload(
         now=now,
         mqtt_status={},
@@ -116,7 +116,7 @@ def test_build_dryad_payload_keeps_empty_dispatch_queue_perfect() -> None:
 
 
 def test_build_dryad_payload_marks_missing_soc_value_stale() -> None:
-    now = datetime(2026, 7, 7, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 7, 12, 0, tzinfo=UTC)
     payload = build_dryad_payload(
         now=now,
         mqtt_status={"bridge_last_seen": now.isoformat()},
@@ -129,6 +129,6 @@ def test_build_dryad_payload_marks_missing_soc_value_stale() -> None:
 
 
 def test_history_rows_to_daily_returns_kwh() -> None:
-    rows = [{"day": datetime(2026, 7, 7, tzinfo=timezone.utc).date(), "generated_wh": 12_345}]
+    rows = [{"day": datetime(2026, 7, 7, tzinfo=UTC).date(), "generated_wh": 12_345}]
 
     assert history_rows_to_daily(rows) == [{"date": "2026-07-07", "solar_kwh": 12.345}]

@@ -6,20 +6,20 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from inspect import signature
 from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from hysteresis import HysteresisController, OverrideMode
 from prometheus_client import CollectorRegistry, Counter, Gauge, start_http_server
 from sqlalchemy import text
+from state import ControlState
 
-from hysteresis import HysteresisController, OverrideMode
 from shared.db import AsyncSessionLocal
 from shared.logging_utils import configure_container_logging
 from shared.mqtt_client import MinyadMqttClient
-from state import ControlState
 
 configure_container_logging(getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
 LOGGER = logging.getLogger(__name__)
@@ -189,7 +189,7 @@ class ControlApp:
         timeout = float(os.getenv("BRIDGE_INITIAL_HEALTH_TIMEOUT_SECONDS", "5"))
         try:
             await asyncio.wait_for(self.bridge_health_event.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             LOGGER.warning(
                 "Timed out waiting %.1fs for retained GoodWe bridge health; starting with status=%s",
                 timeout,
@@ -390,13 +390,13 @@ class ControlApp:
         except ValueError:
             return None
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
 
     def bridge_last_seen_age_seconds(self) -> float | None:
         if self.bridge_last_seen is None:
             return None
-        return (datetime.now(timezone.utc) - self.bridge_last_seen).total_seconds()
+        return (datetime.now(UTC) - self.bridge_last_seen).total_seconds()
 
     def refresh_bridge_last_seen_from_battery_telemetry(self) -> bool:
         """Treat live GoodWe battery telemetry as bridge liveness.
@@ -411,7 +411,7 @@ class ControlApp:
             return False
         if self.bridge_last_seen_error is None and self.bridge_is_available:
             return False
-        self.bridge_last_seen = datetime.now(timezone.utc)
+        self.bridge_last_seen = datetime.now(UTC)
         self.bridge_last_seen_raw = self.bridge_last_seen.isoformat()
         self.bridge_last_seen_error = None
         LOGGER.info(

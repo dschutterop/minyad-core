@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta
+from itertools import pairwise
 from zoneinfo import ZoneInfo
 
 from minyad.strategy.v2 import ConsumptionProfile, build_floor_schedule, night_horizon
@@ -13,7 +14,7 @@ def night_profile() -> ConsumptionProfile:
     slot_watts: dict[int, float] = {}
     for slot in range(SLOTS_PER_DAY):
         hour = (slot * 15) // 60
-        if 21 <= hour or hour < 1:
+        if hour >= 21 or hour < 1:
             slot_watts[slot] = 700.0  # evening cooking/lights
         elif 1 <= hour < 7:
             slot_watts[slot] = 300.0  # overnight trough
@@ -52,7 +53,7 @@ def test_normal_night_drift_near_one_and_monotone_glide():
     # Actual tracks expected, so drift collapses to ~1.0.
     assert abs(schedule.drift_factor - 1.0) < 1e-6
     # Floor glides down monotonically...
-    assert all(b <= a + 1e-9 for a, b in zip(floors, floors[1:]))
+    assert all(b <= a + 1e-9 for a, b in pairwise(floors))
     # ...starting well above the hard floor and ending exactly on it.
     assert floors[0] > 60.0
     assert abs(floors[-1] - 20.0) < 1e-6
@@ -114,10 +115,10 @@ def test_june_29_to_30_winds_down_instead_of_cliffing():
 
     floors = list(curve.values())
     # Monotone non-increasing: a descending staircase, never a step back up.
-    assert all(b <= a + 1e-9 for a, b in zip(floors, floors[1:]))
+    assert all(b <= a + 1e-9 for a, b in pairwise(floors))
     # No cliff: the largest single 15-minute drop stays gentle, unlike the
     # static floor's instant 0%->full discharge block.
-    max_drop = max(a - b for a, b in zip(floors, floors[1:]))
+    max_drop = max(a - b for a, b in pairwise(floors))
     assert max_drop < 6.0
 
     # At 03:30 — where the static floor cliffed — the dynamic floor sits between

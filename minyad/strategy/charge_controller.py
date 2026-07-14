@@ -11,7 +11,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from threading import Event, Lock
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -120,7 +120,7 @@ class ChargeController:
     ) -> None:
         self.mqtt = mqtt or MinyadMqttClient("minyad-strategy")
         self.db_session_factory = db_session_factory if db_session_factory is not None else AsyncSessionLocal
-        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._now = now or (lambda: datetime.now(UTC))
         self.ack_timeout_seconds = ack_timeout_seconds
         self.debounce_seconds = debounce_seconds
         self.jitter_w = jitter_w
@@ -247,7 +247,7 @@ class ChargeController:
             raise ValueError("override floor must be lower than ceiling")
         if expires_at > self._now() + timedelta(hours=24):
             expires_at = self._now() + timedelta(hours=24)
-        mode = ModeConfig(MODE_MANUAL_OVERRIDE, floor, ceiling, self._max_charge_w_sync(), "manual override activated", expires_at.astimezone(timezone.utc), None)
+        mode = ModeConfig(MODE_MANUAL_OVERRIDE, floor, ceiling, self._max_charge_w_sync(), "manual override activated", expires_at.astimezone(UTC), None)
         self._last_mode = mode
         self._store_active_mode_sync(mode)
         self._insert_strategy_decision_sync(mode, applied=False)
@@ -282,7 +282,6 @@ class ChargeController:
         response.raise_for_status()
         watts_per_m2 = response.json().get("hourly", {}).get("shortwave_radiation", [])
         return round(sum(float(v) for v in watts_per_m2) / 1000, 3)
-
 
     def _held_ramp_delta(self, raw_delta: int) -> tuple[int, str]:
         """Apply import/export hysteresis before changing inverter setpoint.
@@ -327,12 +326,12 @@ class ChargeController:
         if floor >= ceiling:
             floor = DEFAULT_SOC_FLOOR
             ceiling = DEFAULT_SOC_CEILING
-        return ModeConfig(mode.mode, floor, ceiling, mode.charge_rate_w, mode.reason, mode.valid_until.astimezone(timezone.utc), mode.forecast_ghi)
+        return ModeConfig(mode.mode, floor, ceiling, mode.charge_rate_w, mode.reason, mode.valid_until.astimezone(UTC), mode.forecast_ghi)
 
     def _end_of_next_local_day(self) -> datetime:
         local = self._now().astimezone(AMSTERDAM) + timedelta(days=1)
         end = datetime(local.year, local.month, local.day, 23, 59, 59, tzinfo=AMSTERDAM)
-        return end.astimezone(timezone.utc)
+        return end.astimezone(UTC)
 
     @staticmethod
     def _coerce_payload(value: str) -> Any:
@@ -350,7 +349,7 @@ class ChargeController:
     @staticmethod
     def _w_from_any(value: Any) -> int:
         numeric = float(value or 0)
-        return int(round(numeric * 1000)) if abs(numeric) < 100 else int(round(numeric))
+        return round(numeric * 1000) if abs(numeric) < 100 else round(numeric)
 
     def _battery_power_w_locked(self) -> int:
         for key in ("power_w", "battery_power", "battery_power_w"):
@@ -380,6 +379,7 @@ class ChargeController:
             return default
         try:
             import asyncio
+
             async def read_setting() -> float:
                 async with self.db_session_factory() as session:
                     result = await session.execute(text("select value from settings where key=:key"), {"key": key})
@@ -396,6 +396,7 @@ class ChargeController:
             return None
         try:
             import asyncio
+
             async def read_active() -> ModeConfig | None:
                 async with self.db_session_factory() as session:
                     result = await session.execute(text("select key, value from settings where key like 'strategy.active.%'"))
@@ -436,6 +437,7 @@ class ChargeController:
             return
         try:
             import asyncio
+
             async def write_active() -> None:
                 values = self._mode_payload(mode) | {"charge_rate_w": mode.charge_rate_w}
                 async with self.db_session_factory() as session:
@@ -457,6 +459,7 @@ class ChargeController:
             return
         try:
             import asyncio
+
             async def insert_row() -> None:
                 async with self.db_session_factory() as session:
                     await session.execute(text("""
@@ -483,6 +486,7 @@ class ChargeController:
             return
         try:
             import asyncio
+
             async def insert_row() -> None:
                 async with self.db_session_factory() as session:
                     await session.execute(text("""

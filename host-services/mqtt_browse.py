@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import paho.mqtt.client as mqtt
 
@@ -30,7 +30,7 @@ def main() -> None:
         client.subscribe(args.topic)
 
     def on_message(_client, _userdata, message: mqtt.MQTTMessage) -> None:
-        ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+        ts = datetime.now(UTC).strftime("%H:%M:%S.%f")[:-3]
         topic = message.topic
         payload = message.payload.decode(errors="replace")
         retain = " [retained]" if message.retain else ""

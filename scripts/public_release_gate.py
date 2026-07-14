@@ -10,7 +10,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 PRIVATE_PATHS = (
@@ -69,7 +68,7 @@ CONTENT_ALLOWLIST: dict[tuple[str, str], str] = {
         "          and source in ('strategy_v3', 'strategy_v2', 'kairos', 'vesper')",
     ): "Real 'source' tags the private planner/agent write to setpoint_log; renaming breaks dispatch_hitrate.",
     (
-        "api/main.py",
+        "api/payload_helpers.py",
         '    elif source in {"strategy_v2", "strategy_v3", "goodwe_bridge"}:',
     ): "Real 'source' tag matching for sign-convention lookup; must match what the private planner writes.",
     (
@@ -105,8 +104,7 @@ def run_git(args: list[str]) -> str:
         cwd=ROOT,
         check=True,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     return result.stdout
 

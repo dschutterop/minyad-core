@@ -3,7 +3,6 @@ import json
 import sys
 from pathlib import Path
 
-
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "trivy_to_sonar.py"
 spec = importlib.util.spec_from_file_location("trivy_to_sonar", MODULE_PATH)
 trivy_to_sonar = importlib.util.module_from_spec(spec)

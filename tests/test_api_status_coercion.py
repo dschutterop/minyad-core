@@ -2,7 +2,12 @@ import os
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
-from api.main import coerce_float_status_value, coerce_grid_status, coerce_int_status_value, parse_status_timestamp
+from api.main import (
+    coerce_float_status_value,
+    coerce_grid_status,
+    coerce_int_status_value,
+    parse_status_timestamp,
+)
 
 
 def test_status_numeric_coercion_keeps_invalid_values():
@@ -54,6 +59,7 @@ def test_cache_complete_with_goodwe_battery_topics_without_optional_legacy_field
 
 def test_grid_status_stores_solar_curve_point(monkeypatch):
     import asyncio
+
     from api import main as api_main
 
     stored = []

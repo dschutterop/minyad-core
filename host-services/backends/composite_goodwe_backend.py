@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+
 from .base import BatteryTelemetry, InverterBackend, InverterState
 
 logger = logging.getLogger("goodwe_bridge")
