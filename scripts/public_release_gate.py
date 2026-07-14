@@ -54,6 +54,50 @@ ALLOWLIST_PATHS = {
     Path("scripts/public_release_gate.py"),
 }
 
+# Reviewed and explicitly accepted line-level exceptions to check_file_contents(). Every entry
+# here is either real interop data the private services actually write/read (renaming it here
+# would break that interop for no privacy benefit) or an unavoidable side effect of what a test
+# is verifying. Keyed on exact line text rather than line number so an edit to the line drops
+# the exemption and forces a fresh review instead of silently carrying it forward.
+CONTENT_ALLOWLIST: dict[tuple[str, str], str] = {
+    (
+        "README.md",
+        "- Trading, day-ahead pricing, and ENTSO-E integrations.",
+    ): "This repo's own \"Not included\" list -- states ENTSO-E integration isn't here, doesn't leak anything.",
+    (
+        "api/dryad.py",
+        "          and source in ('strategy_v3', 'strategy_v2', 'kairos', 'vesper')",
+    ): "Real 'source' tags the private planner/agent write to setpoint_log; renaming breaks dispatch_hitrate.",
+    (
+        "api/main.py",
+        '    elif source in {"strategy_v2", "strategy_v3", "goodwe_bridge"}:',
+    ): "Real 'source' tag matching for sign-convention lookup; must match what the private planner writes.",
+    (
+        "tests/test_agent_dashboard.py",
+        "def test_serialize_control_decision_labels_strategy_v3_signs() -> None:",
+    ): "Test name for the case below; renaming the tag would test the wrong thing.",
+    (
+        "tests/test_agent_dashboard.py",
+        '            "source": "strategy_v3",',
+    ): "Test fixture exercising the real strategy_v3 source tag.",
+    (
+        "tests/test_api_settings_endpoints.py",
+        '    row = {"setpoint_w": 0, "discharge_allowed": False, "source": "strategy_v3"}',
+    ): "Test fixture exercising the real strategy_v3 source tag.",
+    (
+        "tests/test_api_settings_endpoints.py",
+        '    row = {"setpoint_w": 0, "discharge_allowed": True, "source": "strategy_v3"}',
+    ): "Test fixture exercising the real strategy_v3 source tag.",
+    (
+        "tests/test_api_settings_endpoints.py",
+        '    row = {"setpoint_w": 500, "discharge_allowed": False, "source": "strategy_v3"}',
+    ): "Test fixture exercising the real strategy_v3 source tag.",
+    (
+        "tests/test_api_pure_helpers.py",
+        '@pytest.mark.parametrize("value", ["192.0.2", "203.0.113.256", "not.an.ip.addr", "1.2.3.4.5", ""])',
+    ): "203.0.113.256 is deliberately invalid (octet 256) to test IPv4 rejection; any such value fails ipaddress parsing regardless of prefix.",
+}
+
 
 def run_git(args: list[str]) -> str:
     result = subprocess.run(
@@ -130,6 +174,9 @@ def check_file_contents(files: list[Path], failures: list[str]) -> None:
             continue
 
         for line_no, line in enumerate(text.splitlines(), start=1):
+            if (path.as_posix(), line) in CONTENT_ALLOWLIST:
+                continue
+
             for reference in PRIVATE_REFERENCES:
                 if reference in line:
                     add_failure(failures, "private reference", f"{path}:{line_no}: {reference}")
