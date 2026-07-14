@@ -175,7 +175,7 @@ jobs:
           echo "PYTHON_BIN=python3.12" >> "${GITHUB_ENV}"
 
       - name: Install lint dependencies
-        run: "${PYTHON_BIN} -m pip install --user --upgrade pip ruff"
+        run: "${PYTHON_BIN} -m pip install --user --upgrade pip ruff pyright"
 
       - name: Download coverage report
         uses: actions/download-artifact@v4
@@ -202,6 +202,12 @@ jobs:
 
       - name: Run linters
         run: ${PYTHON_BIN} -m ruff check --fix --unsafe-fixes .
+
+      - name: Run type checker (report-only)
+        # Non-blocking until the pre-existing backlog (documented in pyproject.toml's
+        # [tool.pyright] section) is triaged down to zero; flip to a hard failure then.
+        continue-on-error: true
+        run: ${PYTHON_BIN} -m pyright
 
       - name: Load SonarQube environment
         env:
