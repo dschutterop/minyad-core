@@ -4,6 +4,10 @@ description: >-
   with both the commit SHA and `latest`. Shared by deploy.yml and
   quick-release.yml's per-service build matrix (which must still check out
   the repository itself before calling this).
+inputs:
+  github-token:
+    description: Token used to authenticate to GHCR (composite actions can't read `secrets` directly).
+    required: true
 runs:
   using: composite
   steps:
@@ -15,7 +19,7 @@ runs:
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+        password: ${{ inputs.github-token }}
 
     - name: Build and push image
       uses: docker/build-push-action@v6
