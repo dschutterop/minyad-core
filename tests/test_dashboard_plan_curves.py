@@ -5,6 +5,8 @@ os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from api import main as api_main
 from api.main import _classify_cloud_cover, build_plan_curves
 
@@ -28,6 +30,10 @@ def _slot(start, pv_w=1000, load_w=300, soc_target=50.0, cloud_cover_pct=None):
 
 
 def test_classify_cloud_cover_matches_pv_uncertainty_module():
+    pytest.importorskip(
+        "minyad.strategy.v3.pv_uncertainty",
+        reason="private strategy package not present in a standalone Minyad Core checkout",
+    )
     from minyad.strategy.v3.pv_uncertainty import classify_cloud_cover
 
     for pct in (0.0, 10.0, 24.9, 25.0, 50.0, 74.9, 75.0, 100.0):

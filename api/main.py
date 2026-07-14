@@ -11,6 +11,7 @@ import secrets
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
 from threading import Event, Lock
+from types import SimpleNamespace
 from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -33,7 +34,15 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
     from dryad import DRYAD_CACHE_SECONDS, build_dryad_payload, load_dryad_history, load_dryad_inputs
 from shared.db import AsyncSessionLocal, get_session
 from shared.mqtt_client import MinyadMqttClient
-from minyad.strategy.v3 import forecast_contract
+
+try:
+    # minyad.strategy.v3 is Minyad's private forecasting/planning core and is not part of
+    # this public repository (see README's "Not included" section). It's only importable
+    # when deployed alongside the private package. Standalone Minyad Core always reports
+    # minyad_forecast as unavailable rather than fabricating a trajectory.
+    from minyad.strategy.v3 import forecast_contract
+except ImportError:
+    forecast_contract = None
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
@@ -1435,6 +1444,27 @@ def _battery_phase(control_state: str, activity_state: str, battery_charge_w: in
     return "idle"
 
 
+def _strategy_module_unavailable_outcome() -> SimpleNamespace:
+    """The documented ``minyad_forecast`` "unavailable" shape (docs/minyad_forecast_contract.md)
+    for standalone Minyad Core deployments that don't have the private strategy-v3 package.
+    """
+    return SimpleNamespace(
+        validation_status="invalid",
+        validation_reason="strategy_module_unavailable",
+        forecast={
+            "source": "minyad_lp",
+            "quality": "unavailable",
+            "validation": {
+                "status": "invalid",
+                "reason": "strategy_module_unavailable",
+                "age_s": None,
+                "scenario_count": None,
+            },
+        },
+        soc_trajectory_pct=None,
+    )
+
+
 def build_surplus_payload(
     grid: dict[str, Any],
     battery: dict[str, Any],
@@ -1487,19 +1517,22 @@ def build_surplus_payload(
     activity_state = _status_text(battery.get("state") or derive_battery_state(battery), control_state)
     battery_phase = _battery_phase(control_state, activity_state, battery_charge_w, battery_discharge_w)
 
-    forecast_outcome: forecast_contract.ForecastBuildOutcome | None = None
+    forecast_outcome: Any = None
     if attempt_forecast:
-        forecast_outcome = forecast_contract.build_minyad_forecast(
-            plan_payload=plan_payload,
-            plan_generated_at=plan_generated_at,
-            plan_solver_status=plan_solver_status,
-            uncertainty_bands=uncertainty_bands,
-            now=timestamp,
-            stale_minutes=stale_minutes,
-            scenario_count=scenario_count,
-            model_version=model_version,
-            seed=forecast_seed,
-        )
+        if forecast_contract is not None:
+            forecast_outcome = forecast_contract.build_minyad_forecast(
+                plan_payload=plan_payload,
+                plan_generated_at=plan_generated_at,
+                plan_solver_status=plan_solver_status,
+                uncertainty_bands=uncertainty_bands,
+                now=timestamp,
+                stale_minutes=stale_minutes,
+                scenario_count=scenario_count,
+                model_version=model_version,
+                seed=forecast_seed,
+            )
+        else:
+            forecast_outcome = _strategy_module_unavailable_outcome()
         if forecast_outcome.validation_status == "invalid":
             LOGGER.warning(
                 "minyad_forecast unavailable: reason=%s model_version=%s now=%s",

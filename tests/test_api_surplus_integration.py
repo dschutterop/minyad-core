@@ -10,9 +10,20 @@ from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 
+import pytest
 from fastapi.testclient import TestClient
 
 import api.main as api_main
+
+pytestmark = pytest.mark.usefixtures("_require_forecast_contract")
+
+
+@pytest.fixture
+def _require_forecast_contract():
+    pytest.importorskip(
+        "minyad.strategy.v3.forecast_contract",
+        reason="private strategy package not present in a standalone Minyad Core checkout",
+    )
 
 UTC = timezone.utc
 

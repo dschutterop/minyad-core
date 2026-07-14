@@ -5,6 +5,8 @@ os.environ.setdefault("DB_URL", "postgresql+asyncpg://user:pass@localhost/test")
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 import api.main as api_main
 from api.main import SURPLUS_API_VERSION, app, battery_curve_power_w, battery_status_payload, build_surplus_payload, compute_household_load, derive_battery_state, grid_status_payload
 
@@ -290,6 +292,10 @@ def test_surplus_payload_omits_minyad_forecast_by_default():
 
 
 def test_surplus_payload_includes_valid_minyad_forecast_with_96_slot_soc_trajectory():
+    pytest.importorskip(
+        "minyad.strategy.v3.forecast_contract",
+        reason="private strategy package not present in a standalone Minyad Core checkout",
+    )
     plan_payload = _forecast_plan_payload(ALIGNED_NOW)
     payload = build_surplus_payload(
         {"grid_net_power_w": "-300", "solar_power_w": "2500"},
@@ -319,6 +325,10 @@ def test_surplus_payload_includes_valid_minyad_forecast_with_96_slot_soc_traject
 
 def test_surplus_payload_live_fields_survive_forecast_failure():
     """A stale/invalid LP plan must not take down the live snapshot fields."""
+    pytest.importorskip(
+        "minyad.strategy.v3.forecast_contract",
+        reason="private strategy package not present in a standalone Minyad Core checkout",
+    )
     stale_generated_at = ALIGNED_NOW - timedelta(hours=2)
     plan_payload = _forecast_plan_payload(stale_generated_at)
     payload = build_surplus_payload(
@@ -344,6 +354,10 @@ def test_surplus_payload_live_fields_survive_forecast_failure():
 def test_surplus_payload_forecast_timestamps_are_explicit_utc_regardless_of_process_tz(monkeypatch):
     import time
 
+    pytest.importorskip(
+        "minyad.strategy.v3.forecast_contract",
+        reason="private strategy package not present in a standalone Minyad Core checkout",
+    )
     plan_payload = _forecast_plan_payload(ALIGNED_NOW)
     monkeypatch.setenv("TZ", "Europe/Amsterdam")
     if hasattr(time, "tzset"):

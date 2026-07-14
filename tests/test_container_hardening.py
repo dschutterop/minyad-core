@@ -13,8 +13,6 @@ DOCKERFILES = [
     ROOT / "frontend" / "Dockerfile",
     ROOT / "ingestion" / "Dockerfile",
     ROOT / "migrate" / "Dockerfile",
-    ROOT / "minyad-agent" / "Dockerfile",
-    ROOT / "minyad-trade" / "Dockerfile",
     ROOT / "mobile-frontend" / "Dockerfile",
     ROOT / "reporting" / "Dockerfile",
 ]
