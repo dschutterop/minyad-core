@@ -113,7 +113,7 @@ async def main() -> None:
                                 insert into power_curve_rollups
                                   (bucket_start, granularity_seconds, source, sample_count, power_w, delivered_w, returned_w, net_w, updated_at)
                                 values (
-                                  to_timestamp(floor(extract(epoch from :timestamp) / :granularity) * :granularity),
+                                  to_timestamp(floor(extract(epoch from (:timestamp)::timestamptz) / :granularity) * :granularity),
                                   :granularity, 'grid', 1, :power_w, :delivered_w, :returned_w, :power_w, now()
                                 )
                                 on conflict (bucket_start, granularity_seconds, source) do update set
