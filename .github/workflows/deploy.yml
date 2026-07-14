@@ -440,3 +440,13 @@ jobs:
           sudo ss -ltnp | grep -E ':(9101|9102|9103|9104|9105|9106|9107|9108|9109|9110|9111)\b'
           sudo firewall-cmd --list-all
           docker image prune -f
+
+      - name: Notify minyad-deploy of new release
+        env:
+          MINYAD_DEPLOY_DISPATCH_TOKEN: ${{ secrets.MINYAD_DEPLOY_DISPATCH_TOKEN }}
+        run: |
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${MINYAD_DEPLOY_DISPATCH_TOKEN}" \
+            https://api.github.com/repos/dschutterop/minyad-deploy/dispatches \
+            -d "{\"event_type\":\"upstream-updated\",\"client_payload\":{\"source\":\"minyad\",\"sha\":\"${{ github.sha }}\"}}"
