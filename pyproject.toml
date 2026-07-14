@@ -25,3 +25,10 @@ ignore = [
 "frontend/*.py" = [
     "RUF001", # deliberate typography (en-dash, multiplication sign, angle quotes) in user-facing UI copy
 ]
+
+[tool.pyright]
+include = ["api", "control", "host-services", "ingestion", "forecast", "reporting", "shared", "scripts", "migrate"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+reportMissingImports = "warning" # tolerates the optional, privately-hosted minyad.strategy.v3 import
+reportPrivateImportUsage = "none" # paho-mqtt exports CallbackAPIVersion/ReasonCode/Properties at runtime but omits them from __all__

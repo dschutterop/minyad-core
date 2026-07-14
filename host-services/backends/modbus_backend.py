@@ -168,5 +168,8 @@ class ModbusBackend:
     async def set_discharge(self, watts: int) -> None:
         await self.set_battery_limits(0, watts)
 
+    async def stop_forced_mode(self) -> None:
+        """No-op: Modbus limits are ceilings, never an active force-charge/discharge setpoint."""
+
     async def read_state(self) -> InverterState:
         raise RuntimeError("Modbus telemetry disabled: use GoodWe API for inverter telemetry")
