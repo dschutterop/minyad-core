@@ -64,14 +64,14 @@ def _api_verify() -> str | bool:
 
 
 async def _brand_name() -> str:
-    """"Minyad Core" standalone, "Minyad Plus" when the private strategy/agent/trade
+    """"Minyad Core" standalone, "Minyad Pro" when the private strategy/agent/trade
     modules are deployed alongside it -- see PRIVATE_MODULES_AVAILABLE in api/payload_helpers.py.
     Defaults to the conservative "Minyad Core" label if the API can't be reached."""
     try:
         async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=3.0, verify=_api_verify()) as client:
             response = await client.get("/health")
             if response.status_code == 200 and response.json().get("private_modules"):
-                return "Minyad Plus"
+                return "Minyad Pro"
     except httpx.RequestError:
         pass
     return "Minyad Core"
