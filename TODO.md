@@ -63,3 +63,18 @@ warned to be careful with, for a purely cosmetic DRY win. Left as documented, wo
 **Still needs**: an actual run of both workflows against the real self-hosted runner and
 production secrets, on a branch, before merging to `main` — none of this is reachable from a
 sandboxed dev environment.
+
+## Split deploy out of minyad-core entirely — done
+
+Superseded the paragraph above: `.github/actions/deploy` is gone, and so is
+`quick-release.yml`. `deploy.yml` is renamed to `release.yml` and now stops after
+`trivy-gate` — it builds and pushes the 11 service images to GHCR and nothing else, no
+self-hosted deploy job, no `DEPLOY_PATH`, no dispatch to any other repo. `sonar`/`trivy`/
+`trivy-gate` still run on the self-hosted `minyad` runner (needed for the internal
+SonarQube/Trivy network access), but that runner no longer touches the production
+docker-compose stack or host secrets.
+
+The actual merge-and-deploy logic moved to a new repo, `minyad-pro`, which pulls
+`minyad-core` and `minyad-private`, overlays them, and runs the deploy job that used to
+live here. See that repo's README for the trigger model (schedule + optional dispatch from
+`minyad-private`, no dependency on this repo notifying anyone).

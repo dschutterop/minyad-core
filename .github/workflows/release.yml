@@ -18,7 +18,7 @@ on:
         default: true
 
 concurrency:
-  group: minyad-deploy
+  group: minyad-release
   cancel-in-progress: false
 
 env:
@@ -327,49 +327,3 @@ jobs:
       - name: Fail on fixable high or critical vulnerabilities
         run: python3 scripts/trivy_to_sonar.py --ignore-unfixed --output sonar-trivy-issues.json --fail-on-severity HIGH --fail-on-severity CRITICAL "trivy-reports/*.json"
 
-  deploy:
-    name: Deploy
-    runs-on:
-      - self-hosted
-      - minyad
-    needs:
-      - build
-      - sonar
-      - trivy-gate
-    if: >-
-      ${{
-        github.ref == 'refs/heads/main'
-        && always()
-        && !cancelled()
-        && needs.build.result == 'success'
-        && needs.sonar.result == 'success'
-        && (!(github.event_name == 'push' || inputs.run_trivy == true || inputs.run_trivy == 'true') || needs.trivy-gate.result == 'success')
-      }}
-    environment: production
-    permissions:
-      contents: read
-      packages: read
-    env:
-      HOME: /home/actions-runner
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Deploy to self-hosted host
-        uses: ./.github/actions/deploy
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          deploy-path: ${{ vars.DEPLOY_PATH }}
-          host-service-units: ${{ vars.HOST_SERVICE_UNITS || 'dsmr_bridge.service goodwe_bridge.service enphase_bridge.service enphase_token_refresh.timer' }}
-          metrics-bind-ip: ${{ vars.MINYAD_METRICS_BIND_IP }}
-          prometheus-source: ${{ vars.MINYAD_PROMETHEUS_SOURCE }}
-
-      - name: Notify minyad-deploy of new release
-        env:
-          MINYAD_DEPLOY_DISPATCH_TOKEN: ${{ secrets.MINYAD_DEPLOY_DISPATCH_TOKEN }}
-        run: |
-          curl -fsSL -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${MINYAD_DEPLOY_DISPATCH_TOKEN}" \
-            https://api.github.com/repos/dschutterop/minyad-deploy/dispatches \
-            -d "{\"event_type\":\"upstream-updated\",\"client_payload\":{\"source\":\"minyad\",\"sha\":\"${{ github.sha }}\"}}"

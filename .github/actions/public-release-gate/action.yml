@@ -1,10 +1,10 @@
 name: Public release gate
 description: >-
   Runs the structural public-release blockers plus gitleaks/trufflehog full-history
-  secret scans, and fails the job if any of them didn't succeed. Shared by
-  deploy.yml and quick-release.yml's public-release-gate job (which must still
-  check out the repository itself before calling this — composite actions
-  don't do that on their own).
+  secret scans, and fails the job if any of them didn't succeed. Used by
+  release.yml's public-release-gate job (which must still check out the
+  repository itself before calling this — composite actions don't do that
+  on their own).
 runs:
   using: composite
   steps:
