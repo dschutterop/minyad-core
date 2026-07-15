@@ -7,3 +7,9 @@ sqlalchemy==2.0.51
 asyncpg==0.31.0
 cryptography==49.0.0
 paho-mqtt==2.1.0
+# httpx/pulp are unused by this service on its own, but importing
+# minyad.strategy.v3 (see api/payload_helpers.py's try/except ImportError)
+# runs that package's __init__.py, which pulls in its planner/forecast_client
+# modules -- same reason minyad-strategy/requirements.txt carries them.
+httpx==0.28.1
+pulp==2.9.0
