@@ -1,4 +1,4 @@
-[![Full release](https://github.com/dschutterop/minyad-core/actions/workflows/deploy.yml/badge.svg)](https://github.com/dschutterop/minyad-core/actions/workflows/deploy.yml)
+[![Full release](https://github.com/dschutterop/minyad-core/actions/workflows/release.yml/badge.svg)](https://github.com/dschutterop/minyad-core/actions/workflows/release.yml)
 
 # Minyad Core
 

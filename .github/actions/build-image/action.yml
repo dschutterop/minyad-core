@@ -1,9 +1,9 @@
 name: Build and push service image
 description: >-
   Sets up Buildx, logs into GHCR, and builds+pushes one service's image tagged
-  with both the commit SHA and `latest`. Shared by deploy.yml and
-  quick-release.yml's per-service build matrix (which must still check out
-  the repository itself before calling this).
+  with both the commit SHA and `latest`. Shared by build-images.yml and
+  release.yml's per-service build matrix (which must still check out the
+  repository itself before calling this).
 inputs:
   github-token:
     description: Token used to authenticate to GHCR (composite actions can't read `secrets` directly).
