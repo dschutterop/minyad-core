@@ -335,7 +335,7 @@ async def update_trade_settings(update: TradeSettingsUpdate, session: SessionDep
         )
     await session.commit()
     settings = await trade_settings(session)
-    await publish_trade_mqtt_settings(settings)
+    publish_trade_mqtt_settings(settings)
     return settings
 
 

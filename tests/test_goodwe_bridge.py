@@ -58,7 +58,7 @@ if str(HOST_SERVICES) not in sys.path:
     sys.path.insert(0, str(HOST_SERVICES))
 MODULE_PATH = HOST_SERVICES / "goodwe_bridge.py"
 spec = importlib.util.spec_from_file_location("goodwe_bridge", MODULE_PATH)
-from backends import InverterState  # noqa: E402 - must follow sys.path setup above
+from backends import InverterState  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - must follow sys.path setup above
 
 goodwe_bridge = importlib.util.module_from_spec(spec)
 assert spec.loader is not None

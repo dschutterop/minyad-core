@@ -27,6 +27,8 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the frontend Dock
 
 MENU = ["Dashboard", "Agent", "Health", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
 
+DEFAULT_BRAND_NAME = "Minyad Core"
+
 
 def brand_mark() -> str:
     return """
@@ -60,7 +62,7 @@ def html_response(content: str) -> HTMLResponse:
     )
 
 
-def render_page(active: str, body: str, brand_name: str = "Minyad Core") -> str:
+def render_page(active: str, body: str, brand_name: str = DEFAULT_BRAND_NAME) -> str:
     links = render_nav(active)
     return f"""
     <!doctype html>
@@ -91,7 +93,7 @@ def render_page(active: str, body: str, brand_name: str = "Minyad Core") -> str:
     """
 
 
-def render_dashboard_page(brand_name: str = "Minyad Core") -> str:
+def render_dashboard_page(brand_name: str = DEFAULT_BRAND_NAME) -> str:
     return f"""
     <!doctype html>
     <html lang="en">
@@ -851,7 +853,7 @@ def kpi_tile(value_id: str, label: str, *, value: str = "--", accent_class: str 
     return f'<div class="kpi-tile"><b id="{value_id}"{value_classes}>{value}</b><span>{label}</span></div>'
 
 
-def energy_dashboard_body(brand_name: str = "Minyad Core") -> str:
+def energy_dashboard_body(brand_name: str = DEFAULT_BRAND_NAME) -> str:
     unit_toggle = segmented_control(
         "Power unit",
         [

@@ -395,6 +395,6 @@ async def startup() -> None:
     mqtt.subscribe("minyad/solar/#", handle_status_mqtt)
     mqtt.subscribe("minyad/trade/prices/da/+/full", handle_trade_price_mqtt)
     async with AsyncSessionLocal() as session:
-        await publish_battery_mqtt_settings(await battery_settings(session))
-        await publish_trade_mqtt_settings(await trade_settings(session))
+        publish_battery_mqtt_settings(await battery_settings(session))
+        publish_trade_mqtt_settings(await trade_settings(session))
     _debug_refresh_task = asyncio.create_task(_refresh_debug_setting())

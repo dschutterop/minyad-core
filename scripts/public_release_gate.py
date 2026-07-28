@@ -34,8 +34,15 @@ PRIVATE_REFERENCES = (
     "Chronos",
 )
 
+# Equivalent to the previous single alternation but without the leading-".*" branches that
+# caused super-linear backtracking (each ".*\.<ext>$" could scan the whole path and retry).
+# Extension matches stay anchored at "$" only -- re.search already scans, so a leading ".*"
+# was redundant. ".token" is dropped because ".*\.token$"/"\.(...|token)$" already covers it.
 SENSITIVE_HISTORY_PATH_RE = re.compile(
-    r"(^|/)(\.env|\.env\.[^/]+|secrets?|secrets\.[^/]+|.*\.pem|.*\.key|.*\.p12|.*\.pfx|.*\.jks|\.token|.*\.token|.*private.*)$"
+    r"\.(?:pem|key|p12|pfx|jks|token)$"    # sensitive file extensions, anywhere in the path
+    r"|(?:^|/)\.env(?:\.[^/]+)?$"          # .env or .env.<suffix> as the final segment
+    r"|(?:^|/)secret(?:s|s\.[^/]+)?$"      # secret / secrets / secrets.<suffix> final segment
+    r"|private"                             # any path mentioning "private"
 )
 IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 MAC_RE = re.compile(r"\b(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}\b")
@@ -58,6 +65,8 @@ ALLOWLIST_PATHS = {
 # would break that interop for no privacy benefit) or an unavoidable side effect of what a test
 # is verifying. Keyed on exact line text rather than line number so an edit to the line drops
 # the exemption and forces a fresh review instead of silently carrying it forward.
+_STRATEGY_V3_FIXTURE_REASON = "Test fixture exercising the real strategy_v3 source tag."
+_SETTINGS_ENDPOINTS_TEST = "tests/test_api_settings_endpoints.py"
 CONTENT_ALLOWLIST: dict[tuple[str, str], str] = {
     (
         "README.md",
@@ -78,19 +87,19 @@ CONTENT_ALLOWLIST: dict[tuple[str, str], str] = {
     (
         "tests/test_agent_dashboard.py",
         '            "source": "strategy_v3",',
-    ): "Test fixture exercising the real strategy_v3 source tag.",
+    ): _STRATEGY_V3_FIXTURE_REASON,
     (
-        "tests/test_api_settings_endpoints.py",
+        _SETTINGS_ENDPOINTS_TEST,
         '    row = {"setpoint_w": 0, "discharge_allowed": False, "source": "strategy_v3"}',
-    ): "Test fixture exercising the real strategy_v3 source tag.",
+    ): _STRATEGY_V3_FIXTURE_REASON,
     (
-        "tests/test_api_settings_endpoints.py",
+        _SETTINGS_ENDPOINTS_TEST,
         '    row = {"setpoint_w": 0, "discharge_allowed": True, "source": "strategy_v3"}',
-    ): "Test fixture exercising the real strategy_v3 source tag.",
+    ): _STRATEGY_V3_FIXTURE_REASON,
     (
-        "tests/test_api_settings_endpoints.py",
+        _SETTINGS_ENDPOINTS_TEST,
         '    row = {"setpoint_w": 500, "discharge_allowed": False, "source": "strategy_v3"}',
-    ): "Test fixture exercising the real strategy_v3 source tag.",
+    ): _STRATEGY_V3_FIXTURE_REASON,
     (
         "tests/test_api_pure_helpers.py",
         '@pytest.mark.parametrize("value", ["192.0.2", "203.0.113.256", "not.an.ip.addr", "1.2.3.4.5", ""])',
@@ -163,6 +172,26 @@ def check_history_paths(failures: list[str]) -> None:
             add_failure(failures, "sensitive path still in git history", name)
 
 
+def check_line_contents(path: Path, line_no: int, line: str, failures: list[str]) -> None:
+    if (path.as_posix(), line) in CONTENT_ALLOWLIST:
+        return
+
+    for reference in PRIVATE_REFERENCES:
+        if reference in line:
+            add_failure(failures, "private reference", f"{path}:{line_no}: {reference}")
+
+    for match in IPV4_RE.finditer(line):
+        value = match.group(0)
+        if not is_allowed_ip_literal(value):
+            add_failure(failures, "non-public IP literal", f"{path}:{line_no}: {value}")
+
+    for match in MAC_RE.finditer(line):
+        add_failure(failures, "MAC address literal", f"{path}:{line_no}: {match.group(0)}")
+
+    if HOSTNAME_RE.search(line):
+        add_failure(failures, "private hostname literal", f"{path}:{line_no}")
+
+
 def check_file_contents(files: list[Path], failures: list[str]) -> None:
     for path in files:
         if path in ALLOWLIST_PATHS:
@@ -172,23 +201,7 @@ def check_file_contents(files: list[Path], failures: list[str]) -> None:
             continue
 
         for line_no, line in enumerate(text.splitlines(), start=1):
-            if (path.as_posix(), line) in CONTENT_ALLOWLIST:
-                continue
-
-            for reference in PRIVATE_REFERENCES:
-                if reference in line:
-                    add_failure(failures, "private reference", f"{path}:{line_no}: {reference}")
-
-            for match in IPV4_RE.finditer(line):
-                value = match.group(0)
-                if not is_allowed_ip_literal(value):
-                    add_failure(failures, "non-public IP literal", f"{path}:{line_no}: {value}")
-
-            for match in MAC_RE.finditer(line):
-                add_failure(failures, "MAC address literal", f"{path}:{line_no}: {match.group(0)}")
-
-            if HOSTNAME_RE.search(line):
-                add_failure(failures, "private hostname literal", f"{path}:{line_no}")
+            check_line_contents(path, line_no, line, failures)
 
 
 def check_daniel_approval(failures: list[str], require_approval: bool) -> None:

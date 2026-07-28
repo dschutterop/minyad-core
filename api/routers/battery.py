@@ -450,6 +450,6 @@ async def update_battery_settings(update: BatterySettingsUpdate, session: Sessio
     )
     await session.commit()
     settings = await battery_settings(session)
-    await publish_battery_mqtt_settings(settings)
+    publish_battery_mqtt_settings(settings)
     mqtt.client.publish(TOPIC_CONTROL_OVERRIDE, json.dumps({"mode": "reload_settings"}), qos=0, retain=False)
     return settings

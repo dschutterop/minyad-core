@@ -519,6 +519,46 @@ def _strategy_module_unavailable_outcome() -> SimpleNamespace:
     )
 
 
+def _resolve_forecast_outcome(
+    *,
+    attempt_forecast: bool,
+    timestamp: datetime,
+    plan_payload: dict[str, Any] | None,
+    plan_generated_at: datetime | None,
+    plan_solver_status: str | None,
+    uncertainty_bands: dict[str, Any] | None,
+    forecast_seed: int | None,
+) -> Any:
+    """Build the minyad_forecast outcome for build_surplus_payload, or None when not requested.
+
+    Returns the private forecast_contract's outcome when the package is present, an explicit
+    "unavailable" marker when it isn't, and logs any invalid outcome. Scenario count, stale
+    threshold and model version are fixed module constants (no caller overrides them).
+    """
+    if not attempt_forecast:
+        return None
+    if forecast_contract is not None:
+        outcome = forecast_contract.build_minyad_forecast(
+            plan_payload=plan_payload,
+            plan_generated_at=plan_generated_at,
+            plan_solver_status=plan_solver_status,
+            uncertainty_bands=uncertainty_bands,
+            now=timestamp,
+            stale_minutes=PLAN_STALE_MINUTES,
+            scenario_count=MINYAD_FORECAST_SCENARIO_COUNT,
+            model_version=MINYAD_FORECAST_MODEL_VERSION,
+            seed=forecast_seed,
+        )
+    else:
+        outcome = _strategy_module_unavailable_outcome()
+    if outcome.validation_status == "invalid":
+        LOGGER.warning(
+            "minyad_forecast unavailable: reason=%s model_version=%s now=%s",
+            outcome.validation_reason, MINYAD_FORECAST_MODEL_VERSION, timestamp.astimezone(UTC).isoformat(),
+        )
+    return outcome
+
+
 def build_surplus_payload(
     grid: dict[str, Any],
     battery: dict[str, Any],
@@ -531,9 +571,6 @@ def build_surplus_payload(
     plan_generated_at: datetime | None = None,
     plan_solver_status: str | None = None,
     uncertainty_bands: dict[str, Any] | None = None,
-    scenario_count: int = MINYAD_FORECAST_SCENARIO_COUNT,
-    stale_minutes: int = PLAN_STALE_MINUTES,
-    model_version: str = MINYAD_FORECAST_MODEL_VERSION,
     forecast_seed: int | None = None,
 ) -> dict[str, Any]:
     """Build the external surplus snapshot used by downstream surplus consumers.
@@ -571,27 +608,15 @@ def build_surplus_payload(
     activity_state = _status_text(battery.get("state") or derive_battery_state(battery), control_state)
     battery_phase = _battery_phase(control_state, activity_state, battery_charge_w, battery_discharge_w)
 
-    forecast_outcome: Any = None
-    if attempt_forecast:
-        if forecast_contract is not None:
-            forecast_outcome = forecast_contract.build_minyad_forecast(
-                plan_payload=plan_payload,
-                plan_generated_at=plan_generated_at,
-                plan_solver_status=plan_solver_status,
-                uncertainty_bands=uncertainty_bands,
-                now=timestamp,
-                stale_minutes=stale_minutes,
-                scenario_count=scenario_count,
-                model_version=model_version,
-                seed=forecast_seed,
-            )
-        else:
-            forecast_outcome = _strategy_module_unavailable_outcome()
-        if forecast_outcome.validation_status == "invalid":
-            LOGGER.warning(
-                "minyad_forecast unavailable: reason=%s model_version=%s now=%s",
-                forecast_outcome.validation_reason, model_version, timestamp.astimezone(UTC).isoformat(),
-            )
+    forecast_outcome = _resolve_forecast_outcome(
+        attempt_forecast=attempt_forecast,
+        timestamp=timestamp,
+        plan_payload=plan_payload,
+        plan_generated_at=plan_generated_at,
+        plan_solver_status=plan_solver_status,
+        uncertainty_bands=uncertainty_bands,
+        forecast_seed=forecast_seed,
+    )
 
     payload = {
         "api_version": SURPLUS_API_VERSION,

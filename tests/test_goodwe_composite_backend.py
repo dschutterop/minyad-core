@@ -6,8 +6,8 @@ HOST_SERVICES = Path(__file__).resolve().parents[1] / "host-services"
 if str(HOST_SERVICES) not in sys.path:
     sys.path.insert(0, str(HOST_SERVICES))
 
-from backends import InverterState  # noqa: E402,I001 - must follow sys.path setup above
-from backends.composite_goodwe_backend import GoodWeCompositeBackend  # noqa: E402 - must follow sys.path setup above
+from backends import InverterState  # ruff: ignore[module-import-not-at-top-of-file, unsorted-imports] - must follow sys.path setup above
+from backends.composite_goodwe_backend import GoodWeCompositeBackend  # ruff: ignore[module-import-not-at-top-of-file] - must follow sys.path setup above
 
 
 def state(**overrides):
