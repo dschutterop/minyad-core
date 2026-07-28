@@ -256,13 +256,13 @@ def build_health_status(cache: dict[str, Any], db_ok: bool, db_error: str | None
     }
 
 
-async def publish_trade_mqtt_settings(settings: dict[str, Any]) -> None:
+def publish_trade_mqtt_settings(settings: dict[str, Any]) -> None:
     for key, topic in MQTT_TRADE_SETTING_TOPICS.items():
         if key in settings:
             mqtt.client.publish(topic, str(settings[key]), qos=0, retain=True)
 
 
-async def publish_battery_mqtt_settings(settings: dict[str, Any]) -> None:
+def publish_battery_mqtt_settings(settings: dict[str, Any]) -> None:
     for key, topic in MQTT_BATTERY_SETTING_TOPICS.items():
         if key in settings:
             mqtt.client.publish(topic, str(settings[key]), qos=0, retain=True)
