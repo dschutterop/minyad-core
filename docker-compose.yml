@@ -1,8 +1,15 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   minyad-db:
     image: postgres:16-alpine
     container_name: minyad-db
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       POSTGRES_DB: minyad
@@ -27,6 +34,7 @@ services:
       context: .
       dockerfile: migrate/Dockerfile
     container_name: minyad-migrate
+    logging: *default-logging
     env_file: .env
     depends_on:
       minyad-db:
@@ -38,6 +46,7 @@ services:
     image: python:3.12-slim
     container_name: minyad-tls-init
     restart: "no"
+    logging: *default-logging
     command: ["/bin/sh", "/scripts/generate_internal_tls_cert.sh"]
     environment:
       MINYAD_TLS_IP_SANS: ${MINYAD_TLS_IP_SANS:-}
@@ -51,6 +60,7 @@ services:
     image: eclipse-mosquitto:2
     container_name: minyad-mqtt
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     entrypoint:
       - /bin/sh
@@ -84,6 +94,7 @@ services:
       dockerfile: monitoring/Dockerfile
     container_name: minyad-mqtt-observer
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
@@ -103,6 +114,7 @@ services:
       dockerfile: ingestion/Dockerfile
     container_name: minyad-ingestion
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
@@ -124,6 +136,7 @@ services:
       dockerfile: control/Dockerfile
     container_name: minyad-control
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
@@ -146,6 +159,7 @@ services:
       dockerfile: minyad-strategy/Dockerfile
     container_name: minyad-strategy
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       DB_URL: ${DB_URL}
@@ -184,6 +198,7 @@ services:
       dockerfile: deadman/Dockerfile
     container_name: minyad-deadman
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
@@ -201,6 +216,7 @@ services:
       dockerfile: api/Dockerfile
     container_name: minyad-api
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
@@ -250,6 +266,7 @@ services:
       dockerfile: frontend/Dockerfile
     container_name: minyad-frontend
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       API_BASE_URL: https://minyad-api:8000
@@ -277,6 +294,7 @@ services:
       dockerfile: mobile-frontend/Dockerfile
     container_name: minyad-mobile-frontend
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       API_BASE_URL: https://minyad-api:8000
@@ -298,6 +316,7 @@ services:
       dockerfile: forecast/Dockerfile
     container_name: minyad-forecast
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt
@@ -315,6 +334,7 @@ services:
       dockerfile: reporting/Dockerfile
     container_name: minyad-reporting
     restart: unless-stopped
+    logging: *default-logging
     env_file: .env
     environment:
       MQTT_HOST: minyad-mqtt

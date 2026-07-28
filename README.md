@@ -81,6 +81,10 @@ flowchart LR
 
 Prometheus examples live under `prometheus/`, with additional notes in [docs/monitoring.md](docs/monitoring.md). Bind metrics to a trusted interface and avoid exposing bridge metrics directly to the internet.
 
+## Logs
+
+Every service's `logging` block is capped at 10MB × 3 files (json-file driver) via the `x-logging` anchor in `docker-compose.yml` / `docker-compose.monitoring.yml`, so log growth is bounded going forward. That cap only applies after a container is recreated (`docker compose up -d --force-recreate`) and doesn't shrink logs that are already large. Run `scripts/trim_docker_logs.sh` to see current log sizes, or `scripts/trim_docker_logs.sh --trim` to truncate them immediately.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for hardware-reporting details and PR expectations. The short version: keep bridge behavior generic, include useful logs with secrets removed, and do not submit strategy or trading features to this public core.

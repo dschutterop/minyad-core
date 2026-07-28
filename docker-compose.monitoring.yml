@@ -1,8 +1,15 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   minyad-node-exporter:
     image: prom/node-exporter:v1.9.1
     container_name: minyad-node-exporter
     restart: unless-stopped
+    logging: *default-logging
     command:
       - --path.rootfs=/host
     pid: host
@@ -16,6 +23,7 @@ services:
     image: gcr.io/cadvisor/cadvisor:v0.52.1
     container_name: minyad-cadvisor
     restart: unless-stopped
+    logging: *default-logging
     privileged: true
     devices:
       - /dev/kmsg
