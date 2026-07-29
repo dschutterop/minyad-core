@@ -57,7 +57,7 @@ def test_battery_settings_skips_status_keys_and_coerces_ints():
     rows = [
         {"key": "battery.soc_floor", "value": "25"},
         {"key": "battery.status.soc", "value": "80"},
-        {"key": "battery.inverter_ip", "value": "192.168.1.5"},
+        {"key": "battery.inverter_ip", "value": "192.0.2.5"},
     ]
     session = FakeSession([("battery.%", FakeResult(rows=rows))])
 
@@ -65,7 +65,7 @@ def test_battery_settings_skips_status_keys_and_coerces_ints():
 
     assert result["soc_floor"] == 25
     assert "status.soc" not in result and "soc" not in result  # battery.status.* is skipped, not aliased
-    assert result["inverter_ip"] == "192.168.1.5"
+    assert result["inverter_ip"] == "192.0.2.5"
 
 
 # --------------------------------------------------------------------------- #

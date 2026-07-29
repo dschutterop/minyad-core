@@ -205,7 +205,7 @@ def test_agent_operational_logs_serializes_setpoint_log_when_present():
     now = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
     session = FakeAgentSession(
         existing_tables={"setpoint_log"},
-        table_rows={"setpoint_log": [{"id": 1, "timestamp": now, "setpoint_w": 500, "discharge_allowed": False, "source": "strategy_v3"}]},
+        table_rows={"setpoint_log": [{"id": 1, "timestamp": now, "setpoint_w": 500, "discharge_allowed": False, "source": "goodwe_bridge"}]},
         columns={"setpoint_log": ["id", "timestamp", "setpoint_w", "discharge_allowed", "source"]},
     )
 
