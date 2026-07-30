@@ -107,9 +107,15 @@ unrelated errors that `continue-on-error: true` was silently swallowing alongsid
 backlog. Verified end-to-end: a green PR against the actual `ci.yml` on GitHub, not just a
 local run.
 
-**Still needs**: `release.yml`'s `sonar` job has the identical report-only pyright step and the
-identical missing-dependency gap `ci.yml` had — same fix should apply (`sonar` is a leaf job
-nothing else depends on; `build`/`trivy`/`trivy-gate` all key off `test`, not `sonar`, so it's
-low blast radius). Deliberately left alone in this pass — it only runs on the self-hosted
-`minyad` runner with production secrets, not reachable from a sandboxed dev environment, so it
-needs its own explicit sign-off rather than bundling it into a docs cleanup.
+`release.yml`'s `sonar` job had the identical report-only pyright step and the identical
+missing-dependency gap. Brought it to the same blocking state for consistency, as its own
+explicit change rather than bundled into the docs cleanup above, since `sonar` runs only on
+the self-hosted `minyad` runner with production secrets.
+
+**Still needs**: unlike everything else here, this last piece isn't reachable from a sandboxed
+dev environment, so it's verified only by static reasoning (identical fix pattern to `ci.yml`,
+which did get a real green run) and by installing the exact pinned dependencies into an
+isolated local environment and confirming the same zero-error result. `sonar` is a leaf job
+nothing else depends on (`build`/`trivy`/`trivy-gate` all key off `test`, not `sonar`), so the
+blast radius if something about that runner's environment turns out to differ is low — but it
+still needs one actual run on that runner to fully confirm.
