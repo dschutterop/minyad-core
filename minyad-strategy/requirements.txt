@@ -1,15 +1,15 @@
-fastapi==0.138.0
+fastapi==0.141.1
 starlette==1.3.1
-uvicorn[standard]==0.49.0
+uvicorn[standard]==0.52.0
 sqlalchemy==2.0.51
 asyncpg==0.31.0
 cryptography==49.0.0
 paho-mqtt==2.1.0
 httpx==0.28.1
-apscheduler==3.11.1
+apscheduler==3.11.3
 # pulp/coinor-cbc and prometheus-client are unused by this repo's public v2
 # service, but this Dockerfile also builds the private minyad-strategy-v3
 # service (see docker-compose.private.yml in minyad-pro): pulp/coinor-cbc for
 # its LP planner, prometheus-client for the metrics it exports on METRICS_PORT.
 pulp==2.9.0
-prometheus-client==0.23.1
+prometheus-client==0.26.0
