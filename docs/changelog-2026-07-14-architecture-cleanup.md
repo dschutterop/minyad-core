@@ -29,8 +29,9 @@ meter readings — not reproducible outside production hardware.
 `pyproject.toml`'s `[tool.ruff.lint]` now selects `E, F, I, UP, B, SIM, RUF, FAST002` (was
 `FAST002, RUF029, F841, SIM102`), with `E501` ignored (dominated by inline HTML/CSS/JS in
 `frontend/*`) and two documented per-file ignores (`RUF069` in `tests/`, `RUF001` in
-`frontend/*.py`). `pyright` is configured (`basic` mode) and wired into the `sonar` CI job as a
-report-only step (`continue-on-error: true`).
+`frontend/*.py`). `pyright` is configured (`basic` mode) and was, at the time, wired into the
+`sonar` CI job as a report-only step (`continue-on-error: true`) — see the 2026-07-30 addendum
+below for how this was resolved.
 
 Found and fixed one real bug the broadened ruff catches: `InverterState` was used in two type
 annotations in `host-services/goodwe_bridge.py` without being imported (silently masked by
@@ -38,8 +39,8 @@ annotations in `host-services/goodwe_bridge.py` without being imported (silently
 24-error backlog — all either `pymodbus` version-compat shims, invariants invisible across
 function boundaries, or defensive duck-typing, not live bugs — documented but not all fixed.
 
-**Still needs**: a decision on when the 24-error pyright backlog is "clean enough" to flip from
-report-only to a blocking CI gate.
+**Resolved 2026-07-30**: see the addendum at the end of this document — the backlog is at zero
+and both CI gates are now blocking.
 
 ## `docker-compose.yml` / `.github/workflows/deploy.yml` split — done
 
@@ -79,3 +80,36 @@ The actual merge-and-deploy logic moved to a new repo, `minyad-pro`, which pulls
 `minyad-core` and `minyad-private`, overlays them, and runs the deploy job that used to
 live here. See that repo's README for the trigger model (schedule + optional dispatch from
 `minyad-private`, no dependency on this repo notifying anyone).
+
+## Pyright backlog resolved and ci.yml's type-check gate made blocking (2026-07-30) — done
+
+Triaged the 24-error backlog above (23 by the time this ran; one had already been fixed
+incidentally) to zero. Six were exactly the documented category — invariants invisible across
+function/method boundaries, not real bugs — fixed with `assert`s that double as runtime guards,
+or small restructurings, rather than `# type: ignore` suppressions:
+`api/routers/dashboard.py`, `control/main.py`, `host-services/minyad_explain.py`,
+`scripts/fetch_dryad.py`, `ingestion/sensors/dsmr.py`, `host-services/backends/goodwe_backend.py`.
+
+One was a real, currently-live bug: `host-services/backends/modbus_backend.py`'s Modbus
+unit-ID fallback only ever tried `slave=`/`unit=`, and both raise `TypeError` against the
+pinned `pymodbus==3.13.1` (confirmed by installing that exact version and inspecting
+`read_holding_registers`/`write_register`/`write_registers` directly — the real parameter is
+`device_id`). Every Modbus read/write would currently fail for any deployment with
+`GOODWE_MODBUS_LIMITS_ENABLED=true`. The test suite's fake client had silently drifted from
+the real pinned dependency's signature, which is exactly why this wasn't caught. Replaced the
+two-name fallback with a helper trying `device_id`/`slave`/`unit` in order, updated the fake,
+and added tests covering the fallback paths explicitly.
+
+`ci.yml`'s pyright step is now a normal blocking step. It also needed installing the project's
+own `requirements.txt` first — the lint job never had that, so pyright couldn't resolve any
+third-party import (sqlalchemy, cryptography, paho-mqtt, alembic's `op`, ...), producing ~74
+unrelated errors that `continue-on-error: true` was silently swallowing alongside the real
+backlog. Verified end-to-end: a green PR against the actual `ci.yml` on GitHub, not just a
+local run.
+
+**Still needs**: `release.yml`'s `sonar` job has the identical report-only pyright step and the
+identical missing-dependency gap `ci.yml` had — same fix should apply (`sonar` is a leaf job
+nothing else depends on; `build`/`trivy`/`trivy-gate` all key off `test`, not `sonar`, so it's
+low blast radius). Deliberately left alone in this pass — it only runs on the self-hosted
+`minyad` runner with production secrets, not reachable from a sandboxed dev environment, so it
+needs its own explicit sign-off rather than bundling it into a docs cleanup.
