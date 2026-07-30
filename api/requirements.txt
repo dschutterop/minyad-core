@@ -12,4 +12,4 @@ paho-mqtt==2.1.0
 # runs that package's __init__.py, which pulls in its planner/forecast_client
 # modules -- same reason minyad-strategy/requirements.txt carries them.
 httpx==0.28.1
-pulp==2.9.0
+pulp==3.3.2
