@@ -20,6 +20,25 @@ updates:
     schedule:
       interval: "weekly"
     groups:
+      # These packages are pinned in more than one requirements.txt, but CI's Test job
+      # installs every service's requirements.txt into one environment (see ci.yml) --
+      # so if one copy moves without the others, CI breaks with a pip resolution
+      # conflict. Grouping them (major included) means they always move together,
+      # regardless of directories being scanned independently. Re-run the duplicate
+      # check below if requirements.txt files change which packages they share:
+      #   for f in requirements.txt */requirements.txt; do grep -oE "^[A-Za-z0-9_.-]+" "$f"; done | sort | uniq -c | awk '$1>1'
+      shared-across-services:
+        patterns:
+          - "fastapi"
+          - "starlette"
+          - "uvicorn"
+          - "sqlalchemy"
+          - "asyncpg"
+          - "cryptography"
+          - "paho-mqtt"
+          - "prometheus-client"
+          - "httpx"
+          - "pulp"
       python-patch-and-minor:
         update-types:
           - "minor"
