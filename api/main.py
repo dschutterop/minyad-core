@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from sqlalchemy import text
 
@@ -379,8 +381,8 @@ __all__ = [
 _debug_refresh_task: asyncio.Task[None] | None = None
 
 
-@app.on_event("startup")
-async def startup() -> None:
+@asynccontextmanager
+async def _lifespan(_app: object) -> AsyncIterator[None]:
     global _debug_refresh_task
     async with AsyncSessionLocal() as session:
         result = await session.execute(text(DEBUG_LOGGING_SETTING_QUERY))
@@ -398,3 +400,10 @@ async def startup() -> None:
         publish_battery_mqtt_settings(await battery_settings(session))
         publish_trade_mqtt_settings(await trade_settings(session))
     _debug_refresh_task = asyncio.create_task(_refresh_debug_setting())
+    yield
+
+
+# app is constructed in api.state (no dependency on api.main); assigning the
+# lifespan context here, rather than passing FastAPI(lifespan=...) there, keeps
+# that one-way dependency intact since this lifespan needs main.py's imports.
+app.router.lifespan_context = _lifespan
