@@ -1,6 +1,7 @@
-# TODO
+# 2026-07-14 architecture cleanup — completed
 
-Status of the follow-ups from the 2026-07-14 architecture cleanup. All three were completed in
+This is a historical record, not a live backlog — every item below is done. It documents the
+follow-ups from the 2026-07-14 architecture cleanup. All three were completed in
 `refactor/architecture-cleanup`, each verified as far as possible in a sandboxed dev environment.
 What's left in each section is genuinely "requires the real thing" — self-hosted runner, production
 secrets, or live battery/grid hardware — not further code changes.
@@ -57,8 +58,8 @@ intentional step-list change; a before/after diff confirms nothing else moved or
 Deliberately **not** done: deduplicating the 4x-repeated `run_trivy` boolean expression via a
 job output. `sonar`/`trivy`/`trivy-gate`/`deploy` don't currently share a common direct `needs:`
 predecessor that has it available, so exposing it as a `needs.<job>.outputs.run_trivy` would mean
-adding new edges to the job graph — a structural change to the exact pipeline TODO.md always
-warned to be careful with, for a purely cosmetic DRY win. Left as documented, working duplication.
+adding new edges to the job graph — a structural change this doc always warned to be careful
+with, for a purely cosmetic DRY win. Left as documented, working duplication.
 
 **Still needs**: an actual run of both workflows against the real self-hosted runner and
 production secrets, on a branch, before merging to `main` — none of this is reachable from a
