@@ -203,7 +203,7 @@ jobs:
           echo "SONAR_TOKEN=${SONAR_TOKEN}" >> "${GITHUB_ENV}"
 
       - name: Run SonarQube scan
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@v8
 
   build:
     name: Build ${{ matrix.service }}
