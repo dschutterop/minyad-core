@@ -163,5 +163,6 @@ def _battery_mode_label(value: object, fallback: object = None) -> str:
             return "idle"
     try:
         return {0: "idle", 1: "charge", 2: "discharge"}[int(value)]
-    except Exception:
-        return "idle"
+    except (TypeError, ValueError, KeyError):
+        logger.warning("Unrecognized GoodWe battery_mode register value: %r", value)
+        return "unknown"

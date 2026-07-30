@@ -21,7 +21,7 @@ from sqlalchemy import text
 
 try:
     from shared.db import AsyncSessionLocal
-except Exception:  # pragma: no cover - allows unit tests without DB_URL
+except KeyError:  # pragma: no cover - allows unit tests without DB_URL
     AsyncSessionLocal = None
 from shared.mqtt_client import MinyadMqttClient
 
