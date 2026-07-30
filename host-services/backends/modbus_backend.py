@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from time import monotonic, time
+from typing import Any
 
 from pymodbus.client import AsyncModbusTcpClient
 
@@ -79,12 +81,25 @@ class ModbusBackend:
             raise ConnectionError(f"Modbus gateway unreachable at {self.host}:{self.port}")
         return self.client
 
+    async def _call_with_id_kwarg(self, method: Callable[..., Awaitable[Any]], **kwargs: Any) -> Any:
+        """pymodbus has renamed the unit-id keyword across major versions: device_id
+        (3.7+, including the pinned 3.13.1), slave (~3.0-3.6), unit (2.x). Try each
+        until one is accepted -- passed via a dict unpack rather than a literal
+        kwarg so it also can't be pinned to one name by a type checker, since the
+        installed version determines which single name is actually valid and
+        dependabot will keep bumping this pin forward."""
+        last_error: TypeError | None = None
+        for kwarg_name in ("device_id", "slave", "unit"):
+            try:
+                return await method(**kwargs, **{kwarg_name: self.slave_id})
+            except TypeError as exc:
+                last_error = exc
+        assert last_error is not None
+        raise last_error
+
     async def _read_holding_registers(self, address: int, count: int) -> list[int]:
         client = await self._connect()
-        try:
-            result = await client.read_holding_registers(address=address, count=count, slave=self.slave_id)
-        except TypeError:
-            result = await client.read_holding_registers(address=address, count=count, unit=self.slave_id)
+        result = await self._call_with_id_kwarg(client.read_holding_registers, address=address, count=count)
         if result.isError():
             self.metrics.modbus_errors_total += 1
             raise RuntimeError(f"Modbus read failed at {address}: {result}")
@@ -98,14 +113,9 @@ class ModbusBackend:
             return
         client = await self._connect()
         try:
-            result = await client.write_register(address=address, value=value, slave=self.slave_id)
+            result = await self._call_with_id_kwarg(client.write_register, address=address, value=value)
         except AttributeError:
-            result = await client.write_registers(address=address, values=[value], slave=self.slave_id)
-        except TypeError:
-            try:
-                result = await client.write_register(address=address, value=value, unit=self.slave_id)
-            except AttributeError:
-                result = await client.write_registers(address=address, values=[value], unit=self.slave_id)
+            result = await self._call_with_id_kwarg(client.write_registers, address=address, values=[value])
         if result.isError():
             self.metrics.modbus_errors_total += 1
             raise RuntimeError(f"Modbus write failed at {address}: {result}")

@@ -100,7 +100,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.raw:
                 print(json.dumps({"history": history}, indent=2, sort_keys=True))
             else:
-                series = history.get("series") if isinstance(history.get("series"), list) else []
+                raw_series = history.get("series")
+                series = raw_series if isinstance(raw_series, list) else []
                 print(f"Dryad history: {len(series)} day(s), requested={history.get('days')}")
                 if series:
                     print(f"  first: {series[0]}")

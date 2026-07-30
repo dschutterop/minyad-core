@@ -336,6 +336,9 @@ async def api_forecast(session: SessionDep, hours_ahead: int = 12) -> dict[str, 
     stale_status = _forecast_stale_status(plan_row, latest_plan_status, now_)
     if stale_status is not None:
         return {"hours_ahead": hours, "plan_status": stale_status, "points": []}
+    # _forecast_stale_status only returns None when plan_row is not None (see its
+    # own plan_generated_at is None <=> plan_row is None check).
+    assert plan_row is not None
     if plan_row.get("solver_status") == "FALLBACK":
         # See dashboard_curves: a FALLBACK plan is a flat pv_forecast_w=0 hold, not a real
         # forecast — treat it the same as no plan rather than returning fabricated zeros.

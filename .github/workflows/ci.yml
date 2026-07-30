@@ -87,9 +87,5 @@ jobs:
       - name: Run linter
         run: ruff check .
 
-      - name: Run type checker (report-only)
-        # Non-blocking until the pre-existing backlog (documented in pyproject.toml's
-        # [tool.pyright] section) is triaged down to zero; flip to a hard failure then,
-        # same as the sonar job in release.yml.
-        continue-on-error: true
+      - name: Run type checker
         run: pyright

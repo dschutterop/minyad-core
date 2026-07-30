@@ -16,6 +16,11 @@ class Result:
 
 
 class FakeModbusClient:
+    """Mimics the currently-pinned pymodbus 3.13.1 API, which only accepts
+    device_id (not the older slave/unit kwargs) -- see test_modbus_backend
+    below for coverage of the slave/unit fallback paths against older
+    pymodbus versions."""
+
     instances: ClassVar[list] = []
 
     def __init__(self, *args, **kwargs):
@@ -27,11 +32,11 @@ class FakeModbusClient:
         self.connected = True
         return True
 
-    async def write_register(self, address, value, slave=None):
-        self.writes.append((address, value, slave))
+    async def write_register(self, address, value, device_id=None):
+        self.writes.append((address, value, device_id))
         return Result()
 
-    async def read_holding_registers(self, address, count, slave=None):
+    async def read_holding_registers(self, address, count, device_id=None):
         if address == 35180:
             regs = [520, 0, 0xFFFF, 0xFF9C, 0, 0, 0, 2]
             return Result(regs[:count])
@@ -42,10 +47,48 @@ class FakeModbusClient:
         return Result([0] * count)
 
 
-def import_modbus_backend():
+class FakeLegacyModbusClient:
+    """Mimics pymodbus ~3.0-3.6, which used "slave" instead of "device_id"."""
+
+    def __init__(self, *args, **kwargs):
+        self.connected = False
+        self.writes = []
+
+    async def connect(self):
+        self.connected = True
+        return True
+
+    async def write_register(self, address, value, slave=None):
+        self.writes.append((address, value, slave))
+        return Result()
+
+    async def read_holding_registers(self, address, count, slave=None):
+        return Result([0] * count)
+
+
+class FakeVeryLegacyModbusClient:
+    """Mimics pymodbus 2.x, which used "unit" instead of "slave"/"device_id"."""
+
+    def __init__(self, *args, **kwargs):
+        self.connected = False
+        self.writes = []
+
+    async def connect(self):
+        self.connected = True
+        return True
+
+    async def write_register(self, address, value, unit=None):
+        self.writes.append((address, value, unit))
+        return Result()
+
+    async def read_holding_registers(self, address, count, unit=None):
+        return Result([0] * count)
+
+
+def import_modbus_backend(client_cls=FakeModbusClient):
     pymodbus = types.ModuleType("pymodbus")
     client = types.ModuleType("pymodbus.client")
-    client.AsyncModbusTcpClient = FakeModbusClient
+    client.AsyncModbusTcpClient = client_cls
     pymodbus.client = client
     sys.modules["pymodbus"] = pymodbus
     sys.modules["pymodbus.client"] = client
@@ -135,3 +178,27 @@ def test_modbus_adapter_enforces_min_write_interval():
     assert second is False
     assert writes == [(45565, 1000, 247), (45566, 0, 247)]
     assert metrics.skipped_by_reason["write interval not elapsed"] == 1
+
+
+def test_modbus_backend_falls_back_to_legacy_slave_kwarg():
+    modbus = import_modbus_backend(client_cls=FakeLegacyModbusClient)
+
+    async def run():
+        backend = modbus.ModbusBackend("127.0.0.1", 502, 247, 5, 5000, min_write_interval_s=0, post_write_feedback_settle_s=0)
+        await backend.set_battery_limits(1000, 0, state_changed=True)
+        return backend.client.writes
+
+    writes = asyncio.run(run())
+    assert writes == [(45565, 1000, 247), (45566, 0, 247)]
+
+
+def test_modbus_backend_falls_back_to_very_legacy_unit_kwarg():
+    modbus = import_modbus_backend(client_cls=FakeVeryLegacyModbusClient)
+
+    async def run():
+        backend = modbus.ModbusBackend("127.0.0.1", 502, 247, 5, 5000, min_write_interval_s=0, post_write_feedback_settle_s=0)
+        await backend.set_battery_limits(1000, 0, state_changed=True)
+        return backend.client.writes
+
+    writes = asyncio.run(run())
+    assert writes == [(45565, 1000, 247), (45566, 0, 247)]

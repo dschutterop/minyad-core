@@ -185,7 +185,9 @@ def _resolve_grid_power(cur, row: dict[str, Any], ts: datetime) -> float | None:
     if grid is not None:
         return grid
     gp = nearest(cur, "power_curve_points", ts, "grid")
-    return gp and (gp.get("net_w") if "net_w" in gp else gp.get("power_w"))
+    if gp is None:
+        return None
+    return gp.get("net_w") if "net_w" in gp else gp.get("power_w")
 
 
 def _explain_line_parts(row: dict[str, Any], remaining: float | None, grid: float | None) -> list[str]:

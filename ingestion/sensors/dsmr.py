@@ -83,11 +83,22 @@ class P1Reader:
                 return
         self._emit_if_ready()
 
+    def _numeric_value(self, key: str) -> float:
+        # self._values is one shared dict across every subscribed topic, so its
+        # value type is float | datetime (TIMESTAMP_TOPIC stores a datetime,
+        # everything else stores a float) -- callers only ever look up a
+        # non-timestamp key here. Asserting rather than silently coercing
+        # means a future bug that violates that invariant fails loudly instead
+        # of feeding a wrong number into the net-power calculation below.
+        value = self._values[key]
+        assert isinstance(value, float), f"Expected a numeric DSMR value for {key}, got {type(value)!r}"
+        return value
+
     def _emit_if_ready(self) -> None:
         if not REQUIRED_TOPICS.issubset(self._values):
             return
-        delivered = float(self._values[DELIVERED_TOPIC])
-        returned = float(self._values[RETURNED_TOPIC])
+        delivered = self._numeric_value(DELIVERED_TOPIC)
+        returned = self._numeric_value(RETURNED_TOPIC)
         # Use the same sign convention as the host-side DSMR bridge and the
         # control service: positive means grid import (delivered by the grid),
         # negative means grid export (returned to the grid).  This lets evening
@@ -95,7 +106,7 @@ class P1Reader:
         # mistaken for solar surplus.
         net_power_w = round((delivered - returned) * 1000)
         per_phase_w = {
-            phase: round((float(self._values[PHASE_DELIVERED_TOPICS[phase]]) - float(self._values[PHASE_RETURNED_TOPICS[phase]])) * 1000)
+            phase: round((self._numeric_value(PHASE_DELIVERED_TOPICS[phase]) - self._numeric_value(PHASE_RETURNED_TOPICS[phase])) * 1000)
             for phase in ("L1", "L2", "L3")
         }
         timestamp = self._values[TIMESTAMP_TOPIC]

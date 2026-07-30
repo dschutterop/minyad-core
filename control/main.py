@@ -313,6 +313,9 @@ class ControlApp:
         await self._publish_grid_control_result(state, rebalanced_idle_discharge)
 
     async def _publish_grid_control_result(self, state: ControlState | None, rebalanced_idle_discharge: bool) -> None:
+        # Only called from handle_grid_control_sample, which already returns early
+        # when self.controller is None (controller not ready).
+        assert self.controller is not None
         if state is ControlState.CHARGING:
             await self.publish_setpoint(self.charge_target_w(), state_changed=True)
         elif self.controller.state is ControlState.CHARGING:
