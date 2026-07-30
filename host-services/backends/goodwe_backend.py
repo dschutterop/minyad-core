@@ -152,7 +152,7 @@ class GoodWeBackend:
         )
 
 
-def _battery_mode_label(value: object, fallback: object = None) -> str:
+def _battery_mode_label(value: int | float | str | None, fallback: object = None) -> str:
     if isinstance(fallback, str):
         text = fallback.lower()
         if "discharge" in text:
@@ -161,8 +161,11 @@ def _battery_mode_label(value: object, fallback: object = None) -> str:
             return "charge"
         if "idle" in text or "standby" in text:
             return "idle"
+    if value is None:
+        logger.warning("Unrecognized GoodWe battery_mode register value: %r", value)
+        return "unknown"
     try:
         return {0: "idle", 1: "charge", 2: "discharge"}[int(value)]
-    except (TypeError, ValueError, KeyError):
+    except (ValueError, KeyError):
         logger.warning("Unrecognized GoodWe battery_mode register value: %r", value)
         return "unknown"

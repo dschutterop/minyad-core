@@ -56,7 +56,10 @@ class DuplicateInfoFilter(logging.Filter):
 def configure_container_logging(level: int | str = logging.INFO, *, format: str | None = None) -> None:
     """Configure service logging with duplicate INFO-line grouping."""
 
-    logging.basicConfig(level=level, format=format)
+    if format is not None:
+        logging.basicConfig(level=level, format=format)
+    else:
+        logging.basicConfig(level=level)
     root = logging.getLogger()
     root.setLevel(level)
     if any(isinstance(existing, DuplicateInfoFilter) for handler in root.handlers for existing in handler.filters):
