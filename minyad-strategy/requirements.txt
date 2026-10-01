@@ -1,9 +1,9 @@
 fastapi==0.141.1
-starlette==1.6.0
-uvicorn[standard]==0.52.1
-sqlalchemy==2.0.51
+starlette==1.7.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.1
 asyncpg==0.31.0
-cryptography==50.0.0
+cryptography==50.0.1
 paho-mqtt==2.1.0
 httpx==0.28.1
 apscheduler==3.11.3
