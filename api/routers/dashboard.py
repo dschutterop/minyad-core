@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Query
-from sqlalchemy import text
+from sqlalchemy import RowMapping, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
@@ -168,6 +169,24 @@ async def _dashboard_forecast_curves(
     return "ok", plan_generated_at, curves, price_source_points
 
 
+async def _curve_rows(
+    session: SessionDep, table_name: str, step_seconds: int, start: datetime, until: datetime
+) -> Sequence[RowMapping]:
+    if table_name == "power_curve_points":
+        bucket = _bucket_expr("bucket_start", step_seconds)
+        source_filter = "bucket_start >= :start and bucket_start <= :now_"
+    else:
+        bucket = "bucket_start"
+        source_filter = "granularity_seconds = :step_seconds and bucket_start >= :start and bucket_start <= :now_"
+    return (await session.execute(text(f"""
+        select {bucket} as ts, source, avg(power_w) as power_w,
+               avg(delivered_w) as delivered_w, avg(returned_w) as returned_w, avg(net_w) as net_w
+        from {table_name}
+        where {source_filter}
+        group by ts, source order by ts
+    """), {"start": start, "now_": until, "step_seconds": step_seconds})).mappings().all()
+
+
 @router.get("/dashboard/curves")
 async def dashboard_curves(
     session: SessionDep,
@@ -176,27 +195,12 @@ async def dashboard_curves(
 ) -> dict[str, Any]:
     duration, step_seconds, table_name = WINDOWS[window]
     start, end, now_ = dashboard_window_bounds(window, duration, period_offset=offset)
-    if table_name == "power_curve_points":
-        bucket = _bucket_expr("bucket_start", step_seconds)
-        source_filter = "bucket_start >= :start and bucket_start <= :now_"
-        power_expr = "avg(power_w)"
-        delivered_expr = "avg(delivered_w)"
-        returned_expr = "avg(returned_w)"
-        net_expr = "avg(net_w)"
-    else:
-        bucket = "bucket_start"
-        source_filter = "granularity_seconds = :step_seconds and bucket_start >= :start and bucket_start <= :now_"
-        power_expr = "avg(power_w)"
-        delivered_expr = "avg(delivered_w)"
-        returned_expr = "avg(returned_w)"
-        net_expr = "avg(net_w)"
-    rows = (await session.execute(text(f"""
-        select {bucket} as ts, source, {power_expr} as power_w,
-               {delivered_expr} as delivered_w, {returned_expr} as returned_w, {net_expr} as net_w
-        from {table_name}
-        where {source_filter}
-        group by ts, source order by ts
-    """), {"start": start, "end": end, "now_": now_, "step_seconds": step_seconds})).mappings().all()
+    rows = await _curve_rows(session, table_name, step_seconds, start, now_)
+    if not rows and window == "day" and offset is not None and offset < 0:
+        # Raw 1-minute points are not kept for old days; fall back to the 15-minute rollups.
+        rows = await _curve_rows(session, "power_curve_rollups", 900, start, now_)
+        if rows:
+            step_seconds = 900
     series = {"solar": [], "battery": [], "grid": [], "household": []}
     for row in rows:
         series[row["source"]].append({
