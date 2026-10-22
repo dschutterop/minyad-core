@@ -16,4 +16,4 @@
 
 # Only used by scripts/dump_agent_decisions.py, a local/manual maintenance
 # script -- not part of any service image.
-psycopg[binary]==3.3.4
+psycopg[binary]==3.3.6
