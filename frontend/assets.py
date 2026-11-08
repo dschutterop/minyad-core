@@ -636,4 +636,10 @@ html[data-theme=light] body.dashboard-page .forecast-line{stroke:rgba(95,117,136
 html[data-theme=light] body.dashboard-page .home-line{stroke:var(--home-d)}
 html[data-theme=light] body.dashboard-page .chart-tooltip{background:#FFFFFF;border-color:rgba(74,98,118,.20);color:var(--p-ink);box-shadow:0 16px 38px rgba(21,32,42,.16)}
 html[data-theme=light] body.dashboard-page .chart-tooltip span{color:rgba(74,98,118,.76)}
+/* Design system pass: keyboard focus, nav contrast, one-row nav on phones */
+:where(a,button,input,select,textarea,summary,[tabindex]):focus-visible,body.dashboard-page .brand-nav a:focus-visible{outline:2px solid var(--produce-d);outline-offset:3px;border-radius:4px}
+html[data-theme=light] :where(a,button,input,select,textarea,summary,[tabindex]):focus-visible,html[data-theme=light] body.dashboard-page .brand-nav a:focus-visible{outline-color:var(--produce)}
+body.dashboard-page .brand-nav a:not(.active):not(:hover){color:rgba(226,235,243,.64)}
+html[data-theme=light] body.dashboard-page .brand-nav a:not(.active):not(:hover){color:rgba(74,98,118,.92)}
+@media(max-width:700px){body.dashboard-page .brand-nav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}body.dashboard-page .brand-nav::-webkit-scrollbar{display:none}body.dashboard-page .brand-nav a{flex:none}}
 """
