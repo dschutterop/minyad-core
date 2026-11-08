@@ -165,6 +165,9 @@ LANGUAGE_BOOT_SCRIPT = """
       'Live': 'Live',
       'Approx': 'Geschat',
       'mismatch': 'afwijking',
+      'Inbox': 'Postvak',
+      'Measured': 'Gemeten',
+      'Market': 'Markt',
       'Combined day graph - kW / EUR/kWh': 'Gecombineerde daggrafiek - kW / EUR/kWh',
       'Forecast': 'Prognose',
       'Production': 'Productie',
@@ -670,4 +673,23 @@ body.sub-page .brand-main{padding:0 26px}
 @media(max-width:700px){body.sub-page .brand-nav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}body.sub-page .brand-nav::-webkit-scrollbar{display:none}body.sub-page .brand-nav a{flex:none}}
 body.sub-page .brand-nav a:focus-visible{outline:2px solid var(--produce-d);outline-offset:3px;border-radius:4px}
 html[data-theme=light] body.sub-page .brand-nav a:focus-visible{outline-color:var(--produce)}
+/* Dashboard clarity: toolbar, units, idle values, legend groups, inbox label */
+body.dashboard-page .dash-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px 28px;flex-wrap:wrap;padding:4px 26px 16px}
+body.dashboard-page .dash-toolbar .dash-head,body.dashboard-page .dash-toolbar .window-bar{display:flex;align-items:center;padding:0;margin:0;height:auto;border:0;background:transparent}
+body.dashboard-page .dash-toolbar .dash-head{gap:22px;justify-content:flex-start;flex-wrap:wrap}
+body.dashboard-page .dash-toolbar .dash-meta{text-align:left}
+.dash-self{display:flex;align-items:baseline;gap:10px;font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--p-mut)}
+.dash-self b{font-size:22px;font-weight:650;letter-spacing:0;color:var(--produce-d);font-variant-numeric:tabular-nums}
+html[data-theme=light] .dash-self b{color:var(--produce)}
+@media(max-width:860px){body.dashboard-page .dash-toolbar{padding:4px 14px 14px}}
+body.dashboard-page .phrase{display:flex;align-items:baseline;gap:.22em}
+body.dashboard-page .phrase .unit{margin-left:0}
+body.dashboard-page .phrase.is-idle{color:var(--p-mut);text-shadow:none}
+.mailbox-label{margin-left:8px;font:600 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase}
+@media(max-width:560px){.mailbox-label{display:none}}
+body.dashboard-page .chart-legend{gap:8px 22px;align-items:center}
+.legend-group{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.legend-title{font:700 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--p-mut);margin-right:6px}
+body.dashboard-page .chart-legend button{border:1px solid color-mix(in srgb,currentColor 40%,transparent);background:color-mix(in srgb,currentColor 10%,transparent)}
+body.dashboard-page .chart-legend button[aria-pressed="false"]{background:transparent;border:1px dashed var(--p-line);color:var(--p-mut)!important;opacity:.85}
 """
