@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -173,6 +174,7 @@ try:
         battery_settings,
         battery_status,
         current_battery_override,
+        household_status_payload,
     )
     from api.routers.dashboard import api_forecast, api_v1_surplus
     from api.routers.grid import grid_status
@@ -226,6 +228,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the API Docker im
         battery_settings,
         battery_status,
         current_battery_override,
+        household_status_payload,
     )
     from routers.dashboard import api_forecast, api_v1_surplus
     from routers.grid import grid_status
@@ -379,11 +382,29 @@ __all__ = [
 
 
 _debug_refresh_task: asyncio.Task[None] | None = None
+_curve_recorder_task: asyncio.Task[None] | None = None
+CURVE_SAMPLE_SECONDS = float(os.getenv("MINYAD_CURVE_SAMPLE_SECONDS", "10"))
+
+
+async def _record_power_curves() -> None:
+    """Store solar/grid/battery/household curve points continuously, independent of any open UI.
+
+    The status handlers persist a power_curve_points row as a side effect, so reuse them.
+    """
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                await grid_status(session)
+                await battery_status(session)
+                await household_status_payload(session)
+        except Exception:
+            LOGGER.exception("Power curve sampling failed")
+        await asyncio.sleep(CURVE_SAMPLE_SECONDS)
 
 
 @asynccontextmanager
 async def _lifespan(_app: object) -> AsyncIterator[None]:
-    global _debug_refresh_task
+    global _debug_refresh_task, _curve_recorder_task
     async with AsyncSessionLocal() as session:
         result = await session.execute(text(DEBUG_LOGGING_SETTING_QUERY))
         val = result.scalar_one_or_none() or "false"
@@ -400,7 +421,13 @@ async def _lifespan(_app: object) -> AsyncIterator[None]:
         publish_battery_mqtt_settings(await battery_settings(session))
         publish_trade_mqtt_settings(await trade_settings(session))
     _debug_refresh_task = asyncio.create_task(_refresh_debug_setting())
-    yield
+    if CURVE_SAMPLE_SECONDS > 0:
+        _curve_recorder_task = asyncio.create_task(_record_power_curves())
+    try:
+        yield
+    finally:
+        if _curve_recorder_task is not None:
+            _curve_recorder_task.cancel()
 
 
 # app is constructed in api.state (no dependency on api.main); assigning the
