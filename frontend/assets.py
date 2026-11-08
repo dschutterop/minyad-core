@@ -642,4 +642,32 @@ html[data-theme=light] :where(a,button,input,select,textarea,summary,[tabindex])
 body.dashboard-page .brand-nav a:not(.active):not(:hover){color:rgba(226,235,243,.64)}
 html[data-theme=light] body.dashboard-page .brand-nav a:not(.active):not(:hover){color:rgba(74,98,118,.92)}
 @media(max-width:700px){body.dashboard-page .brand-nav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}body.dashboard-page .brand-nav::-webkit-scrollbar{display:none}body.dashboard-page .brand-nav a{flex:none}}
+/* Sub-pages share the dashboard header: same mark, wordmark, nav size and placement */
+body.sub-page .dashboard-nav{background:transparent;border:0;padding:20px 26px 8px}
+body.sub-page .brand-lockup{gap:12px}
+body.sub-page .wordmark strong{color:var(--p-ink);font-family:var(--mono);font-size:17px;font-weight:600;letter-spacing:.26em;text-transform:uppercase}
+body.sub-page .wordmark span{display:none}
+body.sub-page .brand-nav{display:flex;gap:12px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+body.sub-page .brand-nav a{color:rgba(226,235,243,.46);font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;padding:7px 0;border-bottom:1px solid transparent}
+body.sub-page .brand-nav a:hover,body.sub-page .brand-nav a:focus-visible{color:var(--p-ink);outline:none}
+body.sub-page .brand-nav a.active{color:var(--produce-d);border-bottom-color:var(--produce-d)}
+body.sub-page .mark{width:28px;height:28px;filter:drop-shadow(0 0 10px rgba(76,219,131,.32))}
+body.sub-page .mark line,body.sub-page .mark circle{stroke:var(--produce-d)}
+body.sub-page .mark circle{fill:#08111A}
+html[data-theme=light] body.sub-page .wordmark strong{color:var(--p-ink)}
+html[data-theme=light] body.sub-page .brand-nav a{color:rgba(74,98,118,.66)}
+html[data-theme=light] body.sub-page .brand-nav a:hover,html[data-theme=light] body.sub-page .brand-nav a:focus-visible{color:var(--ink)}
+html[data-theme=light] body.sub-page .brand-nav a.active{color:var(--produce);border-bottom-color:var(--produce)}
+html[data-theme=light] body.sub-page .mark{filter:drop-shadow(0 0 8px rgba(46,156,98,.18))}
+html[data-theme=light] body.sub-page .mark line,html[data-theme=light] body.sub-page .mark circle{stroke:var(--produce)}
+html[data-theme=light] body.sub-page .mark circle{fill:#EDF1F4}
+body.sub-page .brand-nav a:not(.active):not(:hover){color:rgba(226,235,243,.64)}
+html[data-theme=light] body.sub-page .brand-nav a:not(.active):not(:hover){color:rgba(74,98,118,.92)}
+body.sub-page .brand-shell{padding:0 0 56px}
+html[data-theme=light] body.sub-page .dashboard-nav{--p-ink:#15202A}
+body.sub-page .brand-main{padding:0 26px}
+@media(max-width:860px){body.sub-page .dashboard-nav{padding:16px 14px 8px;align-items:flex-start;flex-direction:column}body.sub-page .brand-nav{justify-content:flex-start;gap:10px}body.sub-page .brand-main{padding:0 14px}}
+@media(max-width:700px){body.sub-page .brand-nav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}body.sub-page .brand-nav::-webkit-scrollbar{display:none}body.sub-page .brand-nav a{flex:none}}
+body.sub-page .brand-nav a:focus-visible{outline:2px solid var(--produce-d);outline-offset:3px;border-radius:4px}
+html[data-theme=light] body.sub-page .brand-nav a:focus-visible{outline-color:var(--produce)}
 """

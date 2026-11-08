@@ -77,9 +77,9 @@ def render_page(active: str, body: str, brand_name: str = DEFAULT_BRAND_NAME) ->
         {LANGUAGE_BOOT_SCRIPT}
         {AUTO_REFRESH_SCRIPT}
       </head>
-      <body>
+      <body class="sub-page">
         <div class="brand-shell">
-          <header class="brand-header">
+          <header class="brand-header dashboard-nav">
             <a class="brand-lockup" href="/" aria-label="Minyad dashboard">
               {brand_mark()}
               <span class="wordmark"><strong>{brand_name}</strong><span>Virtual Power Plant</span></span>
