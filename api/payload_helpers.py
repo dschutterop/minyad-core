@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
@@ -905,3 +906,310 @@ def _validate_battery_override_limits(
         limit_name = "MAX_DISCHARGE_W" if mode == "force_discharge" else "MAX_CHARGE_W"
         return f"watts must not exceed {limit_name} ({max_allowed_w})"
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Energy Command Center (frontend/views.py energy_center_body) view-model
+# helpers. Pure functions so the sign/threshold/freshness decisions the new
+# dashboard relies on are unit-testable, and so every card that shows one of
+# these values reads it from the same place instead of recomputing it.
+# --------------------------------------------------------------------------- #
+
+
+def integrate_day_kwh(points: list[dict[str, Any]], value_w: Any) -> float:
+    """Trapezoidal-integrate a day's worth of per-minute/rollup points into kWh.
+
+    Mirrors the client-side `dayKwh()` helper the classic dashboard has used for
+    this since before this module existed: gaps longer than ~66 minutes are
+    skipped rather than bridged, so an offline window is never silently counted
+    as a real measurement. `value_w(point)` extracts the signed/clamped watt
+    value to integrate (callers decide solar/import/export/charge/discharge).
+    """
+    total = 0.0
+    for a, b in pairwise(points):
+        ts_a = parse_status_timestamp(a.get("timestamp"))
+        ts_b = parse_status_timestamp(b.get("timestamp"))
+        if ts_a is None or ts_b is None:
+            continue
+        dt_hours = (ts_b - ts_a).total_seconds() / 3600
+        if 0 < dt_hours < 1.1:
+            total += (value_w(a) + value_w(b)) / 2 / 1000 * dt_hours
+    return total
+
+
+def canonical_self_sufficiency_pct(
+    pv_kwh: float | None, grid_export_kwh: float | None, grid_import_kwh: float | None
+) -> float | None:
+    """The Energy Center's "Zelfvoorzienend vandaag" value.
+
+    This preserves the definition frontend/views.py's classic dashboard has
+    used all along (`self = used / (used + imported)`, `used = max(0, produced
+    - exported)`) rather than introducing a second meaning under the same
+    label: the share of today's (self-consumed solar + grid import) that was
+    covered by solar kept on-site. It is solar self-consumption-vs-import, not
+    literally `1 - import/consumption` -- those coincide only when household
+    consumption is measured as exactly self-used-solar-plus-import.
+
+    Returns None (unavailable) rather than a misleading 0%/100% when any input
+    is missing or there is no measurable supply for the day.
+    """
+    if pv_kwh is None or grid_export_kwh is None or grid_import_kwh is None:
+        return None
+    used = max(0.0, pv_kwh - grid_export_kwh)
+    denominator = used + grid_import_kwh
+    if denominator <= 0:
+        return None
+    return max(0.0, min(100.0, 100 * used / denominator))
+
+
+def battery_soc_alert(
+    soc_pct: float | None, min_soc_pct: float | None, max_soc_pct: float | None
+) -> dict[str, Any] | None:
+    """Flag SoC outside the configured controller policy window.
+
+    Below the floor is a policy-threshold warning, not an assumed hardware
+    fault (per spec 5.5/5.7) -- it only escalates to critical when SoC is far
+    (>=10 points) below the floor, since a small, expected excursion while the
+    controller is actively recovering is a different situation from a battery
+    stuck well below its floor.
+    """
+    if soc_pct is None:
+        return None
+    if min_soc_pct is not None and soc_pct < min_soc_pct:
+        severity = "critical" if soc_pct <= min_soc_pct - 10 else "warning"
+        return {
+            "id": "battery-soc-below-floor",
+            "severity": severity,
+            "title": "State of charge below configured minimum",
+            "description": (
+                f"SoC {soc_pct:g}% is below the configured policy floor of {min_soc_pct:g}%. "
+                "This is a controller policy threshold, not necessarily a battery hardware fault."
+            ),
+            "observed": {"value": soc_pct, "unit": "%"},
+            "threshold": {"value": min_soc_pct, "unit": "%", "kind": "minimum"},
+        }
+    if max_soc_pct is not None and soc_pct > max_soc_pct:
+        return {
+            "id": "battery-soc-above-ceiling",
+            "severity": "warning",
+            "title": "State of charge above configured maximum",
+            "description": f"SoC {soc_pct:g}% is above the configured policy ceiling of {max_soc_pct:g}%.",
+            "observed": {"value": soc_pct, "unit": "%"},
+            "threshold": {"value": max_soc_pct, "unit": "%", "kind": "maximum"},
+        }
+    return None
+
+
+def freshness_state(age_seconds: float | None, expected_interval_seconds: float) -> Literal["live", "delayed", "offline"]:
+    """Classify telemetry age per spec 6.3's suggested thresholds."""
+    if age_seconds is None or expected_interval_seconds <= 0:
+        return "offline"
+    if age_seconds <= 2 * expected_interval_seconds:
+        return "live"
+    if age_seconds <= 5 * expected_interval_seconds:
+        return "delayed"
+    return "offline"
+
+
+# Typical bridge/meter publish interval used to judge telemetry age. The thresholds
+# in freshness_state() (2x live, 5x delayed) are multiples of this.
+TELEMETRY_EXPECTED_INTERVAL_SECONDS = 10.0
+_CONNECTION_RANK = {"live": 0, "delayed": 1, "offline": 2}
+_HEALTH_CONNECTION_FLOOR = {"ok": "live", "warning": "delayed", "error": "offline"}
+
+
+def reading_age_seconds(observed_at: Any, now: datetime) -> float | None:
+    """Age in seconds of an ISO timestamp, or None when it is missing/invalid."""
+    parsed = parse_status_timestamp(observed_at)
+    if parsed is None:
+        return None
+    return max(0.0, (now - parsed).total_seconds())
+
+
+def connection_state(
+    ages_seconds: list[float | None],
+    health_status: str | None,
+    expected_interval_seconds: float = TELEMETRY_EXPECTED_INTERVAL_SECONDS,
+) -> Literal["live", "delayed", "offline"]:
+    """Overall Live/Delayed/Offline for the Energy Center top bar.
+
+    The worst per-source telemetry freshness wins, and the overall health status
+    is a floor (a warning is never "live"). Without any timestamp at all the data
+    cannot be shown as live, so the result is at most "delayed".
+    """
+    states = [freshness_state(age, expected_interval_seconds) for age in ages_seconds if age is not None]
+    floor = _HEALTH_CONNECTION_FLOOR.get(health_status or "", "offline")
+    if not states:
+        states = ["delayed"]
+    return max([*states, floor], key=_CONNECTION_RANK.__getitem__)  # type: ignore[return-value]
+
+
+def integrate_day_kwh_checked(points: list[dict[str, Any]], value_w: Any) -> tuple[float | None, float]:
+    """Like integrate_day_kwh, but never reports a total it cannot back up.
+
+    Returns (kwh, skipped_gap_hours). kwh is None when there is no pair of
+    consecutive points close enough to integrate (no data is not zero energy);
+    skipped_gap_hours is the time inside gaps that were not bridged, so the
+    caller can mark the total as incomplete.
+    """
+    total = 0.0
+    integrated = 0
+    skipped = 0.0
+    for a, b in pairwise(points):
+        ts_a = parse_status_timestamp(a.get("timestamp"))
+        ts_b = parse_status_timestamp(b.get("timestamp"))
+        if ts_a is None or ts_b is None:
+            continue
+        dt_hours = (ts_b - ts_a).total_seconds() / 3600
+        if 0 < dt_hours < 1.1:
+            total += (value_w(a) + value_w(b)) / 2 / 1000 * dt_hours
+            integrated += 1
+        elif dt_hours >= 1.1:
+            skipped += dt_hours
+    return (total if integrated else None), skipped
+
+
+def sun_times(latitude: float, longitude: float, day: date, tz: ZoneInfo | None = None) -> tuple[datetime | None, datetime | None]:
+    """Sunrise and sunset for a date and place (NOAA solar-position approximation, about a minute accurate).
+
+    Returns (None, None) in polar day/night. Times are in `tz` (default UTC). Pure astronomy from the
+    configured location: no weather or network provider is involved.
+    """
+    gamma = 2 * math.pi / 365 * (day.timetuple().tm_yday - 1)
+    eqtime = 229.18 * (
+        0.000075 + 0.001868 * math.cos(gamma) - 0.032077 * math.sin(gamma)
+        - 0.014615 * math.cos(2 * gamma) - 0.040849 * math.sin(2 * gamma)
+    )
+    decl = (
+        0.006918 - 0.399912 * math.cos(gamma) + 0.070257 * math.sin(gamma)
+        - 0.006758 * math.cos(2 * gamma) + 0.000907 * math.sin(2 * gamma)
+        - 0.002697 * math.cos(3 * gamma) + 0.00148 * math.sin(3 * gamma)
+    )
+    lat = math.radians(latitude)
+    cos_ha = math.cos(math.radians(90.833)) / (math.cos(lat) * math.cos(decl)) - math.tan(lat) * math.tan(decl)
+    if cos_ha < -1 or cos_ha > 1:
+        return None, None
+    ha = math.degrees(math.acos(cos_ha))
+    midnight = datetime(day.year, day.month, day.day, tzinfo=UTC)
+    sunrise = midnight + timedelta(minutes=720 - 4 * (longitude + ha) - eqtime)
+    sunset = midnight + timedelta(minutes=720 - 4 * (longitude - ha) - eqtime)
+    zone = tz or UTC
+    return sunrise.astimezone(zone), sunset.astimezone(zone)
+
+
+def supply_mix(
+    pv_kwh: float | None,
+    grid_export_kwh: float | None,
+    battery_charge_kwh: float | None,
+    grid_import_kwh: float | None,
+    battery_discharge_kwh: float | None,
+) -> dict[str, Any] | None:
+    """Where today's energy for the home came from, as shares of one defined total.
+
+    solar = pv - export - battery charge (solar used on site, assuming the battery
+    charged from solar), grid = import, battery = discharge; the shares sum to 100%
+    of that supply total. Returns None when any input is unavailable, so a share is
+    never computed from a guessed value.
+    """
+    values = (pv_kwh, grid_export_kwh, battery_charge_kwh, grid_import_kwh, battery_discharge_kwh)
+    if any(v is None for v in values):
+        return None
+    solar = max(0.0, pv_kwh - grid_export_kwh - battery_charge_kwh)  # type: ignore[operator]
+    parts = {"solar": solar, "grid": grid_import_kwh, "battery": battery_discharge_kwh}
+    total = sum(parts.values())  # type: ignore[arg-type]
+    if total <= 0:
+        return None
+    return {
+        "totalKwh": round(total, 2),
+        "parts": {key: {"kwh": round(val, 2), "pct": round(100 * val / total, 1)} for key, val in parts.items()},  # type: ignore[operator]
+    }
+
+
+def grid_direction_label(grid_kw: float | None, deadband_kw: float = 0.03) -> Literal["import", "export", "neutral", "unknown"]:
+    """`grid_kw` follows the canonical UI convention: positive = import, negative = export."""
+    if grid_kw is None:
+        return "unknown"
+    if grid_kw > deadband_kw:
+        return "import"
+    if grid_kw < -deadband_kw:
+        return "export"
+    return "neutral"
+
+
+def battery_direction_label(battery_kw: float | None, deadband_kw: float = 0.03) -> Literal["charge", "discharge", "idle", "unknown"]:
+    """`battery_kw` follows the canonical UI convention: positive = discharge, negative = charge."""
+    if battery_kw is None:
+        return "unknown"
+    if battery_kw > deadband_kw:
+        return "discharge"
+    if battery_kw < -deadband_kw:
+        return "charge"
+    return "idle"
+
+
+_PLAN_STATUS_ALERT_TEXT = {
+    "stale": "The latest strategy plan is older than the freshness window -- forecast and battery-plan panels are hidden rather than shown stale.",
+    "fallback": "The planner is running in fallback mode (forecast provider unreachable) -- no real forecast is available.",
+    "missing": "No strategy plan has been generated yet.",
+}
+
+
+def build_energy_center_alerts(
+    *,
+    soc_alert: dict[str, Any] | None,
+    household: dict[str, Any] | None,
+    health_components: list[dict[str, Any]] | None,
+    plan_status: str | None,
+) -> list[dict[str, Any]]:
+    """Assemble the Energy Center's prioritized alert list (spec 5.7).
+
+    Only ever returns active, source-backed conditions -- callers render
+    "Alles in orde" themselves exactly when this list is empty, never both.
+    """
+    alerts: list[dict[str, Any]] = []
+    if soc_alert is not None:
+        alerts.append({**soc_alert, "active": True, "occurred_at": None, "source": "battery_settings"})
+    if household and household.get("mismatch"):
+        deviation = household.get("deviation_pct")
+        alerts.append({
+            "id": "household-meter-mismatch",
+            "severity": "warning",
+            "title": "Household consumption meters disagree",
+            "description": (
+                f"Local supply check and full DSMR balance differ by {deviation:.1f}%."
+                if deviation is not None
+                else "Local supply check and full DSMR balance disagree."
+            ),
+            "observed": {"value": deviation, "unit": "%"} if deviation is not None else None,
+            "threshold": None,
+            "active": True,
+            "occurred_at": None,
+            "source": "household_status",
+        })
+    for component in health_components or []:
+        status = component.get("status")
+        if status not in ("warning", "error"):
+            continue
+        name = str(component.get("name") or "component")
+        alerts.append({
+            "id": "health-" + name.lower().replace(" ", "-").replace("/", "-"),
+            "severity": "critical" if status == "error" else "warning",
+            "title": f"{name} unhealthy",
+            "description": component.get("detail") or "",
+            "active": True,
+            "occurred_at": component.get("last_seen"),
+            "source": component.get("endpoint"),
+        })
+    if plan_status not in (None, "ok"):
+        alerts.append({
+            "id": "forecast-plan-unavailable",
+            "severity": "info",
+            "title": "No current forecast/battery plan",
+            "description": _PLAN_STATUS_ALERT_TEXT.get(plan_status, f"Plan status: {plan_status}"),
+            "active": True,
+            "occurred_at": None,
+            "source": "dashboard_curves",
+        })
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    alerts.sort(key=lambda item: severity_rank.get(item["severity"], 3))
+    return alerts

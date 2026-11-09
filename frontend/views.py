@@ -10,6 +10,19 @@ from __future__ import annotations
 from fastapi.responses import HTMLResponse
 
 try:
+    from frontend.energy_center import (
+        ENERGY_CENTER_CSS,
+        ENERGY_CENTER_SCRIPT,
+        energy_center_body,
+    )
+except ModuleNotFoundError:  # pragma: no cover - exercised by the frontend Docker image layout
+    from energy_center import (
+        ENERGY_CENTER_CSS,
+        ENERGY_CENTER_SCRIPT,
+        energy_center_body,
+    )
+
+try:
     from frontend.assets import (
         AUTO_REFRESH_SCRIPT,
         BRAND_CSS,
@@ -25,7 +38,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the frontend Dock
     )
 
 
-MENU = ["Dashboard", "Agent", "Health", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
+MENU = ["Dashboard", "Energy Center", "Agent", "Health", "History", "Trade", "Solar", "Battery", "DSMR", "Asset Steering", "Reporting", "Settings"]
 
 DEFAULT_BRAND_NAME = "Minyad Core"
 
@@ -1096,6 +1109,29 @@ def energy_dashboard_body(brand_name: str = DEFAULT_BRAND_NAME) -> str:
       window.addEventListener('resize',()=>{clearTimeout(window._chartResize); window._chartResize=setTimeout(drawChart,150);}); initChartLegend(); initChartRange(); refreshMailboxCount(); setInterval(refreshMailboxCount,45000); loadBatteryLimits(); loadBatteryVisualConfig(); setInterval(loadBatteryLimits,60000); setInterval(loadBatteryVisualConfig,60000); update(); setInterval(update,4000);
     </script>
     """.replace("__MARK__", brand_mark()).replace("__BRAND__", brand_name).replace("__NAV__", render_nav("Dashboard")).replace("__UNIT_TOGGLE__", unit_toggle).replace("__LAYOUT_TOGGLE__", layout_toggle).replace("__METRIC_CARDS__", solar_card + battery_card + grid_card + household_card).replace("__KPI_STRIP__", kpi_strip)
+
+
+def render_energy_center_page(brand_name: str = DEFAULT_BRAND_NAME) -> str:
+    return f"""
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Minyad — Energy Center</title>
+        <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230E151C'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Arial,sans-serif' font-size='20' font-weight='700' fill='%23E6EDF2'%3EM%3C/text%3E%3C/svg%3E">
+        <style>{BRAND_CSS}</style>
+        <style>{ENERGY_CENTER_CSS}</style>
+        {THEME_BOOT_SCRIPT}
+        {LANGUAGE_BOOT_SCRIPT}
+        {AUTO_REFRESH_SCRIPT}
+      </head>
+      <body class="ec-page">
+        {energy_center_body(brand_name, brand_mark())}
+        <script>{ENERGY_CENTER_SCRIPT}</script>
+      </body>
+    </html>
+    """
 
 
 def history_body() -> str:

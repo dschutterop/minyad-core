@@ -25,6 +25,7 @@ try:
         history_body,
         html_response,
         render_dashboard_page,
+        render_energy_center_page,
         render_page,
         reporting_body,
         solar_body,
@@ -42,6 +43,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the frontend Dock
         history_body,
         html_response,
         render_dashboard_page,
+        render_energy_center_page,
         render_page,
         reporting_body,
         solar_body,
@@ -145,6 +147,11 @@ async def dashboard() -> HTMLResponse:
 @app.get("/reporting")
 async def reporting() -> HTMLResponse:
     return html_response(render_page("Reporting", reporting_body(), await _brand_name()))
+
+
+@app.get("/energy-center")
+async def energy_center() -> HTMLResponse:
+    return html_response(render_energy_center_page(await _brand_name()))
 
 
 @app.get("/{section}")
